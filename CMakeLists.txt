@@ -3,7 +3,24 @@
 # project(esp32_hid_web)
 
 idf_component_register(
-    SRCS "tusb_hid_example_main.c"
+    SRCS
+     "tusb_hid_example_main.c"
+     
+     #drivers
+     #lcd drivers
+  "hardware/drivers/lcd/st7789v2/lcDriver.c"
+    "hardware/drivers/lcd/st7789v2/lcDriver.h"
+    "hardware/drivers/lcd/fonts/font_avr_classics.h"
+    "hardware/drivers/lcd/fonts/font_avr_classics.c"
+    
+    #os code
+    
+    
+    #enviroment----warning not tested
+    
+    #"os_code/core/window_env/MWenv.cpp"
+    #"os_code/core/window_env/MWenv.hpp"
+    
     INCLUDE_DIRS "."
     PRIV_REQUIRES
 	nvs_flash

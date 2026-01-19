@@ -1,48 +1,35 @@
-#ifndef D_ST7789V2_S3PSRAM_C_
-#define D_ST7789V2_S3PSRAM_C_
-//D_ST7789V2_S3PSRAM_C_
 
-#include "wiring.h" //physhardware
+#include "lcDriver.h"
+
+#include "hardware/wiring/wiring.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+#include "driver/spi_common.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_psram.h"
-//#include <stdint>
+#include "rom/cache.h"
 #include <string.h>
 #include <math.h>
-#include "rom/cache.h"
-#include "driver/spi_common.h"
-#include "hardware/drivers/lcd/fonts/font_avr_classics.h" //fonts
-
-//note: must include the following definitions externally, for me i have em in wiring.h
-/*
-#define SCREEN_W 240
-#define SCREEN_H 280
-#define X_OFFSET 0
-#define Y_OFFSET 20 //screen fuckery, physical memory is 320 long despite pannel being 280
-#define CHUNK_SIZE 4096 //max this esp32s3 chip handles
-*/
+#include "hardware/drivers/lcd/fonts/font_avr_classics.h"
 
 #define TAG "ST7789_DMA"
 
 static spi_device_handle_t spi;
 
-static uint16_t *framebuffer = NULL;
+//static uint16_t *framebuffer = NULL;
 uint16_t fpsLimiterTarget= 45;
 
-static struct {
+ struct {
     uint32_t chunk_offset;
     bool chunking_active;
     spi_transaction_t trans;
 } dma_state = {0};
 
-struct vec2_ui16t{
-    uint16_t x;
-    uint16_t y;
-   };
+//
+uint16_t *framebuffer = NULL;
 
 //changes array for partial updates and windowing of the display
 #define ddCHANGEDROWS_BITMASK_BITS (SCREEN_H+8)
@@ -53,22 +40,22 @@ uint8_t dd_changedrows_bitmask[ddCHANGEDROWS_BITMASK_BYTES];
  //create a bitmask in which we mark down the changes
  //works by marking changes by setting bit to 1, with that bit coresponding to it's position as a row. 
 
-static inline void dd_changedrows_bm_setrowstate(bool changed, uint16_t row) {
+  void dd_changedrows_bm_setrowstate(bool changed, uint16_t row) {
     if (changed)
         dd_changedrows_bitmask[row / 8] |=  (1 << (row % 8));  // set bit(mark dirty)
     else
         dd_changedrows_bitmask[row / 8] &= ~(1 << (row % 8));  // clear bit (clean)
 }
 
-static inline bool dd_changedrows_bm_getrowstate(uint16_t row) {
+  bool dd_changedrows_bm_getrowstate(uint16_t row) {
     return (dd_changedrows_bitmask[row / 8] >> (row % 8)) & 1;
 }
 
-static inline void dd_changedrows_bm_setallrowschanged(bool state) {
+  void dd_changedrows_bm_setallrowschanged(bool state) {
     memset(dd_changedrows_bitmask, state ? 0xFF : 0x00, ddCHANGEDROWS_BITMASK_BYTES);
 }
 
-static inline void mark_rows_dirty(int y0, int y1) {
+  void mark_rows_dirty(int y0, int y1) {
     if (y0 < 0) y0 = 0;
     if (y1 >= SCREEN_H) y1 = SCREEN_H - 1;
     for (int y = y0; y <= y1; y++)
@@ -77,7 +64,7 @@ static inline void mark_rows_dirty(int y0, int y1) {
 //end changes array section
 
 
-static void framebuffer_alloc(void){
+void framebuffer_alloc(void){
     static bool hasAllocedFrameBuffer=false;
     if (!hasAllocedFrameBuffer){ //stop any form of double alloc
         size_t sz = SCREEN_W * SCREEN_H * sizeof(uint16_t);
@@ -99,7 +86,7 @@ static void framebuffer_alloc(void){
 }
 
 // --------------------- SPI / GPIO ---------------------
-static void spi_init_dma(void)
+ void spi_init_dma(void)
 {
     gpio_config_t cfg = {
         .mode = GPIO_MODE_OUTPUT,
@@ -114,9 +101,9 @@ static void spi_init_dma(void)
     gpio_set_level(lcd_BL, 1);
 
     spi_bus_config_t buscfg = {
-        .mosi_io_num = PIN_MOSI,
+        .mosi_io_num = SPI_MOSI,
         .miso_io_num = -1,
-        .sclk_io_num = PIN_CLK,
+        .sclk_io_num = SPI_CLK,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = SCREEN_W * SCREEN_H * 2,
@@ -138,7 +125,7 @@ static void spi_init_dma(void)
 }
 
 // --------------------- LCD LOW LEVEL ---------------------
-static inline void lcd_cmd(uint8_t cmd)
+ void lcd_cmd(uint8_t cmd)
 {
     spi_transaction_t t = {
         .length = 8,
@@ -149,7 +136,7 @@ static inline void lcd_cmd(uint8_t cmd)
     spi_device_polling_transmit(spi, &t);
 }
 
-static inline void lcd_data(uint8_t data)
+  void lcd_data(uint8_t data)
 {
     spi_transaction_t t = {
         .length = 8,
@@ -160,7 +147,7 @@ static inline void lcd_data(uint8_t data)
     spi_device_polling_transmit(spi, &t);
 }
 
-static inline void lcd_data_bulk(const void *data, size_t len)
+  void lcd_data_bulk(const void *data, size_t len)
 {
     if (!len) return;
     spi_transaction_t t = {
@@ -171,7 +158,7 @@ static inline void lcd_data_bulk(const void *data, size_t len)
     spi_device_polling_transmit(spi, &t);
 }
 
-static inline void lcd_set_window(uint16_t x0, uint16_t y0,
+  void lcd_set_window(uint16_t x0, uint16_t y0,
                                   uint16_t x1, uint16_t y1)
 {
     uint8_t data[4];
@@ -242,7 +229,7 @@ static void fb_display_backbuffer_chunked(void)
     swap_pending = true;
 }*/
 
-static void fb_display_framebuffer(bool OnlyRenderDelta, bool cope_mode){
+ void fb_display_framebuffer(bool OnlyRenderDelta, bool cope_mode){
 	
     const uint32_t row_bytes = SCREEN_W * 2;      // bytes per row
     const uint32_t max_rows_per_chunk = CHUNK_SIZE / row_bytes;
@@ -354,7 +341,8 @@ static void fb_display_framebuffer(bool OnlyRenderDelta, bool cope_mode){
 
 
 // --------------------- DRAWING ---------------------
-static inline void fb_clear(uint16_t color){
+  void fb_clear(uint16_t color){
+	  if (!framebuffer) return;  // or handle error
     uint32_t c = (color<<16)|color;
     uint32_t *p = (uint32_t*)framebuffer;
     size_t n = (SCREEN_W*SCREEN_H)/2;
@@ -362,21 +350,7 @@ static inline void fb_clear(uint16_t color){
     dd_changedrows_bm_setallrowschanged(1);
 }
 
-typedef enum{
-	plain,border_only,plainAndBorder,
-	staticky_plain,dots,
-	triangletiling,diamondtiling,checkerboard,circles, //shape tiling
-	lines,waves,concentric_layers_gradinent_ofthisshape,//more patterns
-	topographic_fakery,circut_fakery,honeycomb //cooler patterns
-	}shapefillpattern;
-
-typedef enum {
-    none, strikethrough, underlined, italicized,
-    bold, transparent, highlighted
-} text_modifier;
-
-
-static inline void fb_rect( 
+  void fb_rect( 
 	bool isfilled,
     uint16_t borderThickness,
     int x, int y, int w, int h,
@@ -440,7 +414,7 @@ static inline void fb_rect(
     }
 }
 
-static inline void fb_line(
+  void fb_line(
     int x0, int y0,
     int x1, int y1,
     uint16_t color
@@ -468,7 +442,7 @@ static inline void fb_line(
 
     mark_rows_dirty(miny, maxy);
 }
-static inline void fb_circle(
+  void fb_circle(
     int cx, int cy, int r,
     shapefillpattern mode,
     uint16_t fillColor,
@@ -502,7 +476,7 @@ static inline void fb_circle(
 
     mark_rows_dirty(miny, maxy);
 }
-static inline void fb_triangle(
+  void fb_triangle(
     int x0,int y0,
     int x1,int y1,
     int x2,int y2,
@@ -551,7 +525,7 @@ static inline void fb_triangle(
 
     mark_rows_dirty(y0, y2);
 }
-static inline void fb_ngon(
+  void fb_ngon(
     int cx,int cy,int r,uint8_t sides,
     shapefillpattern mode,
     uint16_t fillColor,
@@ -605,7 +579,7 @@ static inline void fb_ngon(
 
 
 /*
-static inline void fb_rect_gradient(int x, int y, int w, int h, 
+static  void fb_rect_gradient(int x, int y, int w, int h, 
                                     uint16_t color_top, uint16_t color_bottom) {
     if (x < 0) { w += x; x = 0; }
     if (y < 0) { h += y; y = 0; }
@@ -666,7 +640,7 @@ static inline void fb_rect_gradient(int x, int y, int w, int h,
     }
 }*/
 
-static inline void fb_putpixel_225_fakerot(
+  void fb_putpixel_225_fakerot(
     int x, int y,
     int ox, int oy,
     uint8_t angle,
@@ -690,7 +664,7 @@ static inline void fb_putpixel_225_fakerot(
 
 
 
-static inline void fb_draw_text(
+  void fb_draw_text(
     uint8_t angle,
     int x, int y,
     const char* str,
@@ -780,7 +754,7 @@ static inline void fb_draw_text(
 #define lcd_c_adr_set 0x2A
 
 
-static void lcd_init_simple(void)
+ void lcd_init_simple(void)
 {
     gpio_set_level(LCD_RST, 0);
     vTaskDelay(pdMS_TO_TICKS(20));
@@ -885,12 +859,11 @@ static void lcd_init_simple(void)
     
 }
 // --------------------- GLOBALS ---------------------
-static uint32_t frame = 0;
+uint32_t frame = 0;
 
 // --------------------- REFRESH ---------------------
 
-
-static void refreshScreen(void) {
+ void refreshScreen(void) {
     const uint32_t FRAME_MS = 1000 / fpsLimiterTarget; // 45 FPS
     uint32_t frame_start = esp_log_timestamp();
     static uint32_t stats_frame = 0;
@@ -949,4 +922,3 @@ static void refreshScreen(void) {
 
     frame++;
 }
-#endif
