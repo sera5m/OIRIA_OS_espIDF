@@ -1,5 +1,5 @@
 
-#include "types.h"
+#include "code_stuff/types.h"
 
 const char* GlobalSettingsListCategoryNames[] = {
     "power",        // sleep modes

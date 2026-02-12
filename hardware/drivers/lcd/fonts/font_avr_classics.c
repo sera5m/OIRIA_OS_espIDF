@@ -16,8 +16,8 @@
 /* Standard ASCII 6x8 font */
 #include "font_avr_classics.h"
 #include <math.h>
+#include "hardware/drivers/lcd/fonts/font_basic_types.h"
 
-#pragma once
 
 const uint8_t avrclassic_font6x8 []= {
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // sp

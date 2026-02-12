@@ -1,14 +1,34 @@
 #ifndef MAIN_OS_CODE_CORE_WINDOW_ENV_MWENV_HPP_
 #define MAIN_OS_CODE_CORE_WINDOW_ENV_MWENV_HPP_
 
-#include <cstdint>
+#include <stdint.h>
+#include "esp_timer.h"
+#include "hardware/drivers/lcd/fonts/font_basic_types.h"
 #include <string>
-#include <vector>
 #include <memory>
-#include <cmath>
-
+#include <sstream>
+#include <algorithm>
+#include <variant>//unions for the code
 #include "code_stuff/types.h"
-#include "D_st7789v2_s3psram.c"
+#include <memory>
+#include <math.h>
+#include "hardware/wiring/wiring.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/gpio.h"
+#include "driver/spi_master.h"
+#include "driver/spi_common.h"
+#include "esp_log.h"
+#include "esp_heap_caps.h"
+#include "esp_psram.h"
+#include "rom/cache.h"
+#include <string.h>
+#include <math.h>
+#include "hardware/drivers/lcd/fonts/font_avr_classics.h"
+#include "hardware/drivers/lcd/st7789v2/lcDriver.h"
+#include "hardware/drivers/lcd/fonts/font_avr_classics.h"
+#include "os_code\core\window_env\wenv_basicThemes.h"
+#include <vector>
 
 // forward declarations
 class Window;
@@ -17,6 +37,95 @@ struct CanvasCfg;
 struct TextChunk;
 struct DrawableElement;
 
+struct ColorTag {
+    uint16_t value;
+};
+
+struct SizeTag {
+    uint8_t value;
+};
+
+struct PosTag {
+    int16_t x;
+    int16_t y;
+};
+
+struct HighlighterTag {uint16_t color; bool enabled;};
+
+
+
+
+
+
+
+using ChunkContent = std::variant<
+    std::string,
+    ColorTag,
+    SizeTag,
+    PosTag,
+    HighlighterTag,       
+    std::monostate
+>;
+
+
+
+ //if the enum value is negative, it disables the tag as opposed to having tag removal things, so HAH i am goated
+    enum class TagType : int8_t {
+        None = 0,
+    
+        PlainText,
+    
+        LineBreak,           // <n>
+        UnderlineToggle,     // <u>
+        StrikethroughToggle, // <s>
+        BoldToggle,
+        ItalicToggle,
+    
+        ColorChange,
+        SizeChange,
+        PosChange,
+        HighlightChange,
+    
+        // negative values = disable
+        UnderlineOff      = -UnderlineToggle,
+        StrikethroughOff  = -StrikethroughToggle,
+        BoldOff           = -BoldToggle,
+        ItalicOff         = -ItalicToggle,
+    };
+    
+    struct TextChunk {
+        TagType kind = TagType::None;
+        ChunkContent content = std::monostate{};
+    
+        TextChunk() = default;
+    
+        // plain text
+        explicit TextChunk(std::string txt)
+            : kind(TagType::PlainText),
+              content(std::move(txt)) {}
+    
+        // toggle / no-payload tags
+        explicit TextChunk(TagType t)
+            : kind(t),
+              content(std::monostate{}) {}
+    
+        TextChunk(TagType t, ColorTag c)
+            : kind(t),
+              content(c) {}
+    
+        TextChunk(TagType t, SizeTag s)
+            : kind(t),
+              content(s) {}
+    
+        TextChunk(TagType t, PosTag p)
+            : kind(t),
+              content(p) {}
+    
+        TextChunk(TagType t, HighlighterTag h)
+            : kind(t),
+              content(h) {}
+    };
+    
 /* ---------------- update mode ---------------- */
 
 enum e_wenv_updateType {
@@ -25,29 +134,67 @@ enum e_wenv_updateType {
     both
 };
 
-/* ---------------- window config ---------------- */
+/*optionsmapping*/
+// ──────────────────────────────────────────────
+// Window option flags (bit positions)
+// Use 1 << N style so it's impossible to accidentally overlap
+// ──────────────────────────────────────────────
+enum WindowOptionBits : uint16_t {
+    // Bit 0–3 (lowest bits – most commonly changed / cheapest features)-------------------------
+    WIN_OPT_USE_BORDERGRADIENT          = 1 << 0,   // 0x0001
+    //makes border use gradinent fill
+    WIN_OPT_ANIMATED_BORDER       = 1 << 1,   // 0x0002
+    //border now has - - - - - animated movement "shimmer"
+    WIN_OPT_SHOW_TOP_BAR_MENU     = 1 << 2,   // 0x0004
+    //shows -□x on top corner
+    WIN_OPT_ROUNDED_CORNERS       = 1 << 3,   // 0x0008
+    //corners are now rounded, clipped at 45 deg angle along n pixels (defined in window)
 
+    //------------------------- Bit 4–7---------------------------------------------
+
+    WIN_OPT_CLIPPED_CORNERS       = 1 << 4,   // 0x0010
+    //corners are now triangles, clipped at 45 deg angle along n pixels (defined in window)
+    WIN_OPT_TRANSPARENCY          = 1 << 5,   // 0x0020
+    //enables transparency (0-255) for overlay windows
+    WIN_OPT_INTERIOR_SPECIALFILL     = 1 << 6,   // 0x0040  
+    //context note: enables interior of window to be filled according to internal pattern or gradinent fill
+
+    WIN_OPT_CHILDFREE      = 1 << 7,   // 0x0080   
+    //context note: optimization step keeping it to skip update checks, and blocks this from having children added
+
+    // -------------------------Bit 8–11---------------------------------------------------
+    WIN_OPT_IS_HEAVY_RENDERING    = 1 << 8,   // 0x0100   (games, animated graphs, etc.)
+    WIN_OPT_ALLOW_RAW_VRAM_ACCESS = 1 << 9,   // 0x0200   (dangerous – only if really needed for 2d/3d)
+
+    // Bits 10–15 still free (6 left)
+    // WIN_OPT_???                = 1 << 10,
+    // ...
+};
+
+// Then in your struct:
 struct WindowCfg {
     uint16_t Posx = 0;
     uint16_t Posy = 0;
+    uint16_t Layer = 0; //0 is the top
+    uint16_t renderPriority = 0; // does nothing so far
     uint16_t win_width  = 64;
     uint16_t win_height = 64;
+    uint8_t  win_rotation = 1;          // quadrant only! holy fucking hell (I,II,III,IV)
+    bool     AutoAlignment         = false;
+    bool     WrapText              = true;
+    bool     borderless            = false;
+    bool     ShowNameAtTopOfWindow = false;
+    uint8_t  TextSizeMult          = 1;
+    char     name[32]              = {0};
 
-    bool AutoAlignment        = false;
-    bool WrapText             = true;
-    bool borderless           = false;
-    bool ShowNameAtTopOfWindow = false;
+    uint16_t optionsbitmask        = 0;   
 
-    int  TextSizeMult = 1;
-    char name[32] = {0}; // window name
+    uint16_t BorderColor           = 0xFFFF;
+    uint16_t BgColor               = 0x0000;
+    uint16_t WinTextColor          = 0xFFFF;
 
-    uint16_t BorderColor  = 0xFFFF;
-    uint16_t BgColor      = 0x0000;
-    uint16_t WinTextColor = 0xFFFF;
-
-    float UpdateRate = 0.5f;
+    float    UpdateRate            = 0.5f;
 };
-
 /* ---------------- helpers ---------------- */
 
 struct WinComp_sizing {
@@ -56,13 +203,14 @@ struct WinComp_sizing {
     ui16 Zorder = 0;
     ui16 Width  = 0;
     ui16 Height = 0;
+    uint8_t rotation = 0;
 };
 
 struct Win_MousePos {
     int scrollOffsetX = 0;
     int scrollOffsetY = 0;
-    int accumDX = 0;
-    int accumDY = 0;
+    uint16_t accumDX = 0;
+    uint16_t accumDY = 0;
     int ScrollaccumDX = 0;
     int ScrollaccumDY = 0;
     uint32_t lastScrollTime = 0;
@@ -71,108 +219,6 @@ struct Win_MousePos {
 /* forward dependency */
 void CanvasForceParentUpdate(std::shared_ptr<Window> parent);
 
-/* ======================== WINDOW ======================== */
-
-class Window : public std::enable_shared_from_this<Window> {
-public:
-    WindowCfg Initialcfg;
-    WindowCfg Currentcfg;
-
-    std::string content;
-    std::vector<std::shared_ptr<Canvas>> canvases;
-
-    float UpdateTickRate = 0.1f;
-    bool dirty = false;
-
-    unsigned long lastUpdateTime = 0;
-    unsigned int  lastFrameTime  = 0;
-
-    uint16_t win_internal_color_background = 0x0000;
-    uint16_t win_internal_color_border     = 0xFFFF;
-    uint16_t win_internal_color_text       = 0xFFFF;
-
-    uint8_t win_internal_textsize_mult = 1;
-    WinComp_sizing wi_sizing;
-
-    bool IsWindowShown = true;
-    Win_MousePos MousePos_internal;
-
-    static constexpr int scrollLimit    = 3;
-    static constexpr int scrollPeriodMs = 100;
-
-    Window(const std::string& WindowName,
-           const WindowCfg& windowConfiguration,
-           const std::string& initialContent = "");
-
-    ~Window();
-
-    void setWinTextSize(uint8_t t);
-    void ForceUpdate(bool UpdateSubComps);
-    void ForceUpdateSubComps();
-
-    void ApplyTheme(uint16_t BORDER_COLOR,
-                    uint16_t BG_COLOR,
-                    uint16_t WIN_TEXT_COLOR);
-
-    void SetBgColor(uint16_t newColor);
-    void SetBorderColor(uint16_t newColor);
-    void ForceBorderState(bool isShown);
-
-    void ResizeWindow(int newW, int newH, bool fUpdate);
-    void MoveWindow(int newX, int newY, bool fUpdate);
-
-    void addCanvas(const CanvasCfg& cfg);
-
-    void WindowScroll(int DX, int DY);
-    void animateMove(int targetX, int targetY, int steps);
-
-    void HideWindow();
-    void ShowWindow();
-
-    void setUpdateMode(bool manualOnly);
-    void updateContent(const std::string& newContent);
-
-    void WinDraw();
-
-    void updateWrappedLinesOptimized();
-    void drawVisibleLinesOptimized();
-
-private:
-    struct TextState {
-        uint16_t color = 0xFFFF;
-        uint8_t  size  = 1;
-        int16_t  cursorX = 0;
-        int16_t  cursorY = 0;
-        bool underline = false;
-        bool strikethrough = false;
-        bool highlighted = false;
-    };
-
-    using WrappedLine = std::vector<TextChunk>;
-    std::vector<WrappedLine> wrappedLines;
-
-    e_wenv_updateType win_updatemode = both;
-    uint32_t lastContentUpdate = 0;
-
-    std::string Delim_LinBreak   = "<n>";
-    std::string Delim_Seperator  = "<_>";
-    std::string Delim_ColorChange = "<setcolor(";
-    std::string Delim_PosChange   = "<pos(";
-    std::string Delim_Sizechange  = "<textsize(";
-    std::string Delim_Strikethr   = "<s>";
-    std::string Delim_Underline   = "<u>";
-
-    std::vector<TextChunk> tokenize(const std::string& input);
-    void wrapTextIntoLines(const std::string& text,
-                           std::vector<TextChunk>& currentLine,
-                           int maxCharsPerLine);
-
-    void applyTextState(const TextState& state);
-    void handleTextTag(const std::string& tag, TextState& state);
-    void renderTextLine(const std::string& line, int yPos, TextState initialState);
-    void renderTextChunk(const std::string& text, TextState& state);
-    int  calculateTotalTextWidth();
-};
 
 /* ======================== CANVAS ======================== */
 
@@ -197,128 +243,80 @@ struct CanvasCfg {
     float UpdateTickRateS = 0.1f;
 };
 
-class Canvas {
-public:
-    Canvas(const CanvasCfg& cfg, std::shared_ptr<Window> parent);
-    ~Canvas();
-
-    void clear();
-
-    void AddTextLine(int posX, int posY, const String& text,
-                     uint8_t txtsize, uint16_t color, int layer = 0);
-
-    void AddLine(int x0, int y0, int x1, int y1,
-                 uint16_t color, int layer = 0);
-
-    void AddPixel(int x, int y, uint16_t color, int layer = 0);
-
-    void AddFRect(int x, int y, int w, int h,
-                  uint16_t color, int layer = 0);
-
-    void AddRect(int x, int y, int w, int h,
-                 uint16_t color, int layer = 0);
-
-    void AddRFRect(int x, int y, int w, int h, int r,
-                   uint16_t color, int layer = 0);
-
-    void AddRRect(int x, int y, int w, int h, int r,
-                  uint16_t color, int layer = 0);
-
-    void AddTriangle(uint16_t x0, uint16_t y0,
-                     uint16_t x1, uint16_t y1,
-                     uint16_t x2, uint16_t y2,
-                     uint16_t color, int layer = 0);
-
-    void AddFTriangle(uint16_t x0, uint16_t y0,
-                      uint16_t x1, uint16_t y1,
-                      uint16_t x2, uint16_t y2,
-                      uint16_t color, int layer = 0);
-
-    void AddFCircle(int x, int y, int r,
-                     uint16_t color, int layer = 0);
-
-    void AddCircle(int x, int y, int r,
-                   uint16_t color, int layer = 0);
-
-    void AddBitmap(int x, int y, const uint16_t* bitmap,
-                   int w, int h, int layer = 0);
-
-    void CanvasDraw();
-    void CanvasUpdate(bool force);
-    void ClearAll();
-
-private:
-    int x = 0;
-    int y = 0;
-    int width  = 0;
-    int height = 0;
-
-    bool borderless = true;
-    bool DrawBG     = true;
-
-    uint16_t bgColor     = 0x0000;
-    uint16_t BorderColor = 0xFFFF;
-
-    std::weak_ptr<Window> parentWindow;
-    std::vector<DrawableElement> drawElements;
-
-    bool canvasDirty = true;
-    unsigned long lastUpdateTime = 0;
-    unsigned int UpdateTickRate = 100;
-};
-
 /* ======================== WINDOW MANAGER ======================== */
 
-struct WindowAndUpdateInterval {
-    std::weak_ptr<Window> windowWeakPtr;
-    int UpdateTickRate = 0;
 
-    explicit WindowAndUpdateInterval(std::shared_ptr<Window> Win)
-        : windowWeakPtr(Win),
-          UpdateTickRate(static_cast<int>(Win->UpdateTickRate * 1000)) {}
-
-    void updateIfValid() {
-        if (auto WinPtr = windowWeakPtr.lock()) {
-            WinPtr->WinDraw();
-        }
-    }
-};
-
-class WindowManager {
-public:
-    static WindowManager& getInstance();
-
-    ~WindowManager();
-
-    WindowManager(const WindowManager&) = delete;
-    WindowManager& operator=(const WindowManager&) = delete;
-
-    void registerWindow(std::shared_ptr<Window> Win);
-    void unregisterWindow(Window* Win);
-    void clearAllWindows();
-
-    std::shared_ptr<Window> GetWindowByName(const std::string& WindowName);
-
-    void UpdateAllWindows(bool Force, bool AndSubComps);
-    void ApplyThemeAllWindows(uint16_t secondary,
-                              uint16_t background,
-                              uint16_t primary);
-
-    void notifyUpdateTickRateChange(Window* targetWindow,
-                                    int newUpdateTickRate);
-
-    bool initialize(bool graphicsEnabled);
-
-    bool throttleLowPower = false;
-    bool isScreenCastExternalDevice = false;
-
-private:
-    WindowManager();
-
-    bool AreGraphicsEnabled = false;
-    std::vector<WindowAndUpdateInterval> WindowRegistry;
-};
 
 void clearScreenEveryXCalls(uint16_t x);
+
+class Window : public std::enable_shared_from_this<Window> {
+    public:
+        explicit Window(const WindowCfg& cfg, const std::string& initialContent = "");
+        void LocalToScreen(int lx, int ly, int& sx, int& sy);
+
+        void WinDraw();
+    
+        // Members you are using
+        std::string content;
+    
+        WindowCfg Initialcfg;
+        WindowCfg Currentcfg;
+    
+        struct {
+            uint16_t Xpos   = 0;
+            uint16_t Ypos   = 0;
+            uint16_t Zorder = 0;
+            uint16_t Width  = 0;
+            uint16_t Height = 0;
+            uint8_t rotation = 0;
+        } wi_sizing;
+    
+        uint16_t win_internal_color_background = 0;
+        uint16_t win_internal_color_border     = 0xFFFF;
+        uint16_t win_internal_color_text       = 0xFFFF;
+        int      win_internal_textsize_mult    = 1;
+        uint16_t win_internal_optionsBitmask=0;
+        float    UpdateTickRate = 0.5f;
+    
+        bool     IsWindowShown = true;
+        bool     dirty         = true;
+        uint64_t lastUpdateTime = 0;
+    
+        // Optional: if you want to hide implementation details later,
+        // move tokenize() and TextState to private
+    private:
+        struct TextState {
+            uint16_t color = 0xFFFF;
+            int      size  = 1;
+            int      cursorX = 0;
+            int      cursorY = 0;
+            bool     underline     = false;
+            bool     strikethrough = false;
+            // add more toggles if needed (bold, italic…)
+        };
+    
+    public:
+        // Declaration only — implement in .cpp
+        std::vector<TextChunk> tokenize(const std::string& text);
+    };
+
+
+    struct WindowAndUpdateInterval {
+        std::weak_ptr<Window> windowWeakPtr;
+        int UpdateTickRate = 0;
+    
+        explicit WindowAndUpdateInterval(std::shared_ptr<Window> Win)
+            : windowWeakPtr(Win),
+              UpdateTickRate(static_cast<int>(Win->UpdateTickRate * 1000))
+        {
+        }
+    
+        void updateIfValid() {
+            if (auto WinPtr = windowWeakPtr.lock()) {
+                WinPtr->WinDraw();
+            }
+        }
+    };
+
 
 #endif

@@ -17,6 +17,7 @@
 
 /* Standard ASCII 6x8 font */
 #include <math.h>
+#include "font_basic_types.h"
 extern const uint8_t avrclassic_font6x8[];
 extern const uint8_t avrclassic_font8x16[];
 // ----------------------------------------------------------------------------

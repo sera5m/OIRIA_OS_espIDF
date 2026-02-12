@@ -6,12 +6,22 @@
  */
 
 
-#ifndef LCDRIVER_H_
-#define LCDRIVER_H_
+//#ifndef LCDRIVER_H_
+//#define LCDRIVER_H_
 
+#pragma once
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include "hardware/drivers/lcd/fonts/font_basic_types.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include "hardware/wiring/wiring.h"
+
+#include "hardware/drivers/lcd/fonts/font_basic_types.h"
+#include "code_stuff/types.h"
 /*  REQUIRED EXTERNAL DEFINES
     SCREEN_W
     SCREEN_H
@@ -52,10 +62,7 @@ typedef enum {
 } text_modifier;
 
 // --------------------- STRUCTS ---------------------
-struct vec2_ui16t {
-    uint16_t x;
-    uint16_t y;
-};
+
 
 // --------------------- INIT ---------------------
  void spi_init_dma(void);
@@ -121,6 +128,8 @@ void fb_draw_text(
     bool drawblocksforbackground,
     uint16_t blockBackground_color,
     uint16_t maxTLenBeforeAutoWrapToNextLine,
-    struct vec2_ui16t fontSize
+    struct fontcharsize fontSize
 );
+#ifdef __cplusplus
+}
 #endif

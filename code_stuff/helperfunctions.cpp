@@ -1,8 +1,8 @@
-#include "helperfunctions.h"
-#include "types.h"
-#include <cstdint>
+#include "code_stuff/helperfunctions.hpp"
+#include "code_stuff/types.h"
+//#include <cstdint>
 //bitsmushing here
-#include <cstddef>
+// #include <cstddef>
 
 
 void split_u32_to_24(uint32_t input, uint8_t *last8, uint8_t *color) {

@@ -1,9 +1,8 @@
 #ifndef HELPERFUNCTIONS_H
 #define HELPERFUNCTIONS_H
 
-#include <cstdint>
-#include "types.h"
-#include <cstddef>
+#include "code_stuff/types.h"
+//#include <cstddef>
 //bits
 #pragma once
 

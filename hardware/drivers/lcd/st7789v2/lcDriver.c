@@ -676,7 +676,7 @@ static  void fb_rect_gradient(int x, int y, int w, int h,
     bool drawblocksforbackground,
     uint16_t blockBackground_color,
     uint16_t maxTLenBeforeAutoWrapToNextLine,
-    struct vec2_ui16t fontSize
+    struct fontcharsize  fontSize
 ) {
     int ax=1, ay=0;   // advance
     int ux=0, uy=1;   // up (glyph rows)
@@ -729,19 +729,23 @@ static  void fb_rect_gradient(int x, int y, int w, int h,
                 int py = y + gx * ay + gy * uy;
 
                 // draw span
-                for (int s = 0; s < span_len; s++) {
-                    int sx = px + s * ux;
-                    int sy = py + s * uy;
+for (int s = 0; s < span_len; s++) {
+    for (int t = 0; t < size; t++) {
+        int sx = px + s * ux + t * ax;
+        int sy = py + s * uy + t * ay;
 
-                    if (sx>=0 && sx<SCREEN_W &&
-                        sy>=0 && sy<SCREEN_H)
-                        framebuffer[sy*SCREEN_W + sx] = color;
-                }
+        if (sx >= 0 && sx < SCREEN_W &&
+            sy >= 0 && sy < SCREEN_H)
+            framebuffer[sy * SCREEN_W + sx] = color;
+    }
+}
 
-                mark_rows_dirty(
-                    py < py + uy*span_len ? py : py + uy*span_len,
-                    py > py + uy*span_len ? py : py + uy*span_len
-                );
+
+mark_rows_dirty(
+    py < py + uy*span_len ? py : py + uy*span_len,
+    py > py + uy*span_len ? py : py + uy*span_len
+);
+
             }
         }
 

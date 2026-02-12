@@ -2,10 +2,13 @@
 #ifndef TYPES_H
 #define TYPES_H
 
+#include <stdint.h>
+//#include <stdint.h>
+//#include <cmath.h>
 #pragma once
-//#include <cstdint>
+
 //pragma twice would be funny lol
-#include <math.h>
+
 //math
 
 #define ui8 uint8_t
@@ -15,11 +18,23 @@ struct int16vect {
     int16_t x;
     int16_t y;
     int16_t z;
-    
-    // Constructors (now properly inside the struct definition)
+
+#ifdef __cplusplus
     int16vect() : x(0), y(0), z(0) {}
     int16vect(int16_t x, int16_t y, int16_t z) : x(x), y(y), z(z) {}
+#endif
 };
+
+struct vec2_ui16t {
+    int16_t x;
+    int16_t y;
+
+#ifdef __cplusplus
+    vec2_ui16t() : x(0), y(0) {}
+    vec2_ui16t(int16_t x, int16_t y) : x(x), y(y) {}
+#endif
+};
+
 
 //application info-modes-full type implementations of whatever in types.cpp
 
@@ -79,16 +94,6 @@ typedef struct {
     uint32_t storage_used_mb;
     uint32_t storage_total_mb;
 } DataSettings;
-
-typedef struct {
-    PowerSettings power;
-    AlertsSettings alerts;
-    DisplaySettings display;
-    DataSettings data;
-    WirelessSettings wireless;
-    // ext_hardware can be fleshed out later
-} GlobalSettings;
-
 
 
 
