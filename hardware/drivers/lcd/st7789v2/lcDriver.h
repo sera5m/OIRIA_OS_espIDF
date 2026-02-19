@@ -116,20 +116,11 @@ void fb_ngon(
 );
 
 // --------------------- TEXT ---------------------
-void fb_draw_text(
-    uint8_t angle,
-    int x, int y,
-    const char* str,
-    uint16_t color,
-    uint8_t size,
-    text_modifier* modifiers,
-    const uint8_t* font,
-    bool wraptext,
-    bool drawblocksforbackground,
-    uint16_t blockBackground_color,
-    uint16_t maxTLenBeforeAutoWrapToNextLine,
-    struct fontcharsize fontSize
-);
+void fb_draw_text( uint8_t angle, int x, int y, const char* str, uint16_t color, uint8_t size, 
+ const uint8_t* font, uint8_t transparency, bool drawblocksforbackground, uint16_t blockBackground_color,
+  uint16_t maxTLenBeforeAutoWrapToNextLine, struct fontcharsize fontSize );
+
+
 #ifdef __cplusplus
 }
 #endif

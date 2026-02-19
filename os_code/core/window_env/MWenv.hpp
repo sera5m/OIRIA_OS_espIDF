@@ -165,8 +165,8 @@ enum WindowOptionBits : uint16_t {
     // -------------------------Bit 8–11---------------------------------------------------
     WIN_OPT_IS_HEAVY_RENDERING    = 1 << 8,   // 0x0100   (games, animated graphs, etc.)
     WIN_OPT_ALLOW_RAW_VRAM_ACCESS = 1 << 9,   // 0x0200   (dangerous – only if really needed for 2d/3d)
-
-    // Bits 10–15 still free (6 left)
+	WIN_OPT_ISMEDIA_WINDOW=1<<10, //0x???? is this media playing a video or music or something that reqires it to display frames
+    // Bits 11–15 still free (6 left)
     // WIN_OPT_???                = 1 << 10,
     // ...
 };

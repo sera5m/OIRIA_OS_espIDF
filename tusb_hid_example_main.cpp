@@ -61,7 +61,10 @@ auto win = std::make_shared<Window>(
             .WinTextColor = 0xFFFF,
             .UpdateRate = 1.0f          // doesn't matter for manual draw
         },
-        "Hello from\nWindow!\n<size:1>BIG</size>"
+        
+        "<|u|>Underlined text<|/u|> normal again<|s|><|n|>Strikethrough example<|/s|><|hl=0x07E0|><|n|>Highlighted green background<|/hl|><|size=2|><|b|>Bold big text<|/b|><|/size|><|n|><|i|>Italic text (placeholder)<|/i|>Mixed: normal <|u|>under<|/u|><|n|> <|hl=0xF800|>red highlight<|/hl|> <|s|>strike<|/s|> end"
+        
+        
     );
 
     win->WinDraw();
