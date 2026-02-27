@@ -71,10 +71,10 @@ void lcd_init_simple(void);
 // --------------------- FRAMEBUFFER ---------------------
  void framebuffer_alloc(void);
 void fb_clear(uint16_t color);
- void refreshScreen(void);
+ void lcd_refreshScreen(void);
 
 // --------------------- DISPLAY ---------------------
-void fb_display_framebuffer(bool OnlyRenderDelta, bool cope_mode);
+void lcd_fb_display_framebuffer(bool OnlyRenderDelta, bool cope_mode);
 
 // --------------------- DRAWING PRIMITIVES ---------------------
 void fb_rect(

@@ -229,7 +229,7 @@ static void fb_display_backbuffer_chunked(void)
     swap_pending = true;
 }*/
 
- void fb_display_framebuffer(bool OnlyRenderDelta, bool cope_mode){
+ void lcd_fb_display_framebuffer(bool OnlyRenderDelta, bool cope_mode){
 	
     const uint32_t row_bytes = SCREEN_W * 2;      // bytes per row
     const uint32_t max_rows_per_chunk = CHUNK_SIZE / row_bytes;
@@ -678,6 +678,7 @@ static  void fb_rect_gradient(int x, int y, int w, int h,
     uint16_t maxTLenBeforeAutoWrapToNextLine,
     struct fontcharsize  fontSize
 ) {
+	
     int ax=1, ay=0;   // advance
     int ux=0, uy=1;   // up (glyph rows)
 
@@ -690,7 +691,7 @@ static  void fb_rect_gradient(int x, int y, int w, int h,
     }
 
     int cursor = 0;
-
+	
     while (*str) {
         char c = *str++;
         if (c < ' ' || c > '~') {
@@ -859,7 +860,7 @@ mark_rows_dirty(
     fb_clear(0x0000);
    framebuffer_alloc();
     
-        fb_display_framebuffer(0, 0);
+        lcd_fb_display_framebuffer(0, 0); //yes, we're using this specific fb push here, ebcause its the lcd  not the general other whatever the fucklery 
     
 }
 // --------------------- GLOBALS ---------------------
@@ -867,7 +868,7 @@ uint32_t frame = 0;
 
 // --------------------- REFRESH ---------------------
 
- void refreshScreen(void) {
+ void lcd_refreshScreen(void) {
     const uint32_t FRAME_MS = 1000 / fpsLimiterTarget; // 45 FPS
     uint32_t frame_start = esp_log_timestamp();
     static uint32_t stats_frame = 0;
@@ -882,7 +883,7 @@ uint32_t frame = 0;
     
     // Time the actual SPI transfers
     uint32_t spi_start = esp_log_timestamp();
-    fb_display_framebuffer(1, 0);
+    lcd_fb_display_framebuffer(1, 0); //note howit says LCD refresh screen, we will use lcd driver
     uint32_t spi_time = esp_log_timestamp() - spi_start;
     
     // Update SPI stats

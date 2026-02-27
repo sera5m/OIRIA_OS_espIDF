@@ -24,6 +24,8 @@
 #include "rom/cache.h"
 #include <string.h>
 #include <math.h>
+#include "hardware/drivers/abstraction_layers/al_scr.h"
+
 #include "hardware/drivers/lcd/fonts/font_avr_classics.h"
 #include "hardware/drivers/lcd/st7789v2/lcDriver.h"
 #include "hardware/drivers/lcd/fonts/font_avr_classics.h"

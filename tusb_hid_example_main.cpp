@@ -17,6 +17,7 @@
 #define TAG "ST7789_DMA"
 
 #include "hardware/wiring/wiring.h"
+#include "hardware/drivers/abstraction_layers/al_scr.h"
 //my libs
 #include "hardware/drivers/lcd/fonts/font_avr_classics.h"
 #include "hardware/drivers/lcd/st7789v2/lcDriver.h"
@@ -36,6 +37,7 @@ uint16_t lcd_background_color= 0x0000;
 
 void cpp_main(void)
 {
+	screen_set_driver(&onboard_screen_driver); //set the screen to onboard lcd. MUST go first OR SILENT FAIL
 	   framebuffer_alloc();   // REQUIRED before any fb_* calls
 
     spi_init_dma();
@@ -88,7 +90,7 @@ auto win = std::make_shared<Window>(
         if (y2 <= 0 || y2 + size >= SCREEN_H) vy2 = -vy2;
 
         // push framebuffer to LCD
-        fb_display_framebuffer(false, false);
+        display_framebuffer(true, false);
     }
 }
 

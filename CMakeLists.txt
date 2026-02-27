@@ -16,11 +16,16 @@ idf_component_register(
      #lcd drivers
        "hardware/drivers/lcd/fonts/font_basic_types.h"
         "hardware/drivers/lcd/fonts/font_basic_types.c"
+        
+        "hardware/drivers/abstraction_layers/al_scr.h"
+        "hardware/drivers/abstraction_layers/al_scr.c"
+       
        
   "hardware/drivers/lcd/st7789v2/lcDriver.c"
     "hardware/drivers/lcd/st7789v2/lcDriver.h"
     "hardware/drivers/lcd/fonts/font_avr_classics.h"
     "hardware/drivers/lcd/fonts/font_avr_classics.c"
+  
   
     #os code
 

@@ -31,17 +31,14 @@
 
 
 
-typedef struct encoder_state { pcnt_unit_handle_t unit; int16_t last_count; } encoder_state_t;
+typedef enum {pulse,lift,down,positionDelta,analogInput,null}keyaction;
+//buttons go down and up, but other things like twist on here make pulses. 
+//i2c periphrials may be used for analog input. 
 
-typedef struct encoder_state encoder_state_t;
 
-void inphandler_encoder_delta(uint8_t id, int32_t delta) {
-	
-	
-	
-    // semantic layer decides what delta means
-}
 
-void inphandler_button_event(uint8_t id, bool pressed) {
-    // semantic layer decides meaning
-}
+typedef struct {
+    uint16_t key;
+    uint16_t proc_destination_id;
+    input_event_type keyaction; 
+} Q_input_event_t;
