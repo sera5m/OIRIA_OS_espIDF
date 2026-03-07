@@ -24,6 +24,15 @@
 #include "hardware/drivers/lcd/fonts/font_basic_types.h"
 #include "os_code/core/window_env/MWenv.hpp"
 
+#include "hardware/drivers/encoders/ky040_driver.hpp"
+
+// Encoder handles
+static ky040_handle_t enc_left = nullptr;
+static ky040_handle_t enc_right = nullptr;
+
+// Tick counters (accumulated deltas)
+static int32_t ticks_x = 0;  // left encoder
+static int32_t ticks_y = 0;  // right encoder
 
 #define LCD_BG_COLOR 0x0000  
 
@@ -33,10 +42,52 @@ extern const uint8_t avrclassic_font6x8[]; //hopefully pull font data
 uint16_t lcd_background_color= 0x0000;
 
 
+static void on_encoder_tick(void* user_ctx, int delta) {
+    // user_ctx is 0 for left, 1 for right
+    uintptr_t which = (uintptr_t)user_ctx;
 
+    if (which == 0) {
+        ticks_x += delta;
+        ESP_LOGI("ENC", "Left encoder: %ld", ticks_x);
+    } else if (which == 1) {
+        ticks_y += delta;
+        ESP_LOGI("ENC", "Right encoder: %ld", ticks_y);
+    }
+}
 
 void cpp_main(void)
 {
+	    // Initialize encoders
+    ky040_config_t cfg_left = {
+        .clk_pin         = ENCODER0_CLK_PIN,
+        .dt_pin          = ENCODER0_DT_PIN,
+        .sw_pin          = ENCODER0_SW_PIN,         // or KY040_PIN_UNUSED if you don't use button
+        .detents_per_rev = 20,
+        .on_twist        = on_encoder_tick,
+        .user_ctx        = (void*)(uintptr_t)0      // left = 0
+    };
+
+    esp_err_t err = ky040_new(&cfg_left, &enc_left);
+    if (err != ESP_OK) {
+        ESP_LOGE("ENC", "Left encoder init failed: %s", esp_err_to_name(err));
+    }
+
+    ky040_config_t cfg_right = {
+        .clk_pin         = ENCODER1_CLK_PIN,
+        .dt_pin          = ENCODER1_DT_PIN,
+        .sw_pin          = ENCODER1_SW_PIN,
+        .detents_per_rev = 20,
+        .on_twist        = on_encoder_tick,
+        .user_ctx        = (void*)(uintptr_t)1      // right = 1
+    };
+
+    err = ky040_new(&cfg_right, &enc_right);
+    if (err != ESP_OK) {
+        ESP_LOGE("ENC", "Right encoder init failed: %s", esp_err_to_name(err));
+    }
+
+    ESP_LOGI("ENC", "Encoders initialized");
+    
 	screen_set_driver(&onboard_screen_driver); //set the screen to onboard lcd. MUST go first OR SILENT FAIL
 	   framebuffer_alloc();   // REQUIRED before any fb_* calls
 
@@ -71,16 +122,33 @@ auto win = std::make_shared<Window>(
 
     win->WinDraw();
     
-    while (1) {
+      while (1) {
+        // Poll encoders → this calls the callback when ticks happen
+        if (enc_left)  ky040_poll(enc_left);
+        if (enc_right) ky040_poll(enc_right);
+
         fb_clear(LCD_BG_COLOR);
 
-        // moving squares
-        fb_rect(true,  0, x1, y1, size, size, 0xF800, 0);
+        // moving squares (keep your animation)
+        fb_rect(true, 0, x1, y1, size, size, 0xF800, 0);
         fb_rect(false, 4, x2, y2, size, size, 0x07E0, 0xF00F);
 
-		win->WinDraw();
-		
-        // motion
+        // Format the display text with current tick values
+        char buf[256];
+        snprintf(buf, sizeof(buf),
+            "Encoder ticks:\n"
+            "X: %ld   Y: %ld\n\n"
+            "<|size=2|><|b|>Use knobs to change!<|/b|><|/size|>",
+            ticks_x, ticks_y
+        );
+
+        // Update window content (replaces old text)
+        win->SetText(buf);
+
+        // Redraw window
+        win->WinDraw();
+
+        // motion (your bouncing squares)
         x1 += vx1; y1 += vy1;
         x2 += vx2; y2 += vy2;
 
@@ -89,11 +157,13 @@ auto win = std::make_shared<Window>(
         if (x2 <= 0 || x2 + size >= SCREEN_W) vx2 = -vx2;
         if (y2 <= 0 || y2 + size >= SCREEN_H) vy2 = -vy2;
 
-        // push framebuffer to LCD
+        // Push to LCD
         display_framebuffer(true, false);
+
+        // Don't spin CPU too hard
+        vTaskDelay(pdMS_TO_TICKS(10));   // ~100 Hz – plenty for encoders
     }
 }
-
 
 // load main cpp app because entrypoint seems to be only in c
 extern "C" void app_main(void)

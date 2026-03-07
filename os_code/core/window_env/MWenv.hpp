@@ -257,7 +257,15 @@ class Window : public std::enable_shared_from_this<Window> {
         void LocalToScreen(int lx, int ly, int& sx, int& sy);
 
         void WinDraw();
-    
+
+        void SetText(const std::string& newText);
+void AppendText(const std::string& moreText);
+void ClearText();
+        
+        
+
+
+
         // Members you are using
         std::string content;
     
@@ -287,6 +295,9 @@ class Window : public std::enable_shared_from_this<Window> {
         // Optional: if you want to hide implementation details later,
         // move tokenize() and TextState to private
     private:
+    std::vector<TextChunk> cachedChunks;
+bool isTokenized = false;
+
         struct TextState {
             uint16_t color = 0xFFFF;
             int      size  = 1;

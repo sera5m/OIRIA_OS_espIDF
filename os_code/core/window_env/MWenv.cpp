@@ -270,7 +270,12 @@ void Window::WinDraw() {
     uint8_t last_line_height_mult = state.size;
     uint8_t max_size_this_line    = state.size;
 
-    auto chunks = tokenize(content);
+    if (!isTokenized) {
+    cachedChunks = tokenize(content);
+    isTokenized = true;
+}
+
+auto& chunks = cachedChunks;
 
     for (const auto& chunk : chunks) {
         switch (chunk.kind) {
@@ -461,3 +466,43 @@ void Window::WinDraw() {
     dirty = false;
     lastUpdateTime = esp_timer_get_time();
 }
+//guess who found out she needed to do this a lot after making the window system and working on other drivers
+//i swear to god bruh
+
+void Window::SetText(const std::string& newText) {
+    content = newText;
+    isTokenized = false;
+    dirty = true;
+}
+    
+void Window::AppendText(const std::string& moreText) {
+    content += moreText;
+    isTokenized = false;
+    dirty = true;
+}
+void Window::ClearText() {
+    content.clear();
+    cachedChunks.clear();
+    isTokenized = false;
+    dirty = true;
+}
+
+//remember, dumbass,
+/*
+SetText()
+    ↓
+content changes
+    ↓
+isTokenized = false
+    ↓
+WinDraw()
+    ↓
+tokenize(content)   (only once)
+    ↓
+cachedChunks
+    ↓
+render cached chunks every frame
+*/
+
+
+

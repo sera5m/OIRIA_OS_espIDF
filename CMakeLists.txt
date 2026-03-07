@@ -13,18 +13,27 @@ idf_component_register(
      "code_stuff/types.c"
      "code_stuff/types.h"
      #drivers
-     #lcd drivers
-       "hardware/drivers/lcd/fonts/font_basic_types.h"
-        "hardware/drivers/lcd/fonts/font_basic_types.c"
+     
+     
+    			 #lcd drivers
+      			 "hardware/drivers/lcd/fonts/font_basic_types.h"
+      			  "hardware/drivers/lcd/fonts/font_basic_types.c"
         
-        "hardware/drivers/abstraction_layers/al_scr.h"
-        "hardware/drivers/abstraction_layers/al_scr.c"
+      			  "hardware/drivers/abstraction_layers/al_scr.h"
+       			 "hardware/drivers/abstraction_layers/al_scr.c"
        
        
-  "hardware/drivers/lcd/st7789v2/lcDriver.c"
-    "hardware/drivers/lcd/st7789v2/lcDriver.h"
-    "hardware/drivers/lcd/fonts/font_avr_classics.h"
-    "hardware/drivers/lcd/fonts/font_avr_classics.c"
+       							#screen drivers
+ 				 "hardware/drivers/lcd/st7789v2/lcDriver.c"
+    							"hardware/drivers/lcd/st7789v2/lcDriver.h"
+    		#font
+    				"hardware/drivers/lcd/fonts/font_avr_classics.h"
+   				 "hardware/drivers/lcd/fonts/font_avr_classics.c"
+   				 
+   				 
+   	#rotorary_encoders			 
+   			"hardware/drivers/encoders/ky040_driver.cpp"
+   			"hardware/drivers/encoders/ky040_driver.hpp"
   
   
     #os code
