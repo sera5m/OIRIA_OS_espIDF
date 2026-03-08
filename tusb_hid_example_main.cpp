@@ -60,7 +60,7 @@ void cpp_main(void)
 	    // Initialize encoders
     ky040_config_t cfg_left = {
         .clk_pin         = ENCODER0_CLK_PIN,
-        .dt_pin          = ENCODER0_DT_PIN,
+        .dt_pin          = ENCODER0_DT_PIN, //TEMPORARILY SWAPPING THESE
         .sw_pin          = ENCODER0_SW_PIN,         // or KY040_PIN_UNUSED if you don't use button
         .detents_per_rev = 20,
         .on_twist        = on_encoder_tick,
@@ -161,7 +161,7 @@ auto win = std::make_shared<Window>(
         display_framebuffer(true, false);
 
         // Don't spin CPU too hard
-        vTaskDelay(pdMS_TO_TICKS(10));   // ~100 Hz – plenty for encoders
+        vTaskDelay(pdMS_TO_TICKS(10));   // ~250hz
     }
 }
 

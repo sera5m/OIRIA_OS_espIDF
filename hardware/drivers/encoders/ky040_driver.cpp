@@ -7,16 +7,22 @@
 #define TAG "KY040"
 
 struct ky040_impl_t {
-    pcnt_unit_handle_t      pcnt_unit;
-    int                     detents_per_rev;
-    ky040_twist_cb_t        on_twist;
-    void                   *user_ctx;
-    int                     last_count;
-    int64_t                 last_event_us;
-    int                     recent_deltas_sum;
-    int                     delta_count;
-    gpio_num_t              sw_pin;
+    pcnt_unit_handle_t pcnt_unit;
+    int detents_per_rev;
+    ky040_twist_cb_t on_twist;
+    void *user_ctx;
+    int last_count;
+    int64_t last_event_us;
+    int recent_deltas_sum;
+    int delta_count;
+    gpio_num_t sw_pin;
+
+    // ── New software hysteresis fields ────────────────────────────────
+    int pending_steps;          // accumulated net steps in current direction
+    int last_direction;         // +1 or -1 — the direction we're building toward
+    int64_t last_step_us;       // when we last saw any step (for timeout)
 };
+
 
 esp_err_t ky040_new(const ky040_config_t *cfg, ky040_handle_t *out_handle) {
     *out_handle = NULL;
@@ -39,6 +45,10 @@ esp_err_t ky040_new(const ky040_config_t *cfg, ky040_handle_t *out_handle) {
     self->last_event_us     = 0;
     self->recent_deltas_sum = 0;
     self->delta_count       = 0;
+	    self->pending_steps   = 0;
+    self->last_direction  = 0;          // 0 = no direction yet
+    self->last_step_us    = 0;
+
 
     pcnt_unit_config_t unit_cfg{};
     unit_cfg.low_limit  = -32768;
@@ -49,8 +59,8 @@ esp_err_t ky040_new(const ky040_config_t *cfg, ky040_handle_t *out_handle) {
     chan_cfg.level_gpio_num = cfg->dt_pin;
 
     pcnt_glitch_filter_config_t filter_cfg = {
-        .max_glitch_ns = 1000,
-    };
+        .max_glitch_ns = 5000, 
+    }; //Do not go above ~12750 ns — it will always fail with "glitch width out of range".
 
     pcnt_channel_handle_t chan = NULL;
     esp_err_t ret;
@@ -119,45 +129,68 @@ esp_err_t ky040_del(ky040_handle_t self) {
     return ESP_OK;
 }
 
+
 void ky040_poll(ky040_handle_t self) {
     if (!self || !self->pcnt_unit) return;
 
     int count = 0;
-    if (pcnt_unit_get_count(self->pcnt_unit, &count) != ESP_OK) {
+    if (pcnt_unit_get_count(self->pcnt_unit, &count) != ESP_OK) return;
+
+    int delta_total = count - self->last_count;
+    if (delta_total == 0) {
+        // timeout check (your existing code)
         return;
     }
 
-    int delta_total = count - self->last_count;
-    if (delta_total == 0) return;
+    ESP_LOGI(TAG, "Raw delta_total = %+d   (count now %d)", delta_total, count);
 
     self->last_count = count;
-
-    // Normalize to ±1 per detent (most KY-040 give ±2 per click in quadrature mode)
-    int detent_steps = delta_total / 2;
-    int sign = (detent_steps > 0) ? 1 : (detent_steps < 0 ? -1 : 0);
-    int clicks = (detent_steps < 0) ? -detent_steps : detent_steps;
-
     int64_t now_us = esp_timer_get_time();
+    self->last_step_us = now_us;
 
-    if (self->on_twist) {
-        for (int i = 0; i < clicks; i++) {
-            self->on_twist(self->user_ctx, sign);
+    // No division — use raw delta (expect ±4 or ±8 per detent)
+    int raw_steps = delta_total;
+    int this_sign = (raw_steps > 0) ? 1 : (raw_steps < 0 ? -1 : 0);
+    int abs_steps = raw_steps < 0 ? -raw_steps : raw_steps;
+
+    if (abs_steps == 0) return;
+
+    // Hysteresis logic (your code is already good)
+    if (self->pending_steps == 0) {
+        self->pending_steps = abs_steps;
+        self->last_direction = this_sign;
+        ESP_LOGD(TAG, "Started accumulating %d steps, dir=%d", abs_steps, this_sign);
+    }
+    else if (this_sign == self->last_direction) {
+        self->pending_steps += abs_steps;
+        ESP_LOGD(TAG, "Added %d steps (same dir), pending now %d", abs_steps, self->pending_steps);
+    }
+    else {
+        self->pending_steps = abs_steps;
+        self->last_direction = this_sign;
+        ESP_LOGD(TAG, "Direction reversed → reset to %d steps, new dir=%d", abs_steps, this_sign);
+    }
+
+    // Fire when we have enough steps for one full detent
+    if (self->pending_steps >= STEP_THRESHOLD) {
+        int full_clicks = self->pending_steps / STEP_THRESHOLD;
+
+        if (self->on_twist) {
+            for (int i = 0; i < full_clicks; i++) {
+                self->on_twist(self->user_ctx, self->last_direction);
+            }
         }
+
+        self->pending_steps %= STEP_THRESHOLD;
+
+        ESP_LOGD(TAG, "Fired %d full clicks (dir=%d), %d pending left",
+                 full_clicks, self->last_direction, self->pending_steps);
     }
 
-    // Basic speed tracking (optional, but harmless)
-    if (clicks > 0) {
-        self->recent_deltas_sum += sign * clicks;
-        self->delta_count += clicks;
-        self->last_event_us = now_us;
-    }
-
-    // Reset speed estimator after ~0.5s inactivity
-    if (now_us - self->last_event_us > 500000) {
-        self->recent_deltas_sum = 0;
-        self->delta_count = 0;
-    }
+    self->last_step_us = now_us;
 }
+
+
 float ky040_get_rate_detents_per_sec(ky040_handle_t self) {
     if (!self || self->delta_count == 0) return 0.0f;
 
