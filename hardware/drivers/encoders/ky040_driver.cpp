@@ -6,6 +6,26 @@
 
 #define TAG "KY040"
 
+
+
+
+
+
+
+
+
+
+//to do: add mutable size for encoders so it works after it runs. try using an object-like structure with automatic registeration
+//what if i put it as a subcategory of input device?
+
+
+
+
+
+
+
+
+
 struct ky040_impl_t {
     pcnt_unit_handle_t pcnt_unit;
     int detents_per_rev;

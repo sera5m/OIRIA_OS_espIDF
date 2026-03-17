@@ -32,6 +32,10 @@
 #include "os_code\core\window_env\wenv_basicThemes.h"
 #include <vector>
 
+#include "../../../hardware/drivers/psram_std/psram_std.hpp" //my custom work for psram stdd things
+#include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
+
+//get this from psram string and whatnot
 // forward declarations
 class Window;
 class Canvas;
@@ -59,13 +63,13 @@ struct HighlighterTag {uint16_t color; bool enabled;};
 
 
 
-
+// Forward declare so variant can use it
 using ChunkContent = std::variant<
-    std::string,
+    stdpsram::String,
     ColorTag,
     SizeTag,
     PosTag,
-    HighlighterTag,       
+    HighlighterTag,
     std::monostate
 >;
 
@@ -94,40 +98,21 @@ using ChunkContent = std::variant<
         BoldOff           = -BoldToggle,
         ItalicOff         = -ItalicToggle,
     };
-    
+
     struct TextChunk {
         TagType kind = TagType::None;
         ChunkContent content = std::monostate{};
     
         TextChunk() = default;
-    
-        // plain text
-        explicit TextChunk(std::string txt)
-            : kind(TagType::PlainText),
-              content(std::move(txt)) {}
-    
-        // toggle / no-payload tags
+        explicit TextChunk(stdpsram::String txt)
+            : kind(TagType::PlainText), content(std::move(txt)) {}
         explicit TextChunk(TagType t)
-            : kind(t),
-              content(std::monostate{}) {}
-    
-        TextChunk(TagType t, ColorTag c)
-            : kind(t),
-              content(c) {}
-    
-        TextChunk(TagType t, SizeTag s)
-            : kind(t),
-              content(s) {}
-    
-        TextChunk(TagType t, PosTag p)
-            : kind(t),
-              content(p) {}
-    
-        TextChunk(TagType t, HighlighterTag h)
-            : kind(t),
-              content(h) {}
+            : kind(t), content(std::monostate{}) {}
+        TextChunk(TagType t, ColorTag c)       : kind(t), content(c) {}
+        TextChunk(TagType t, SizeTag s)        : kind(t), content(s) {}
+        TextChunk(TagType t, PosTag p)         : kind(t), content(p) {}
+        TextChunk(TagType t, HighlighterTag h) : kind(t), content(h) {}
     };
-    
 /* ---------------- update mode ---------------- */
 
 enum e_wenv_updateType {
@@ -135,6 +120,21 @@ enum e_wenv_updateType {
     managed,
     both
 };
+
+
+
+
+
+
+
+
+
+static int16_t parse_int(const stdpsram::String& str, int base = 10);
+
+
+
+
+
 
 /*optionsmapping*/
 // ──────────────────────────────────────────────
@@ -220,6 +220,8 @@ struct Win_MousePos {
 
 /* forward dependency */
 void CanvasForceParentUpdate(std::shared_ptr<Window> parent);
+int         safe_parse_int(const stdpsram::String& str, int default_val);
+uint16_t    safe_parse_color(const stdpsram::String& str, uint16_t default_val);
 
 
 /* ======================== CANVAS ======================== */
@@ -254,21 +256,25 @@ void clearScreenEveryXCalls(uint16_t x);
 class Window : public std::enable_shared_from_this<Window> {
     public:
         explicit Window(const WindowCfg& cfg, const std::string& initialContent = "");
-        void LocalToScreen(int lx, int ly, int& sx, int& sy);
-
+    
         void WinDraw();
-
+    
+        // Overloads – both are useful
         void SetText(const std::string& newText);
-void AppendText(const std::string& moreText);
-void ClearText();
-        
-        
-
-
+        void SetText(const stdpsram::String& newText);
+    
+        void AppendText(const std::string& moreText);
+        void AppendText(const stdpsram::String& moreText);
+    
+        void ClearText();
+        void LocalToScreen(int lx, int ly, int& sx, int& sy);
+        stdpsram::String content;
+        stdpsram::Vector<TextChunk> cachedChunks;
 
         // Members you are using
-        std::string content;
-    
+       // std::string content;
+       // In Window class definition:
+
         WindowCfg Initialcfg;
         WindowCfg Currentcfg;
     
@@ -295,23 +301,28 @@ void ClearText();
         // Optional: if you want to hide implementation details later,
         // move tokenize() and TextState to private
     private:
-    std::vector<TextChunk> cachedChunks;
+   
 bool isTokenized = false;
 
-        struct TextState {
-            uint16_t color = 0xFFFF;
-            int      size  = 1;
-            int      cursorX = 0;
-            int      cursorY = 0;
-            bool     underline     = false;
-            bool     strikethrough = false;
-            // add more toggles if needed (bold, italic…)
-        };
+struct TextState {
+    uint16_t color = 0xFFFF;
+    int      size  = 1;
+    int      cursorX = 0;
+    int      cursorY = 0;
+    bool     underline     = false;
+    bool     strikethrough = false;
+    bool     bold          = false;        // ← add
+    bool     italic        = false;        // ← add
+    uint16_t highlight_bg  = 0;            // ← add
+};
     
     public:
-        // Declaration only — implement in .cpp
-        std::vector<TextChunk> tokenize(const std::string& text);
-    };
+    
+    // One tokenize – takes the native type
+    stdpsram::Vector<TextChunk> tokenize(const stdpsram::String& s);
+    // Optionally keep a std::string wrapper if needed
+    stdpsram::Vector<TextChunk> tokenize(const std::string& s);
+};
 
 
     struct WindowAndUpdateInterval {

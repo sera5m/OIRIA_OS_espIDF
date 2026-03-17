@@ -29,15 +29,21 @@
 #include "esp_timer.h"
 #include "os_code\core\window_env\wenv_basicThemes.h"
 #include "hardware/drivers/lcd/fonts/font_avr_classics.h"
+#include <esp_heap_caps.h>
 
+#include "hardware/drivers/psram_std/psram_std.hpp" //my custom work for psram stdd things
+#include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
+// Custom allocator for std::string that prefers PSRAM
+#include "esp_log.h"
 
-
+static const char* TAG = "WindowDraw";
 
 Window::Window(const WindowCfg& cfg, const std::string& initialContent)
-    : content(initialContent),
+    : content(stdpsram::String(initialContent.begin(), initialContent.end())),
       Initialcfg(cfg),
       Currentcfg(cfg)
 {
+	
     // Make sure name is null-terminated
     Currentcfg.name[sizeof(Currentcfg.name) - 1] = '\0';
 
@@ -92,134 +98,224 @@ void Window::LocalToScreen(int lx, int ly, int& sx, int& sy)
 
 
 
-std::vector<TextChunk> Window::tokenize(const std::string& s) {
-    std::vector<TextChunk> chunks;
-    if (s.empty()) return chunks;
-
+// Helper function (add to MWenv.cpp or a utils header)
+static int16_t parse_int(const stdpsram::String& str, int base) {
+    int16_t result = 0;
+    bool negative = false;
     size_t i = 0;
-    std::string text_buffer;
+
+    if (str.empty()) return 0;
+
+    if (str[0] == '-') {
+        negative = true;
+        ++i;
+    }
+
+    while (i < str.size()) {
+        char c = str[i++];
+        int digit;
+        if (c >= '0' && c <= '9')      digit = c - '0';
+        else if (base == 16 && c >= 'a' && c <= 'f') digit = c - 'a' + 10;
+        else if (base == 16 && c >= 'A' && c <= 'F') digit = c - 'A' + 10;
+        else break;
+
+        result = result * base + digit;
+    }
+
+    return negative ? -result : result;
+}
+
+// Then in tokenize():
+/*
+//christ i have nothing but contempt for this part of code. how the fuck are these stupid fucking words and gybberish i'm typing making up a text tokenizer 
+//how the fuck does linux do this shit
+int val = parse_int(inside.substr(5));  // for size=
+int16_t x = parse_int(inside.substr(4, comma - 4));
+int16_t y = parse_int(inside.substr(comma + 1));
+*/
+// Helper: parse integer from stdpsram::String substring (no exceptions, fallback to default)
+// MWenv.cpp – add these right after includes or before tokenize
+
+// MWenv.cpp
+// Add this block right after your includes (or before tokenize)
+
+// Anonymous namespace = visible only in this .cpp file
+
+
+ int safe_parse_int(const stdpsram::String& str, int default_val = 0) {
+    if (str.empty()) return default_val;
+
+    int sign = 1;
+    size_t i = 0;
+
+    if (!str.empty() && str[0] == '-') { sign = -1; ++i; }
+    if (!str.empty() && str[0] == '+') { ++i; }
+
+    int result = 0;
+    bool digits_found = false;
+
+    while (i < str.size()) {
+        char c = str[i++];
+        if (c < '0' || c > '9') break;
+        result = result * 10 + (c - '0');
+        digits_found = true;
+    }
+
+    return digits_found ? result * sign : default_val;
+}
+
+ uint16_t safe_parse_color(const stdpsram::String& str, uint16_t default_val = 0xFFFF) {
+    if (str.empty()) return default_val;
+
+    size_t start = 0;
+    int base = 10;
+
+    // Check for 0x / 0X prefix
+    if (str.size() >= 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
+        base = 16;
+        start = 2;
+    }
+
+    uint32_t result = 0;
+    bool digits_found = false;
+
+    for (size_t i = start; i < str.size(); ++i) {
+        char c = str[i];
+        int digit = -1;
+
+        if (c >= '0' && c <= '9')      digit = c - '0';
+        else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
+
+        if (digit == -1) break;
+
+        result = result * base + digit;
+        digits_found = true;
+
+        // Early overflow protection (16-bit color)
+        if (result > 0xFFFF) return default_val;
+    }
+
+    return digits_found ? static_cast<uint16_t>(result) : default_val;
+}
+
+  // end anonymous namespace  // end anonymous namespace
+
+// ──────────────────────────────────────────────
+// Main tokenize function – cleaner structure
+// ──────────────────────────────────────────────
+stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& s) {
+    stdpsram::Vector<TextChunk> chunks;
+    if (s.empty()) {
+        ESP_LOGI(TAG, "Tokenize: empty input → empty chunks");
+        return chunks;
+    }
+
+    stdpsram::String text_buffer;
+    text_buffer.reserve(s.length() / 2 + 64);  // rough guess, helps perf
 
     auto flush = [&]() {
         if (!text_buffer.empty()) {
-            chunks.emplace_back(std::move(text_buffer));
+            chunks.emplace_back(TextChunk(std::move(text_buffer)));
             text_buffer.clear();
+            ESP_LOGD(TAG, "Flushed text chunk, total chunks now: %zu", chunks.size());
         }
     };
 
-    while (i < s.size()) {
-        if (s[i] == '<' && i + 1 < s.size() && s[i + 1] == '|') {  // <| opening
+    size_t i = 0;
+    while (i < s.length()) {
+        if (s[i] == '<' && i + 1 < s.length() && s[i + 1] == '|') {
             flush();
 
             size_t end = s.find("|>", i + 2);
-            if (end == std::string::npos) {
-                // broken → treat rest as text
+            if (end == stdpsram::String::npos) {
+                ESP_LOGW(TAG, "Unclosed tag at pos %zu → treat rest as text", i);
                 text_buffer = s.substr(i);
                 break;
             }
 
-            std::string inside = s.substr(i + 2, end - i - 2);  // content between <| and |>
+            stdpsram::String inside = s.substr(i + 2, end - i - 2);
             i = end + 2;
 
-            if (inside.empty()) continue;  // skip empty tags
+            if (inside.empty()) continue;
 
-            // ──────────────────────────────
-            // Handle known tags
-            // ──────────────────────────────
+            ESP_LOGD(TAG, "Found tag: <%s>", inside.c_str());
 
-            if (inside == "n" || inside == "br") {
-                chunks.emplace_back(TagType::LineBreak);
-            }
-            else if (inside == "u") {
-                chunks.emplace_back(TagType::UnderlineToggle);
-            }
-            else if (inside == "/u") {
-                chunks.emplace_back(TagType::UnderlineOff);
-            }
-            else if (inside == "s") {
-                chunks.emplace_back(TagType::StrikethroughToggle);
-            }
-            else if (inside == "/s") {
-                chunks.emplace_back(TagType::StrikethroughOff);
-            }
-            else if (inside == "b") {
-                chunks.emplace_back(TagType::BoldToggle);
-            }
-            else if (inside == "/b") {
-                chunks.emplace_back(TagType::BoldOff);
-            }
-            else if (inside == "i") {
-                chunks.emplace_back(TagType::ItalicToggle);
-            }
-            else if (inside == "/i") {
-                chunks.emplace_back(TagType::ItalicOff);
-            }
+            // ────────────────────── Short toggle tags ──────────────────────
+            if (inside.length() == 1 || inside.length() == 2) {
+                char first = inside[0];
+                bool is_off = (inside.length() == 2 && inside[0] == '/');
 
-            // Color: <|color=0xF800|> or <|color=63488|> (decimal also ok)
-            else if (inside.starts_with("color=")) {
-                std::string val = inside.substr(6);
-                uint16_t col = 0xFFFF;  // fallback white
-
-                if (!val.empty()) {
-                    try {
-                        if (val.starts_with("0x") || val.starts_with("0X")) {
-                            col = static_cast<uint16_t>(std::stoul(val.substr(2), nullptr, 16));
-                        } else {
-                            col = static_cast<uint16_t>(std::stoul(val, nullptr, 0));  // auto-detect base
+                switch (first) {
+                    case 'n':
+                      if (inside == "n" ) {
+                            chunks.emplace_back(TagType::LineBreak);
+                            ESP_LOGD(TAG, "LineBreak");
                         }
-                    } catch (...) {
-                        col = 0xFFFF;
-                    }
+                        break;
+
+                    case 'u':
+                        chunks.emplace_back(is_off ? TagType::UnderlineOff : TagType::UnderlineToggle);
+                        ESP_LOGD(TAG, "Underline %s", is_off ? "OFF" : "ON");
+                        break;
+
+                    case 's':
+                        chunks.emplace_back(is_off ? TagType::StrikethroughOff : TagType::StrikethroughToggle);
+                        ESP_LOGD(TAG, "Strikethrough %s", is_off ? "OFF" : "ON");
+                        break;
+
+                    case 'b':
+                        chunks.emplace_back(is_off ? TagType::BoldOff : TagType::BoldToggle);
+                        ESP_LOGD(TAG, "Bold %s", is_off ? "OFF" : "ON");
+                        break;
+
+                    case 'i':
+                        chunks.emplace_back(is_off ? TagType::ItalicOff : TagType::ItalicToggle);
+                        ESP_LOGD(TAG, "Italic %s", is_off ? "OFF" : "ON");
+                        break;
+
+                    default:
+                        ESP_LOGD(TAG, "Unknown short tag: %s → treat as text", inside.c_str());
+                        text_buffer += inside;
+                        break;
                 }
+                continue;
+            }
+
+            // ────────────────────── Value tags ──────────────────────
+            if (inside.starts_with("color=")) {
+                auto val = inside.substr(6);
+                uint16_t col = safe_parse_color(val);
                 chunks.emplace_back(TagType::ColorChange, ColorTag{col});
+                ESP_LOGD(TAG, "Color → 0x%04x", col);
             }
-            else if (inside == "/color") {
-                chunks.emplace_back(TagType::ColorChange, ColorTag{0xFFFF});  // reset to default
-            }
-
-            // Size: <|size=3|> or <|size=1|>
             else if (inside.starts_with("size=")) {
-                try {
-                    int val = std::stoi(inside.substr(5));
-                    if (val >= 1 && val <= 255) {
-                        chunks.emplace_back(TagType::SizeChange, SizeTag{static_cast<uint8_t>(val)});
-                    }
-                } catch (...) {}
+                auto val = inside.substr(5);
+                int sz = safe_parse_int(val, 1);
+                if (sz >= 1 && sz <= 255) {
+                    chunks.emplace_back(TagType::SizeChange, SizeTag{static_cast<uint8_t>(sz)});
+                    ESP_LOGD(TAG, "Size → %d", sz);
+                }
             }
-            else if (inside == "/size") {
-                chunks.emplace_back(TagType::SizeChange, SizeTag{1});
-            }
-
-            // Position: <|pos=10,40|>
             else if (inside.starts_with("pos=")) {
                 size_t comma = inside.find(',', 4);
-                if (comma != std::string::npos) {
-                    try {
-                        int16_t x = std::stoi(inside.substr(4, comma - 4));
-                        int16_t y = std::stoi(inside.substr(comma + 1));
-                        chunks.emplace_back(TagType::PosChange, PosTag{x, y});
-                    } catch (...) {}
+                if (comma != stdpsram::String::npos) {
+                    auto x_str = inside.substr(4, comma - 4);
+                    auto y_str = inside.substr(comma + 1);
+                    int16_t x = safe_parse_int(x_str);
+                    int16_t y = safe_parse_int(y_str);
+                    chunks.emplace_back(TagType::PosChange, PosTag{x, y});
+                    ESP_LOGD(TAG, "Pos → %d,%d", x, y);
                 }
             }
-
-            // Highlight: <|hl=0xFFFF|> or <|hl|> = toggle on/off
             else if (inside.starts_with("hl=")) {
-                std::string val = inside.substr(3);
-                uint16_t col = 0xFFFF;
-                try {
-                    if (val.starts_with("0x")) {
-                        col = static_cast<uint16_t>(std::stoul(val.substr(2), nullptr, 16));
-                    } else {
-                        col = static_cast<uint16_t>(std::stoul(val, nullptr, 0));
-                    }
-                } catch (...) {}
+                auto val = inside.substr(3);
+                uint16_t col = safe_parse_color(val, 0xFFFF);
                 chunks.emplace_back(TagType::HighlightChange, HighlighterTag{col, true});
+                ESP_LOGD(TAG, "Highlight ON color=0x%04x", col);
             }
-            else if (inside == "hl" || inside == "/hl") {
-                chunks.emplace_back(TagType::HighlightChange, HighlighterTag{0x0000, false});
-            }
-
-            // Unknown → pass through as literal text (don't add markup)
             else {
+                ESP_LOGD(TAG, "Unknown tag: %s → treat as literal text", inside.c_str());
                 text_buffer += inside;
             }
         }
@@ -229,164 +325,139 @@ std::vector<TextChunk> Window::tokenize(const std::string& s) {
     }
 
     flush();
+    ESP_LOGI(TAG, "Tokenization complete: %zu chunks", chunks.size());
+    ESP_LOGI(TAG, "%s", s.c_str());
     return chunks;
 }
 
 void Window::WinDraw() {
-    if (!IsWindowShown) return;
+    ESP_LOGI(TAG, "WinDraw() called");
+
+    if (!IsWindowShown) {
+        ESP_LOGI(TAG, "Window hidden, skipping draw");
+        return;
+    }
 
     const int rot = wi_sizing.rotation & 3;
     const int W = wi_sizing.Width;
     const int H = wi_sizing.Height;
+
     const int drawW = (rot % 2) ? H : W;
     const int drawH = (rot % 2) ? W : H;
+
+    ESP_LOGI(TAG, "Rotation=%d RawW=%d RawH=%d DrawW=%d DrawH=%d",
+             rot, W, H, drawW, drawH);
+
     const fontcharsize font_glyph_size = font6x8;
 
-    fb_rect(true, 0, wi_sizing.Xpos, wi_sizing.Ypos, drawW, drawH,
-            win_internal_color_background, win_internal_color_border);
+    // Background
+    fb_rect(true, 0,
+            wi_sizing.Xpos, wi_sizing.Ypos,
+            drawW, drawH,
+            win_internal_color_background,
+            win_internal_color_border);
 
     if (!Currentcfg.borderless) {
-        fb_rect(false, 1, wi_sizing.Xpos, wi_sizing.Ypos, drawW, drawH,
-                0x0000, win_internal_color_border);
+        fb_rect(false, 1,
+                wi_sizing.Xpos, wi_sizing.Ypos,
+                drawW, drawH,
+                0x0000,
+                win_internal_color_border);
     }
 
-    struct TextState {
-        uint16_t color = 0xFFFF;
-        uint8_t  size  = 1;
-        bool     underline     = false;
-        bool     strikethrough = false;
-        bool     bold          = false;    // placeholder — could switch font later
-        bool     italic        = false;    // placeholder — could shear or switch font
-        uint16_t highlight_bg  = 0;        // 0 = no highlight
-    };
-
+    // Use the CLASS-LEVEL Texstate (no local redefinition!)
     TextState state;
     state.color = win_internal_color_text;
     state.size  = Currentcfg.TextSizeMult;
 
+    ESP_LOGI(TAG, "Initial text state: color=%u size=%u",
+             state.color, state.size);
+
     int curLX = 2;
     int curLY = 2;
 
+    ESP_LOGD(TAG, "Initial cursor position: %d,%d", curLX, curLY);
+
     uint8_t last_line_height_mult = state.size;
-    uint8_t max_size_this_line    = state.size;
+    uint8_t max_size_this_line = state.size;
 
+    // Tokenize if needed
     if (!isTokenized) {
-    cachedChunks = tokenize(content);
-    isTokenized = true;
-}
+        ESP_LOGI(TAG, "Tokenizing content...");
+        cachedChunks = tokenize(content);
+        isTokenized = true;
+        ESP_LOGI(TAG, "Tokenization complete. chunk_count=%zu", cachedChunks.size());
+        
+    }
 
-auto& chunks = cachedChunks;
+    auto& chunks = cachedChunks;
 
-    for (const auto& chunk : chunks) {
+    // Rest of your loop unchanged...
+    // (just make sure it uses state.highlight_bg, state.bold, etc. — now they exist)
+    
+    for (size_t idx = 0; idx < cachedChunks.size(); ++idx) {
+        const auto& chunk = cachedChunks[idx];
+
+        ESP_LOGD(TAG, "Chunk %zu: kind=%d", idx, (int)chunk.kind);
+
         switch (chunk.kind) {
-
         case TagType::PlainText: {
-            const std::string& txt = std::get<std::string>(chunk.content);
-            if (txt.empty()) break;
+            const stdpsram::String& txt = std::get<stdpsram::String>(chunk.content);
+
+            if (txt.empty()) {
+                ESP_LOGD(TAG, "Empty text → skip");
+                continue;
+            }
 
             int screenX, screenY;
             LocalToScreen(curLX, curLY, screenX, screenY);
 
-            bool is_vertical = (rot % 2) == 1;
-
-            int char_advance_px = is_vertical 
-                ? font_glyph_size.y * state.size 
-                : font_glyph_size.x * state.size;
-
-            int remaining_px = drawW - (is_vertical ? curLY : curLX) - 4;
-
-            uint16_t max_chars = 0;
-            if (char_advance_px > 0) {
-                max_chars = remaining_px / char_advance_px;
+            // Clamp to visible area
+            if (screenX >= drawW || screenY >= drawH || screenX < -100 || screenY < -100) {
+                ESP_LOGW(TAG, "Text off-screen: (%d,%d) → skip", screenX, screenY);
+                curLX += txt.length() * font_glyph_size.x * state.size;  // still advance
+                continue;
             }
 
-            if (state.size < max_size_this_line) {
-                int cons_advance = is_vertical 
-                    ? font_glyph_size.y * max_size_this_line 
-                    : font_glyph_size.x * max_size_this_line;
-                uint16_t cons_max = remaining_px / cons_advance;
-                max_chars = std::min(max_chars, cons_max);
-            }
+            ESP_LOGD(TAG, "Draw text '%s' @ screen(%d,%d) size=%d color=0x%04x",
+                     txt.c_str(), screenX, screenY, state.size, state.color);
 
-            if (max_chars < 8) max_chars = 999;
-
-            // ──────────────────────────────
-            // 1. Draw highlight background (if active)
-            // ──────────────────────────────
+            // Highlight background if active
             if (state.highlight_bg != 0) {
-                int bg_x0 = curLX;
-                int bg_y0 = curLY;
-                int bg_x1 = curLX + txt.length() * font_glyph_size.x * state.size;
-                int bg_y1 = curLY + font_glyph_size.y * state.size;
-
-                int sx0, sy0, sx1, sy1;
-                LocalToScreen(bg_x0, bg_y0, sx0, sy0);
-                LocalToScreen(bg_x1, bg_y1, sx1, sy1);
-
-                // Make sure coords are ordered correctly
-                int left   = std::min(sx0, sx1);
-                int top    = std::min(sy0, sy1);
-                int right  = std::max(sx0, sx1);
-                int bottom = std::max(sy0, sy1);
-
-                fb_rect(true, 0, left, top, right - left + 1, bottom - top + 1,
-                        state.highlight_bg, state.highlight_bg);  // filled rect
+                int bg_w = txt.length() * font_glyph_size.x * state.size;
+                int bg_h = font_glyph_size.y * state.size;
+                fb_rect(true, 0,
+                        screenX, screenY,
+                        bg_w, bg_h,
+                        state.highlight_bg, state.highlight_bg);
             }
-
-            // ──────────────────────────────
-            // 2. Draw the actual text
-            // ──────────────────────────────
-            fb_draw_text(
-                rot * 4,
+			ESP_LOGI(TAG, "TEXT CHUNK: '%s'", txt.c_str());
+            fb_draw_ptext(
+                0, //issue noted, text does not render if at positions other than 0
                 screenX, screenY,
-                txt.c_str(),
+              // 25,25,
+                txt, 
                 state.color,
                 state.size,
                 avrclassic_font6x8,
                 0,
                 false,
                 win_internal_color_background,
-                max_chars,
+                999,  // large enough to not wrap unless needed
                 font_glyph_size
             );
 
-            // ──────────────────────────────
-            // 3. Draw underline / strikethrough if active
-            // ──────────────────────────────
-            if (state.underline || state.strikethrough) {
-                int line_y_offset;
-                if (state.underline) {
-                    line_y_offset = font_glyph_size.y * state.size - 1;  // bottom
-                } else {
-                    line_y_offset = (font_glyph_size.y * state.size) / 2; // middle for strikethrough
-                }
+            // Advance cursor
+            int advance = txt.length() * font_glyph_size.x * state.size;
+            curLX += advance;
 
-                int ul_y = curLY + line_y_offset;
-                int ul_x_start = curLX;
-                int ul_x_end   = curLX + txt.length() * font_glyph_size.x * state.size;
-
-                int sx0, sy0, sx1, sy1;
-                LocalToScreen(ul_x_start, ul_y, sx0, sy0);
-                LocalToScreen(ul_x_end,   ul_y, sx1, sy1);
-
-                // Draw horizontal line (handles rotation via screen coords)
-                fb_line(sx0, sy0, sx1, sy1, state.color);
-            }
-
-            // Advance
-            int this_chunk_advance = static_cast<int>(txt.length()) * (font_glyph_size.x * state.size);
-            curLX += this_chunk_advance;
-
-            if (state.size > max_size_this_line) {
-                max_size_this_line = state.size;
-            }
-
+            if (state.size > max_size_this_line) max_size_this_line = state.size;
             last_line_height_mult = state.size;
 
-            // Force wrap if overrun
-            if (Currentcfg.WrapText && curLX >= drawW - 10) {
+            // Simple wrap (can be improved)
+            if (curLX >= drawW - 20) {
                 curLX = 2;
-                curLY += (font_glyph_size.y * last_line_height_mult) + 2;
+                curLY += font_glyph_size.y * last_line_height_mult + 2;
                 max_size_this_line = state.size;
             }
 
@@ -395,91 +466,96 @@ auto& chunks = cachedChunks;
 
         case TagType::LineBreak:
             curLX = 2;
-            curLY += (font_glyph_size.y * last_line_height_mult) + 2;
+            curLY += font_glyph_size.y * last_line_height_mult + 2;
             max_size_this_line = state.size;
+            ESP_LOGD(TAG, "Line break → cursor %d,%d", curLX, curLY);
             break;
 
         case TagType::PosChange: {
             auto pos = std::get<PosTag>(chunk.content);
             curLX = pos.x;
             curLY = pos.y;
-            max_size_this_line = state.size;
+            ESP_LOGD(TAG, "Pos → %d,%d", curLX, curLY);
             break;
         }
 
-        case TagType::ColorChange: {
-            auto c = std::get<ColorTag>(chunk.content);
-            state.color = c.value;
+        case TagType::ColorChange:
+            state.color = std::get<ColorTag>(chunk.content).value;
+            ESP_LOGD(TAG, "Color → 0x%04x", state.color);
             break;
-        }
 
         case TagType::SizeChange: {
-            auto sz = std::get<SizeTag>(chunk.content);
-            state.size = sz.value;
+            int sz = std::get<SizeTag>(chunk.content).value;
+            if (sz >= 1 && sz <= 16) {  // reasonable limit
+                state.size = sz;
+                ESP_LOGD(TAG, "Size → %d", state.size);
+            }
             break;
         }
 
         case TagType::HighlightChange: {
             auto hl = std::get<HighlighterTag>(chunk.content);
             state.highlight_bg = hl.enabled ? hl.color : 0;
+            ESP_LOGD(TAG, "Highlight %s color=0x%04x", hl.enabled ? "ON" : "OFF", hl.color);
             break;
         }
 
-        // ──────────────────────────────
-        // Style toggles
-        // ──────────────────────────────
-        case TagType::UnderlineToggle:
-            state.underline = true;
-            break;
-        case TagType::UnderlineOff:
-            state.underline = false;
-            break;
-
-        case TagType::StrikethroughToggle:
-            state.strikethrough = true;
-            break;
-        case TagType::StrikethroughOff:
-            state.strikethrough = false;
-            break;
-
-        case TagType::BoldToggle:
-            state.bold = true;
-            // TODO: if you have a bold font variant, switch font pointer here later
-            break;
-        case TagType::BoldOff:
-            state.bold = false;
-            break;
-
-        case TagType::ItalicToggle:
-            state.italic = true;
-            // TODO: if you have italic font or want shear transform, add here
-            break;
-        case TagType::ItalicOff:
-            state.italic = false;
-            break;
+        // Toggles (simple)
+        case TagType::UnderlineToggle:   state.underline = true;    ESP_LOGD(TAG, "Underline ON"); break;
+        case TagType::UnderlineOff:      state.underline = false;   ESP_LOGD(TAG, "Underline OFF"); break;
+        case TagType::StrikethroughToggle: state.strikethrough = true;  ESP_LOGD(TAG, "Strike ON"); break;
+        case TagType::StrikethroughOff:  state.strikethrough = false;   ESP_LOGD(TAG, "Strike OFF"); break;
+        case TagType::BoldToggle:        state.bold = true;         ESP_LOGD(TAG, "Bold ON"); break;
+        case TagType::BoldOff:           state.bold = false;        ESP_LOGD(TAG, "Bold OFF"); break;
+        case TagType::ItalicToggle:      state.italic = true;       ESP_LOGD(TAG, "Italic ON"); break;
+        case TagType::ItalicOff:         state.italic = false;      ESP_LOGD(TAG, "Italic OFF"); break;
 
         default:
+            ESP_LOGW(TAG, "Unknown tag type: %d", (int)chunk.kind);
             break;
         }
     }
 
     dirty = false;
     lastUpdateTime = esp_timer_get_time();
+
+    ESP_LOGI(TAG, "WinDraw complete - %zu chunks processed", cachedChunks.size());
 }
+
+
+
+
+
 //guess who found out she needed to do this a lot after making the window system and working on other drivers
 //i swear to god bruh
 
-void Window::SetText(const std::string& newText) {
-    content = newText;
+
+void Window::SetText(const std::string& newText) { //std string variant with explicit conversion
+    content = stdpsram::String(newText.begin(), newText.end());  // force PSRAM copy
     isTokenized = false;
     dirty = true;
 }
-    
-void Window::AppendText(const std::string& moreText) {
-    content += moreText;
+
+void Window::SetText(const stdpsram::String& newText) { //stdpsram variant with no conversion needed
+    content=newText;  
     isTokenized = false;
     dirty = true;
 }
+
+
+//overloaded for std and stdpsram
+void Window::AppendText(const stdpsram::String& moreText) {
+    content.append(moreText);
+    isTokenized = false;
+    dirty = true;
+}
+
+void Window::AppendText(const std::string& moreText) { //overloaded stdstr, convert needed
+    content.append(stdpsram::String(moreText.begin(), moreText.end()));
+    isTokenized = false;
+    dirty = true;
+}
+
 void Window::ClearText() {
     content.clear();
     cachedChunks.clear();

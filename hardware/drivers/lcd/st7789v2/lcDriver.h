@@ -8,30 +8,44 @@
 
 //#ifndef LCDRIVER_H_
 //#define LCDRIVER_H_
-
+// lcDriver.h
 #pragma once
+
+#include <stdint.h>
+#include <stdbool.h>
+//#include <string.h>
+#include "driver/spi_master.h"
+#include "hardware/wiring/wiring.h"
+#include "hardware/drivers/lcd/fonts/font_basic_types.h"
+
+// Move this **before** extern "C" so C++ headers are visible
+//#include "hardware/drivers/psram_std/psram_std.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include "hardware/drivers/lcd/fonts/font_basic_types.h"
-#include <stdint.h>
-#include <stdbool.h>
-#include "hardware/wiring/wiring.h"
+// ──────────────────────────────────────────────
+// Required external defines (from your project)
+// ──────────────────────────────────────────────
+#ifndef SCREEN_W
+#define SCREEN_W 240
+#endif
+#ifndef SCREEN_H
+#define SCREEN_H 280
+#endif
+#ifndef X_OFFSET
+#define X_OFFSET 0   // usually 0 for 240×320 panels centered
+#endif
+#ifndef Y_OFFSET
+#define Y_OFFSET 20  // 320-280 = 40 → 20 top/bottom centering
+#endif
+#ifndef CHUNK_SIZE
+#define CHUNK_SIZE (4096)  // max DMA buffer — we'll use smaller effective chunks
+#endif
 
-#include "hardware/drivers/lcd/fonts/font_basic_types.h"
-#include "code_stuff/types.h"
-/*  REQUIRED EXTERNAL DEFINES
-    SCREEN_W
-    SCREEN_H
-    X_OFFSET
-    Y_OFFSET
-    CHUNK_SIZE
-*/
+extern spi_device_handle_t spi;           // from main – must be SPI2_HOST for LCD
 extern uint16_t *framebuffer;
-extern uint16_t fpsLimiterTarget;
-
 // --------------------- ENUMS ---------------------
 typedef enum {
     plain,
@@ -65,13 +79,10 @@ typedef enum {
 
 
 // --------------------- INIT ---------------------
- void spi_init_dma(void);
-void lcd_init_simple(void);
-
-// --------------------- FRAMEBUFFER ---------------------
- void framebuffer_alloc(void);
+void framebuffer_alloc(void);
 void fb_clear(uint16_t color);
- void lcd_refreshScreen(void);
+void lcd_init_simple(void);
+void lcd_refresh_screen(void);              // renamed for clarity
 
 // --------------------- DISPLAY ---------------------
 void lcd_fb_display_framebuffer(bool OnlyRenderDelta, bool cope_mode);
@@ -84,6 +95,8 @@ void fb_rect(
     uint16_t color,
     uint16_t secondarycolor
 );
+
+
 
 void fb_line(
     int x0, int y0,
@@ -120,7 +133,9 @@ void fb_draw_text( uint8_t angle, int x, int y, const char* str, uint16_t color,
  const uint8_t* font, uint8_t transparency, bool drawblocksforbackground, uint16_t blockBackground_color,
   uint16_t maxTLenBeforeAutoWrapToNextLine, struct fontcharsize fontSize );
 
+  
 
 #ifdef __cplusplus
+
 }
 #endif

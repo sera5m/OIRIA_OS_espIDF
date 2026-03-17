@@ -24,8 +24,10 @@
 //aster out slave in
 #define SPI_DIN GPIO_NUM_11
 
+
 #define SPI_MISO  GPIO_NUM_13
-//master in slave out 
+//master in slave out (miso means output from "slave" device. "slave device" is older terminology for data output device)
+//this device provides data out to microcontroller
 
 
 #define BUZZER_PIN GPIO_NUM_2
@@ -39,6 +41,7 @@
 #define SPI_CS_SD GPIO_NUM_6 
 //generic sdcard on g6
 
+
 #define LED_PIN GPIO_NUM_48
 //i2c pins
 //hardware known connected: max30012 hr sensor, mpu6050 gyro, 
@@ -48,14 +51,22 @@
 
 //other pins
 //#define IRQ 16 //notify from input devices
-#define NFC_IRQ_PIN GPIO_NUM_16  
+#define SD_MISO GPIO_NUM_16 
+#define spi2_in_sd GPIO_NUM_16
+
+#define SD_MOSI GPIO_NUM_15
+#define spi2_out_sd GPIO_NUM_15
 
 #define LCD_DC GPIO_NUM_4
 #define LCD_RST GPIO_NUM_5
 #define LCD_BACKLIGHT GPIO_NUM_1 
 #define NFC_RST_PIN GPIO_NUM_15 
 //uhhhhhhhhhhh
+#define SD_SCK GPIO_NUM_17
 
+// LCD still on SPI2_HOST (default pins 11/12/13)
+
+// Separate bus for SD:
 
 
 #define NEOPIXEL_PIN GPIO_NUM_48 
@@ -80,7 +91,8 @@ void StartSPI() {
 #define SCREEN_H 280
 #define X_OFFSET 0
 #define Y_OFFSET 20
-#define CHUNK_SIZE 4096 //max the esp can reliably handle hardware wise
+#define CHUNK_SIZE 4096 //lol
+ //max the esp can reliably handle hardware wise is roughly 4kib, but this should be lowered a bit to make it safer
 
 
 

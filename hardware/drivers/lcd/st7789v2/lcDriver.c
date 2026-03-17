@@ -1,354 +1,339 @@
-
+// lcDriver.c
 #include "lcDriver.h"
-
-#include "hardware/wiring/wiring.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "driver/gpio.h"
-#include "driver/spi_master.h"
-#include "driver/spi_common.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
-#include "esp_psram.h"
-#include "rom/cache.h"
+#include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <string.h>
-#include <math.h>
-#include "hardware/drivers/lcd/fonts/font_avr_classics.h"
+#include <math.h>               // ← added for sqrtf, cosf, sinf
 
-#define TAG "ST7789_DMA"
+#include <stdint.h>
+#include <stdbool.h>
 
-static spi_device_handle_t spi;
+//#include "hardware/drivers/psram_std/psram_std.h" //my custom work for psram stdd things
 
-//static uint16_t *framebuffer = NULL;
-uint16_t fpsLimiterTarget= 45;
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
- struct {
-    uint32_t chunk_offset;
-    bool chunking_active;
-    spi_transaction_t trans;
-} dma_state = {0};
 
-//
+
+#define SAFE_ROWS_PER_CHUNK 4   // 240×4×2 = 1920 bytes — safe on S3
+#define SAFE_CHUNK_BYTES (SCREEN_W * SAFE_ROWS_PER_CHUNK * 2)
+
+#define TAG "ST7789"
+
+#define SAFE_ROWS_PER_CHUNK 4   // 240×4×2 = 1920 bytes — safe on S3 DMA
+#define SAFE_CHUNK_BYTES (SCREEN_W * SAFE_ROWS_PER_CHUNK * 2)
+
+// ──────────────────────────────────────────────
+// Framebuffer & dirty rows
+// ──────────────────────────────────────────────
 uint16_t *framebuffer = NULL;
 
-//changes array for partial updates and windowing of the display
-#define ddCHANGEDROWS_BITMASK_BITS (SCREEN_H+8)
-//general size for change bitmask for this
-#define ddCHANGEDROWS_BITMASK_BYTES (ddCHANGEDROWS_BITMASK_BITS/8) // 36 bytes given 288/8
+#define CHANGED_ROWS_BITS (SCREEN_H + 7)
+#define CHANGED_ROWS_BYTES ((CHANGED_ROWS_BITS + 7) / 8)
+static uint8_t changed_rows_bitmask[CHANGED_ROWS_BYTES];
 
-uint8_t dd_changedrows_bitmask[ddCHANGEDROWS_BITMASK_BYTES];
- //create a bitmask in which we mark down the changes
- //works by marking changes by setting bit to 1, with that bit coresponding to it's position as a row. 
-
-  void dd_changedrows_bm_setrowstate(bool changed, uint16_t row) {
-    if (changed)
-        dd_changedrows_bitmask[row / 8] |=  (1 << (row % 8));  // set bit(mark dirty)
-    else
-        dd_changedrows_bitmask[row / 8] &= ~(1 << (row % 8));  // clear bit (clean)
+static inline void mark_row_dirty(uint16_t row) {
+    if (row >= SCREEN_H) return;
+    changed_rows_bitmask[row / 8] |= (1u << (row % 8));
 }
 
-  bool dd_changedrows_bm_getrowstate(uint16_t row) {
-    return (dd_changedrows_bitmask[row / 8] >> (row % 8)) & 1;
+static inline bool is_row_dirty(uint16_t row) {
+    if (row >= SCREEN_H) return false;
+    return (changed_rows_bitmask[row / 8] & (1u << (row % 8))) != 0;
 }
 
-  void dd_changedrows_bm_setallrowschanged(bool state) {
-    memset(dd_changedrows_bitmask, state ? 0xFF : 0x00, ddCHANGEDROWS_BITMASK_BYTES);
+static inline void mark_all_dirty(bool dirty) {
+    memset(changed_rows_bitmask, dirty ? 0xFF : 0x00, sizeof(changed_rows_bitmask));
 }
 
-  void mark_rows_dirty(int y0, int y1) {
-    if (y0 < 0) y0 = 0;
-    if (y1 >= SCREEN_H) y1 = SCREEN_H - 1;
-    for (int y = y0; y <= y1; y++)
-        dd_changedrows_bm_setrowstate(true, y);
-}
-//end changes array section
-
-
-void framebuffer_alloc(void){
-    static bool hasAllocedFrameBuffer=false;
-    if (!hasAllocedFrameBuffer){ //stop any form of double alloc
-        size_t sz = SCREEN_W * SCREEN_H * sizeof(uint16_t);
-        framebuffer= heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
-        memset(framebuffer, 0, sz);
-
-        if (!framebuffer) {
-            ESP_LOGE(TAG, "Frame buffer allocation failed!");
-            hasAllocedFrameBuffer=false;
-            return;
-        }else{
-            ESP_LOGE(TAG, "Frame buffer allocation success");
-            hasAllocedFrameBuffer=true;
-            return;
-        }
-        
-        
+static void mark_rows_range_dirty(int y0, int y1) {
+    y0 = (y0 < 0) ? 0 : y0;
+    y1 = (y1 >= SCREEN_H) ? SCREEN_H - 1 : y1;
+    for (int y = y0; y <= y1; y++) {
+        mark_row_dirty(y);
     }
 }
+// ──────────────────────────────────────────────
+// Framebuffer
+// ──────────────────────────────────────────────
 
-// --------------------- SPI / GPIO ---------------------
- void spi_init_dma(void)
-{
-    gpio_config_t cfg = {
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = (1ULL<<LCD_DC) | (1ULL<<LCD_RST) | (1ULL<<lcd_BL)
-    };
-    gpio_config(&cfg);
 
-    gpio_set_direction(SPI_CS_LCD, GPIO_MODE_OUTPUT);
-    gpio_set_level(SPI_CS_LCD, 1);
-    gpio_set_level(LCD_RST, 1);
-    gpio_set_level(LCD_DC, 0);
-    gpio_set_level(lcd_BL, 1);
+void framebuffer_alloc(void) {
+    static bool allocated = false;
+    if (allocated) return;
 
-    spi_bus_config_t buscfg = {
-        .mosi_io_num = SPI_MOSI,
-        .miso_io_num = -1,
-        .sclk_io_num = SPI_CLK,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = SCREEN_W * SCREEN_H * 2,
-        .flags = SPICOMMON_BUSFLAG_MASTER | SPICOMMON_BUSFLAG_GPIO_PINS,
-        .intr_flags = ESP_INTR_FLAG_IRAM
-    };
+    size_t sz = SCREEN_W * SCREEN_H * sizeof(uint16_t);
+    ESP_LOGI(TAG, "Alloc FB: %u bytes (%.1f KiB)", sz, sz / 1024.0f);
 
-    ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
-
-    spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 76 * 1000 * 1000,
-        .mode = 0,
-        .spics_io_num = SPI_CS_LCD,
-        .queue_size = 3,
-        .flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_NO_DUMMY,
-    };
-
-    ESP_ERROR_CHECK(spi_bus_add_device(SPI3_HOST, &devcfg, &spi));
-}
-
-// --------------------- LCD LOW LEVEL ---------------------
- void lcd_cmd(uint8_t cmd)
-{
-    spi_transaction_t t = {
-        .length = 8,
-        .flags = SPI_TRANS_USE_TXDATA,
-    };
-    t.tx_data[0] = cmd;
-    gpio_set_level(LCD_DC, 0);
-    spi_device_polling_transmit(spi, &t);
-}
-
-  void lcd_data(uint8_t data)
-{
-    spi_transaction_t t = {
-        .length = 8,
-        .flags = SPI_TRANS_USE_TXDATA,
-    };
-    t.tx_data[0] = data;
-    gpio_set_level(LCD_DC, 1);
-    spi_device_polling_transmit(spi, &t);
-}
-
-  void lcd_data_bulk(const void *data, size_t len)
-{
-    if (!len) return;
-    spi_transaction_t t = {
-        .length = len * 8,
-        .tx_buffer = data,
-    };
-    gpio_set_level(LCD_DC, 1);
-    spi_device_polling_transmit(spi, &t);
-}
-
-  void lcd_set_window(uint16_t x0, uint16_t y0,
-                                  uint16_t x1, uint16_t y1)
-{
-    uint8_t data[4];
-    
-    // Apply offsets to center 240x280 in 240x320
-    uint16_t px0 = x0 + X_OFFSET;
-    uint16_t px1 = x1 + X_OFFSET;
-    uint16_t py0 = y0 + Y_OFFSET;  // This centers 280 rows in 320
-    uint16_t py1 = y1 + Y_OFFSET;
-    
-    // Column address set (240 columns)
-    lcd_cmd(0x2A);
-    data[0] = (px0 >> 8) & 0xFF; data[1] = px0 & 0xFF;
-    data[2] = (px1 >> 8) & 0xFF; data[3] = px1 & 0xFF;
-    lcd_data_bulk(data, 4);
-    
-    // Row address set (320 rows total, we use rows 20-299)
-    lcd_cmd(0x2B);
-    data[0] = (py0 >> 8) & 0xFF; data[1] = py0 & 0xFF;
-    data[2] = (py1 >> 8) & 0xFF; data[3] = py1 & 0xFF;
-    lcd_data_bulk(data, 4);
-    
-    // Memory write
-    lcd_cmd(0x2C);
-}
-
-// --------------------- FRAMEBUFFERS ---------------------
-
-// --------------------- DMA DISPLAY ---------------------
-/*
-static void fb_display_backbuffer_chunked(void)
-{
-    spi_transaction_t *ret;
-
-    // Drain completed transaction if any
-    if (swap_pending) {
-        if (spi_device_get_trans_result(spi, &ret, 0) != ESP_OK) {
-            return; // DMA still busy
-        }
-    }
-
-    if (!dma_state.chunking_active) {
-        lcd_set_window(0, 0, SCREEN_W - 1, SCREEN_H - 1);
-        dma_state.chunk_offset = 0;
-        dma_state.chunking_active = true;
-    }
-
-    uint32_t total = SCREEN_W * SCREEN_H * 2;
-    if (dma_state.chunk_offset >= total) {
-        dma_state.chunking_active = false;
-        swap_pending = false;
-        backbuffer_ready = false;
+    framebuffer = heap_caps_malloc(sz, MALLOC_CAP_SPIRAM);
+    if (!framebuffer) {
+        ESP_LOGE(TAG, "FB alloc failed!");
         return;
     }
 
-    uint32_t remain = total - dma_state.chunk_offset;
-    uint32_t send = remain > CHUNK_SIZE ? CHUNK_SIZE : remain;
+    fb_clear(0x0000);
+    allocated = true;
+}
 
-    dma_state.trans.length = send * 8;
-    dma_state.trans.tx_buffer =
-        (uint8_t *)framebuffer + dma_state.chunk_offset;
-    dma_state.trans.flags = 0;
+void fb_clear(uint16_t color) {
+    if (!framebuffer) return;
 
+    uint32_t c = ((uint32_t)color << 16) | color;
+    uint32_t *p = (uint32_t *)framebuffer;
+    size_t n = (SCREEN_W * SCREEN_H) / 2;
+    for (size_t i = 0; i < n; i++) p[i] = c;
+
+    mark_all_dirty(true);
+}
+
+// ──────────────────────────────────────────────
+// Low-level LCD commands
+// ──────────────────────────────────────────────
+static esp_err_t lcd_cmd(uint8_t cmd) {
+    spi_transaction_t t = {
+        .length = 8,
+        .flags = SPI_TRANS_USE_TXDATA,
+        .tx_data = {cmd}
+    };
+    gpio_set_level(LCD_DC, 0);
+    esp_err_t ret = spi_device_polling_transmit(spi, &t);
+    if (ret != ESP_OK) ESP_LOGE(TAG, "lcd_cmd(0x%02x) failed: %s", cmd, esp_err_to_name(ret));
+    return ret;
+}
+
+static esp_err_t lcd_data(uint8_t data) {
+    spi_transaction_t t = {
+        .length = 8,
+        .flags = SPI_TRANS_USE_TXDATA,
+        .tx_data = {data}
+    };
     gpio_set_level(LCD_DC, 1);
-    spi_device_queue_trans(spi, &dma_state.trans, portMAX_DELAY);
+    esp_err_t ret = spi_device_polling_transmit(spi, &t);
+    if (ret != ESP_OK) ESP_LOGE(TAG, "lcd_data(0x%02x) failed: %s", data, esp_err_to_name(ret));
+    return ret;
+}
 
-    dma_state.chunk_offset += send;
-    swap_pending = true;
-}*/
+static esp_err_t lcd_data_bulk(const void *data, size_t len) {
+    if (len == 0) return ESP_OK;
+    spi_transaction_t t = {
+        .length = len * 8,
+        .tx_buffer = data
+    };
+    gpio_set_level(LCD_DC, 1);
+    esp_err_t ret = spi_device_polling_transmit(spi, &t);
+    if (ret != ESP_OK) ESP_LOGE(TAG, "lcd_data_bulk(%u bytes) failed: %s", (unsigned)len, esp_err_to_name(ret));
+    return ret;
+}
 
- void lcd_fb_display_framebuffer(bool OnlyRenderDelta, bool cope_mode){
-	
-    const uint32_t row_bytes = SCREEN_W * 2;      // bytes per row
-    const uint32_t max_rows_per_chunk = CHUNK_SIZE / row_bytes;
+static void lcd_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
+    uint8_t data[4];
 
-    if (max_rows_per_chunk == 0)
-        return; // impossible config
+    x0 += X_OFFSET; x1 += X_OFFSET;
+    y0 += Y_OFFSET; y1 += Y_OFFSET;
 
-    if (OnlyRenderDelta) {
-		
+    lcd_cmd(0x2A); // CASET
+    data[0] = x0 >> 8; data[1] = x0 & 0xFF;
+    data[2] = x1 >> 8; data[3] = x1 & 0xFF;
+    lcd_data_bulk(data, 4);
+
+    lcd_cmd(0x2B); // RASET
+    data[0] = y0 >> 8; data[1] = y0 & 0xFF;
+    data[2] = y1 >> 8; data[3] = y1 & 0xFF;
+    lcd_data_bulk(data, 4);
+
+    lcd_cmd(0x2C); // RAMWR
+}
+// ──────────────────────────────────────────────
+// Safe framebuffer display (chunked)
+// ──────────────────────────────────────────────
+void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
+    ESP_LOGI(TAG, "Display FB: delta=%d cope=%d", only_delta, cope_mode);
+
+    const uint32_t row_bytes = SCREEN_W * 2;
+    const uint32_t rows_per_chunk = SAFE_ROWS_PER_CHUNK;
+
+    if (only_delta) {
+        ESP_LOGI(TAG, "Delta update");
         int y = 0;
-
         while (y < SCREEN_H) {
+            if (!is_row_dirty(y)) { y++; continue; }
 
-            // find first dirty row
-            if (!dd_changedrows_bm_getrowstate(y)) {
-                y++;
-                continue;
-            }
-
-            // determine contiguous dirty run
             int y_start = y;
             int y_end = y;
-
             while (y_end + 1 < SCREEN_H &&
-                   dd_changedrows_bm_getrowstate(y_end + 1) &&
-                   (y_end - y_start + 1) < max_rows_per_chunk) {
+                   is_row_dirty(y_end + 1) &&
+                   (y_end - y_start + 1) < rows_per_chunk) {
                 y_end++;
             }
 
-            const uint32_t rows = y_end - y_start + 1;
-            const uint32_t bytes_to_send = rows * row_bytes;
+            uint32_t rows = y_end - y_start + 1;
+            uint32_t bytes = rows * row_bytes;
 
-            // framebuffer pointer MUST match window exactly
-            uint8_t *buf = (uint8_t *)&framebuffer[y_start * SCREEN_W];
+            lcd_set_window(0, y_start, SCREEN_W - 1, y_end);
 
+            esp_err_t ret = lcd_data_bulk((uint8_t *)&framebuffer[y_start * SCREEN_W], bytes);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Delta chunk y=%d–%d failed: %s", y_start, y_end, esp_err_to_name(ret));
+            }
 
-            // window must match rows sent — offset handled in lcd init
-            lcd_set_window(
-                0,
-                y_start,
-                SCREEN_W - 1,
-                y_end
-            );
-
-            gpio_set_level(LCD_DC, 1);
-
-            spi_transaction_t t = {
-                .length    = bytes_to_send * 8,
-                .tx_buffer = buf,
-                .flags     = 0
-            };
-
-            spi_device_transmit(spi, &t);
-
-            // mark rows clean
             for (int ry = y_start; ry <= y_end; ry++) {
-                dd_changedrows_bm_setrowstate(false, ry);
+                changed_rows_bitmask[ry / 8] &= ~(1u << (ry % 8));
             }
 
             y = y_end + 1;
         }
-        taskYIELD(); 
-
     } else {
-		
-        // FULL FRAME — ALSO ROW ALIGNED
-        for (int y = 0; y < SCREEN_H; y += max_rows_per_chunk) {
+        ESP_LOGI(TAG, "Full update");
+        for (int y = 0; y < SCREEN_H; y += rows_per_chunk) {
+            int rows = rows_per_chunk;
+            if (y + rows > SCREEN_H) rows = SCREEN_H - y;
 
-            int rows = max_rows_per_chunk;
-            if (y + rows > SCREEN_H)
-                rows = SCREEN_H - y;
-
-            uint8_t *buf = (uint8_t *)&framebuffer[y * SCREEN_W];
             uint32_t bytes = rows * row_bytes;
 
-            lcd_set_window(
-                0,
-                y,
-                SCREEN_W - 1,
-                y + rows - 1
-            );
+            lcd_set_window(0, y, SCREEN_W - 1, y + rows - 1);
 
-            gpio_set_level(LCD_DC, 1);
-
-            spi_transaction_t t = {
-                .length    = bytes * 8,
-                .tx_buffer = buf,
-                .flags     = 0
-            };
-
-            spi_device_transmit(spi, &t);
+            esp_err_t ret = lcd_data_bulk((uint8_t *)&framebuffer[y * SCREEN_W], bytes);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Full chunk y=%d failed: %s", y, esp_err_to_name(ret));
+            }
         }
-
-        dd_changedrows_bm_setallrowschanged(false);
-        
-    }//end else
-
-    //
+        mark_all_dirty(false);
     }
 
-
-
-
-
-
-
-
-
-
-
-// --------------------- DRAWING ---------------------
-  void fb_clear(uint16_t color){
-	  if (!framebuffer) return;  // or handle error
-    uint32_t c = (color<<16)|color;
-    uint32_t *p = (uint32_t*)framebuffer;
-    size_t n = (SCREEN_W*SCREEN_H)/2;
-    for (size_t i=0;i<n;i++){ p[i]=c;}
-    dd_changedrows_bm_setallrowschanged(1);
+    ESP_LOGI(TAG, "Display push complete");
 }
+// ──────────────────────────────────────────────
+// Simple init (unchanged but with error checking)
+// ──────────────────────────────────────────────
+#define lcd_c_adr_set 0x2A
+
+ void lcd_init_simple(void)
+{
+    gpio_set_level(LCD_RST, 0);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    gpio_set_level(LCD_RST, 1);
+    vTaskDelay(pdMS_TO_TICKS(120));
+
+    // Software reset
+    lcd_cmd(0x01);
+    vTaskDelay(pdMS_TO_TICKS(150));
+
+    // Sleep out
+    lcd_cmd(0x11);
+    vTaskDelay(pdMS_TO_TICKS(120));
+
+    // Color mode: 16-bit/pixel (RGB565)
+    lcd_cmd(0x3A);
+    lcd_data(0x55);  // 0x55 = 16 bits/pixel
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // Memory data access control
+    // 0x00 = Normal orientation, RGB order
+    // 0x40 = X-Mirror
+    // 0x80 = Y-Mirror  
+    // 0xC0 = X-Y-Mirror
+    lcd_cmd(0x36);
+    lcd_data(0x00);  // Try different values if display is rotated
+    
+    // ---------- CRITICAL FOR 240x320 ----------
+    // Set display resolution to 240x320
+    lcd_cmd(lcd_c_adr_set);  // Column address set 
+    lcd_data(0x00); lcd_data(0x00);      // Start column = 0
+    lcd_data(0x00); lcd_data(0xEF);      // End column = 239 (0xEF = 239)
+    
+    lcd_cmd(0x2B);  // Row address set  
+    lcd_data(0x00); lcd_data(0x00);      // Start row = 0
+    lcd_data(0x01); lcd_data(0x3F);      // End row = 319 (0x13F = 319)
+    
+    // Porch settings for 240x320
+    lcd_cmd(0xB2);  // Porch control
+    lcd_data(0x0C); lcd_data(0x0C); lcd_data(0x00);
+    lcd_data(0x33); lcd_data(0x33);
+    
+    // Gate control
+    lcd_cmd(0xB7);
+    lcd_data(0x35);  // VGH=14.22V, VGL=-7.14V
+    
+    // VCOM setting
+    lcd_cmd(0xBB);
+    lcd_data(0x1F);  // VCOM=1.775V
+    
+    // LCM control
+    lcd_cmd(0xC0);
+    lcd_data(0x2C);
+    
+    // VDV and VRH command enable
+    lcd_cmd(0xC2);
+    lcd_data(0x01);
+    
+    // VRH set
+    lcd_cmd(0xC3);
+    lcd_data(0x12);  // VRH=4.45+VCOM
+    
+    // VDV set
+    lcd_cmd(0xC4);
+    lcd_data(0x20);  // VDV=0V
+    
+    // Frame rate control
+    lcd_cmd(0xC6);
+    lcd_data(0x0F);  // 60Hz
+    
+    // Power control 1
+    lcd_cmd(0xD0);
+    lcd_data(0xA4); lcd_data(0xA1);
+    
+    // Positive gamma correction
+    lcd_cmd(0xE0);
+    lcd_data(0xD0); lcd_data(0x08); lcd_data(0x11); lcd_data(0x08);
+    lcd_data(0x0C); lcd_data(0x15); lcd_data(0x39); lcd_data(0x33);
+    lcd_data(0x50); lcd_data(0x36); lcd_data(0x13); lcd_data(0x14);
+    lcd_data(0x29); lcd_data(0x2D);
+    
+    // Negative gamma correction
+    lcd_cmd(0xE1);
+    lcd_data(0xD0); lcd_data(0x08); lcd_data(0x10); lcd_data(0x08);
+    lcd_data(0x06); lcd_data(0x06); lcd_data(0x39); lcd_data(0x44);
+    lcd_data(0x51); lcd_data(0x0B); lcd_data(0x16); lcd_data(0x14);
+    lcd_data(0x2F); lcd_data(0x31);
+    
+    // Display inversion ON (helps with colors)
+    lcd_cmd(0x21);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    
+    // Display ON
+    lcd_cmd(0x29);
+    vTaskDelay(pdMS_TO_TICKS(120));
+    
+    // Clear screen to black
+    fb_clear(0x0000);
+   framebuffer_alloc();
+    
+        lcd_fb_display_framebuffer(0, 0); //yes, we're using this specific fb push here, ebcause its the lcd  not the general other whatever the fucklery 
+    
+}
+
+// ──────────────────────────────────────────────
+// Refresh wrapper
+// ──────────────────────────────────────────────
+uint16_t fpsLimiterTarget = 30;  // ← define it here (or extern in header)
+
+void lcd_refresh_screen(void) {
+    const uint32_t FRAME_MS = 1000 / fpsLimiterTarget;
+    uint32_t frame_start = esp_log_timestamp();
+
+    lcd_fb_display_framebuffer(true, false);  // delta preferred
+
+    uint32_t frame_time = esp_log_timestamp() - frame_start;
+    if (frame_time < FRAME_MS) {
+        vTaskDelay(pdMS_TO_TICKS(FRAME_MS - frame_time));
+    }
+}
+// --------------------- DRAWING ---------------------
+
 
   void fb_rect( 
 	bool isfilled,
@@ -374,12 +359,12 @@ static void fb_display_backbuffer_chunked(void)
         for (int py = y; py < y + borderThickness; py++) {
             for (int px = x; px < x + w; px++)
                 framebuffer[py * SCREEN_W + px] = secondarycolor;
-            dd_changedrows_bm_setrowstate(true, py);
+            mark_rows_range_dirty(true, py);
         }
         for (int py = y + h - borderThickness; py < y + h; py++) {
             for (int px = x; px < x + w; px++)
                 framebuffer[py * SCREEN_W + px] = secondarycolor;
-            dd_changedrows_bm_setrowstate(true, py);
+            mark_rows_range_dirty(true, py);
         }
 
         // Left + right
@@ -388,7 +373,7 @@ static void fb_display_backbuffer_chunked(void)
                 framebuffer[py * SCREEN_W + px] = secondarycolor;
             for (int px = x + w - borderThickness; px < x + w; px++)
                 framebuffer[py * SCREEN_W + px] = secondarycolor;
-            dd_changedrows_bm_setrowstate(true, py);
+            mark_rows_range_dirty(true, py);
         }
     }
 
@@ -404,13 +389,13 @@ static void fb_display_backbuffer_chunked(void)
                 uint16_t *dst = &framebuffer[py * SCREEN_W + fx];
                 for (int i = 0; i < fw; i++)
                     dst[i] = color;
-                dd_changedrows_bm_setrowstate(true, py);
+                mark_rows_range_dirty(true, py);
             }
         }
     } else {
         // Even if hollow, rows are dirty because border touched them
         for (int py = y; py < y + h; py++)
-            dd_changedrows_bm_setrowstate(true, py);
+            mark_rows_range_dirty(true, py);
     }
 }
 
@@ -440,7 +425,7 @@ static void fb_display_backbuffer_chunked(void)
         if (e2 <= dx) { err += dx; y0 += sy; }
     }
 
-    mark_rows_dirty(miny, maxy);
+    mark_rows_range_dirty(miny, maxy);
 }
   void fb_circle(
     int cx, int cy, int r,
@@ -474,7 +459,7 @@ static void fb_display_backbuffer_chunked(void)
         }
     }
 
-    mark_rows_dirty(miny, maxy);
+    mark_rows_range_dirty(miny, maxy);
 }
   void fb_triangle(
     int x0,int y0,
@@ -523,7 +508,7 @@ static void fb_display_backbuffer_chunked(void)
         xr += dx02;
     }
 
-    mark_rows_dirty(y0, y2);
+    mark_rows_range_dirty(y0, y2);
 }
   void fb_ngon(
     int cx,int cy,int r,uint8_t sides,
@@ -574,7 +559,7 @@ static void fb_display_backbuffer_chunked(void)
                     framebuffer[y*SCREEN_W+x] = fillColor;
     }
 
-    mark_rows_dirty(miny, maxy);
+    mark_rows_range_dirty(miny, maxy);
 }
 
 
@@ -742,7 +727,8 @@ for (int s = 0; s < span_len; s++) {
 }
 
 
-mark_rows_dirty(
+
+mark_rows_range_dirty(
     py < py + uy*span_len ? py : py + uy*span_len,
     py > py + uy*span_len ? py : py + uy*span_len
 );
@@ -758,111 +744,6 @@ mark_rows_dirty(
 
 #define lcd_c_adr_set 0x2A
 
-
- void lcd_init_simple(void)
-{
-    gpio_set_level(LCD_RST, 0);
-    vTaskDelay(pdMS_TO_TICKS(20));
-    gpio_set_level(LCD_RST, 1);
-    vTaskDelay(pdMS_TO_TICKS(120));
-
-    // Software reset
-    lcd_cmd(0x01);
-    vTaskDelay(pdMS_TO_TICKS(150));
-
-    // Sleep out
-    lcd_cmd(0x11);
-    vTaskDelay(pdMS_TO_TICKS(120));
-
-    // Color mode: 16-bit/pixel (RGB565)
-    lcd_cmd(0x3A);
-    lcd_data(0x55);  // 0x55 = 16 bits/pixel
-    vTaskDelay(pdMS_TO_TICKS(10));
-
-    // Memory data access control
-    // 0x00 = Normal orientation, RGB order
-    // 0x40 = X-Mirror
-    // 0x80 = Y-Mirror  
-    // 0xC0 = X-Y-Mirror
-    lcd_cmd(0x36);
-    lcd_data(0x00);  // Try different values if display is rotated
-    
-    // ---------- CRITICAL FOR 240x320 ----------
-    // Set display resolution to 240x320
-    lcd_cmd(lcd_c_adr_set);  // Column address set 
-    lcd_data(0x00); lcd_data(0x00);      // Start column = 0
-    lcd_data(0x00); lcd_data(0xEF);      // End column = 239 (0xEF = 239)
-    
-    lcd_cmd(0x2B);  // Row address set  
-    lcd_data(0x00); lcd_data(0x00);      // Start row = 0
-    lcd_data(0x01); lcd_data(0x3F);      // End row = 319 (0x13F = 319)
-    
-    // Porch settings for 240x320
-    lcd_cmd(0xB2);  // Porch control
-    lcd_data(0x0C); lcd_data(0x0C); lcd_data(0x00);
-    lcd_data(0x33); lcd_data(0x33);
-    
-    // Gate control
-    lcd_cmd(0xB7);
-    lcd_data(0x35);  // VGH=14.22V, VGL=-7.14V
-    
-    // VCOM setting
-    lcd_cmd(0xBB);
-    lcd_data(0x1F);  // VCOM=1.775V
-    
-    // LCM control
-    lcd_cmd(0xC0);
-    lcd_data(0x2C);
-    
-    // VDV and VRH command enable
-    lcd_cmd(0xC2);
-    lcd_data(0x01);
-    
-    // VRH set
-    lcd_cmd(0xC3);
-    lcd_data(0x12);  // VRH=4.45+VCOM
-    
-    // VDV set
-    lcd_cmd(0xC4);
-    lcd_data(0x20);  // VDV=0V
-    
-    // Frame rate control
-    lcd_cmd(0xC6);
-    lcd_data(0x0F);  // 60Hz
-    
-    // Power control 1
-    lcd_cmd(0xD0);
-    lcd_data(0xA4); lcd_data(0xA1);
-    
-    // Positive gamma correction
-    lcd_cmd(0xE0);
-    lcd_data(0xD0); lcd_data(0x08); lcd_data(0x11); lcd_data(0x08);
-    lcd_data(0x0C); lcd_data(0x15); lcd_data(0x39); lcd_data(0x33);
-    lcd_data(0x50); lcd_data(0x36); lcd_data(0x13); lcd_data(0x14);
-    lcd_data(0x29); lcd_data(0x2D);
-    
-    // Negative gamma correction
-    lcd_cmd(0xE1);
-    lcd_data(0xD0); lcd_data(0x08); lcd_data(0x10); lcd_data(0x08);
-    lcd_data(0x06); lcd_data(0x06); lcd_data(0x39); lcd_data(0x44);
-    lcd_data(0x51); lcd_data(0x0B); lcd_data(0x16); lcd_data(0x14);
-    lcd_data(0x2F); lcd_data(0x31);
-    
-    // Display inversion ON (helps with colors)
-    lcd_cmd(0x21);
-    vTaskDelay(pdMS_TO_TICKS(10));
-    
-    // Display ON
-    lcd_cmd(0x29);
-    vTaskDelay(pdMS_TO_TICKS(120));
-    
-    // Clear screen to black
-    fb_clear(0x0000);
-   framebuffer_alloc();
-    
-        lcd_fb_display_framebuffer(0, 0); //yes, we're using this specific fb push here, ebcause its the lcd  not the general other whatever the fucklery 
-    
-}
 // --------------------- GLOBALS ---------------------
 uint32_t frame = 0;
 

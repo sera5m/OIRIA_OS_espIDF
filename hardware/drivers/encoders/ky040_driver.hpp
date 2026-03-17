@@ -13,7 +13,8 @@
 //here we have 1, but feel free to change later
 //i should probably use a virtual function for this
 
-#define STEP_THRESHOLD      3       // how many raw steps needed to count as 1 detent
+#define STEP_THRESHOLD      2       // how many raw steps needed to count as 1 detent
+//was 3 at one point but i'm fairly sure it's physically 2, keep it at 2
 #define ABANDON_TIMEOUT_US  550000  // 550 ms — if no progress, forget half-turn
 
 //when rotating the dials the turn often happens in one raw step, pause, then the next, because humans are slow creatures

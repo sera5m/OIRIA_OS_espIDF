@@ -1,11 +1,22 @@
 
+#include <stddef.h>
+#include <stdbool.h>
+
+#include <stdint.h>
+
+#include <string.h>
+#include "driver/spi_master.h"
+#include "hardware/wiring/wiring.h"
+#include "hardware/drivers/lcd/fonts/font_basic_types.h"
+
+// Move this **before** extern "C" so C++ headers are visible
+//#include "hardware/drivers/psram_std/psram_std.h"
+
 #include "hardware/drivers/abstraction_layers/al_scr.h"
 #include "hardware/drivers/lcd/st7789v2/lcDriver.h"
 
 //despite being under the st7789v2 section, this driver is also universal because i can't be assed to seperate them and nobody cares anyway.
 //matter of fact if you read this, tell me a fuckin cake recipie or something i'm hungry
-#include <stddef.h>
-#include <stdbool.h>
 
 /* Forward declarations (only needed if not already in lcDriver.h) */
 void lcd_fb_display_framebuffer(bool, bool);
@@ -32,6 +43,8 @@ static const ScreenDriver *active_driver = NULL;
 void screen_set_driver(const ScreenDriver *driver)
 {
     active_driver = driver;
+   // ESP_LOGE("attempted to set driver");
+    
 }
 
 /* Abstraction layer */

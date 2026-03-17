@@ -14,7 +14,7 @@ idf_component_register(
      "code_stuff/types.h"
      #drivers
      
-     
+     "hardware/drivers/psram_std/psram_std.hpp"
     			 #lcd drivers
       			 "hardware/drivers/lcd/fonts/font_basic_types.h"
       			  "hardware/drivers/lcd/fonts/font_basic_types.c"
@@ -26,6 +26,9 @@ idf_component_register(
        							#screen drivers
  				 "hardware/drivers/lcd/st7789v2/lcDriver.c"
     							"hardware/drivers/lcd/st7789v2/lcDriver.h"
+    							
+    				"hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"		
+    				"hardware/drivers/lcd/st7789v2/lcdriverAddon.cpp"		
     		#font
     				"hardware/drivers/lcd/fonts/font_avr_classics.h"
    				 "hardware/drivers/lcd/fonts/font_avr_classics.c"
@@ -34,7 +37,7 @@ idf_component_register(
    	#rotorary_encoders			 
    			"hardware/drivers/encoders/ky040_driver.cpp"
    			"hardware/drivers/encoders/ky040_driver.hpp"
-  
+  	
   
     #os code
 
@@ -60,7 +63,8 @@ idf_component_register(
         
         
 )
-
+# 
+target_compile_options(${COMPONENT_LIB} PRIVATE -fexceptions -Wno-missing-field-initializers -Wno-error=missing-field-initializers -Wno-format-truncation)
 # Switch C standard if needed
 # set(CMAKE_C_STANDARD 99)   # or 17
 # set(CMAKE_C_STANDARD_REQUIRED ON)
