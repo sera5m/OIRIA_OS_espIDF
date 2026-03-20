@@ -14,6 +14,11 @@ idf_component_register(
      "code_stuff/types.h"
      #drivers
      
+     "hardware/drivers/devices_i2c/i2cHelpers.c"
+      "hardware/drivers/devices_i2c/i2cHelpers.c"
+      
+      
+     #more extensions for this device
      "hardware/drivers/psram_std/psram_std.hpp"
     			 #lcd drivers
       			 "hardware/drivers/lcd/fonts/font_basic_types.h"

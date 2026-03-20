@@ -45,9 +45,12 @@
 #define LED_PIN GPIO_NUM_48
 //i2c pins
 //hardware known connected: max30012 hr sensor, mpu6050 gyro, 
-#define SDA_PIN GPIO_NUM_8
-#define SCL_PIN GPIO_NUM_9
+#define SDA_PIN GPIO_NUM_38
+#define SCL_PIN GPIO_NUM_39
 //if i read the data right these are also acessable by the ulp co-proscessor
+// I2C config — choose free GPIOs that don't conflict with your SPI/encoders/LCD
+//#define I2C_PORT        I2C_NUM_1     // or I2C_NUM_1 if port 0 is used elsewhere
+#define I2C_FREQ_HZ 100000       // 
 
 //other pins
 //#define IRQ 16 //notify from input devices
@@ -60,7 +63,7 @@
 #define LCD_DC GPIO_NUM_4
 #define LCD_RST GPIO_NUM_5
 #define LCD_BACKLIGHT GPIO_NUM_1 
-#define NFC_RST_PIN GPIO_NUM_15 
+//#define NFC_RST_PIN GPIO_NUM_15 
 //uhhhhhhhhhhh
 #define SD_SCK GPIO_NUM_17
 

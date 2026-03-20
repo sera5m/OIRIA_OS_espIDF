@@ -83,20 +83,10 @@ static inline void rotPointLocal(
 void Window::LocalToScreen(int lx, int ly, int& sx, int& sy)
 {
     int rx, ry;
-
-    rotPointLocal(
-        lx, ly,
-        wi_sizing.Width,
-        wi_sizing.Height,
-        wi_sizing.rotation,
-        rx, ry
-    );
-
-    sx = wi_sizing.Xpos + rx;
-    sy = wi_sizing.Ypos + ry;
+    rotPointLocal(lx, ly, wi_sizing.Width, wi_sizing.Height, wi_sizing.rotation, rx, ry);
+    sx = currentPhysX + rx;
+    sy = currentPhysY + ry;
 }
-
-
 
 // Helper function (add to MWenv.cpp or a utils header)
 static int16_t parse_int(const stdpsram::String& str, int base) {
@@ -330,201 +320,133 @@ stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& s) {
     return chunks;
 }
 
+
+
+
+// ──────────────────────────────────────────────
+// COMPLETELY REWRITTEN WinDraw() – logical origin fixed at (Posx, Posy) for ALL rotations
+// ──────────────────────────────────────────────
 void Window::WinDraw() {
-    ESP_LOGI(TAG, "WinDraw() called");
+    if (!IsWindowShown) return;
 
-    if (!IsWindowShown) {
-        ESP_LOGI(TAG, "Window hidden, skipping draw");
-        return;
-    }
+    const int rot   = wi_sizing.rotation & 3;
+    const int rawW  = wi_sizing.Width;
+    const int rawH  = wi_sizing.Height;
 
-    const int rot = wi_sizing.rotation & 3;
-    const int W = wi_sizing.Width;
-    const int H = wi_sizing.Height;
+    const int physW = (rot % 2 == 0) ? rawW : rawH;
+    const int physH = (rot % 2 == 0) ? rawH : rawW;
 
-    const int drawW = (rot % 2) ? H : W;
-    const int drawH = (rot % 2) ? W : H;
+    // === CRITICAL: logical window (0,0) must be exactly at screen (Xpos, Ypos) ===
+    int offsetX, offsetY;
+    rotPointLocal(0, 0, rawW, rawH, rot, offsetX, offsetY);
 
-    ESP_LOGI(TAG, "Rotation=%d RawW=%d RawH=%d DrawW=%d DrawH=%d",
-             rot, W, H, drawW, drawH);
+    int physX = wi_sizing.Xpos - offsetX;
+    int physY = wi_sizing.Ypos - offsetY;
 
-    const fontcharsize font_glyph_size = font6x8;
+    // Clamp to screen (change these to your real screen size)
+    const int screenW = 240;
+    const int screenH = 320;
+    physX = std::max(0, std::min(physX, screenW - physW));
+    physY = std::max(0, std::min(physY, screenH - physH));
 
-    // Background
-    fb_rect(true, 0,
-            wi_sizing.Xpos, wi_sizing.Ypos,
-            drawW, drawH,
-            win_internal_color_background,
-            win_internal_color_border);
+    ESP_LOGI(TAG, "WinDraw rot=%d | logical(%dx%d) @ (%d,%d) → phys(%d,%d %dx%d)",
+             rot, rawW, rawH, wi_sizing.Xpos, wi_sizing.Ypos, physX, physY, physW, physH);
+
+    // === Draw background + single border (this fixes the double-line bug) ===
+    fb_rect(true,  0, physX, physY, physW, physH,
+            win_internal_color_background, win_internal_color_border);
 
     if (!Currentcfg.borderless) {
-        fb_rect(false, 1,
-                wi_sizing.Xpos, wi_sizing.Ypos,
-                drawW, drawH,
-                0x0000,
-                win_internal_color_border);
+        fb_rect(false, 1, physX, physY, physW, physH, 0x0000, win_internal_color_border);
     }
 
-    // Use the CLASS-LEVEL Texstate (no local redefinition!)
-    TextState state;
-    state.color = win_internal_color_text;
-    state.size  = Currentcfg.TextSizeMult;
+    // === Text rendering (unchanged, uses same rotation math) ===
+    if (!isTokenized) {
+        cachedChunks = tokenize(content);
+        isTokenized = true;
+    }
 
-    ESP_LOGI(TAG, "Initial text state: color=%u size=%u",
-             state.color, state.size);
+    Tstate.color         = win_internal_color_text;
+    Tstate.size          = Currentcfg.TextSizeMult;
+    Tstate.underline     = false;
+    Tstate.strikethrough = false;
+    Tstate.bold          = false;
+    Tstate.italic        = false;
+    Tstate.highlight_bg  = 0;
+
+    const int text_rot_flag = rot * 4;
+    fontcharsize font_glyph_size = font6x8;
 
     int curLX = 2;
     int curLY = 2;
+    uint8_t last_line_height = Currentcfg.TextSizeMult;
 
-    ESP_LOGD(TAG, "Initial cursor position: %d,%d", curLX, curLY);
-
-    uint8_t last_line_height_mult = state.size;
-    uint8_t max_size_this_line = state.size;
-
-    // Tokenize if needed
-    if (!isTokenized) {
-        ESP_LOGI(TAG, "Tokenizing content...");
-        cachedChunks = tokenize(content);
-        isTokenized = true;
-        ESP_LOGI(TAG, "Tokenization complete. chunk_count=%zu", cachedChunks.size());
-        
-    }
-
-    auto& chunks = cachedChunks;
-
-    // Rest of your loop unchanged...
-    // (just make sure it uses state.highlight_bg, state.bold, etc. — now they exist)
-    
-    for (size_t idx = 0; idx < cachedChunks.size(); ++idx) {
-        const auto& chunk = cachedChunks[idx];
-
-        ESP_LOGD(TAG, "Chunk %zu: kind=%d", idx, (int)chunk.kind);
-
+    for (const auto& chunk : cachedChunks) {
         switch (chunk.kind) {
         case TagType::PlainText: {
-            const stdpsram::String& txt = std::get<stdpsram::String>(chunk.content);
+            const auto& txt = std::get<stdpsram::String>(chunk.content);
+            if (txt.empty()) break;
 
-            if (txt.empty()) {
-                ESP_LOGD(TAG, "Empty text → skip");
-                continue;
-            }
+            int rx, ry;
+            rotPointLocal(curLX, curLY, rawW, rawH, rot, rx, ry);
+            int sx = physX + rx;
+            int sy = physY + ry;
 
-            int screenX, screenY;
-            LocalToScreen(curLX, curLY, screenX, screenY);
+            
 
-            // Clamp to visible area
-            if (screenX >= drawW || screenY >= drawH || screenX < -100 || screenY < -100) {
-                ESP_LOGW(TAG, "Text off-screen: (%d,%d) → skip", screenX, screenY);
-                curLX += txt.length() * font_glyph_size.x * state.size;  // still advance
-                continue;
-            }
+            fb_draw_ptext(text_rot_flag, 
+            sx, sy, txt, Tstate.color, Tstate.size,
+            
+                          avrclassic_font6x8, 12, Tstate.highlight_bg, win_internal_color_background, 999, font_glyph_size); //i don't think i'm using the highlight command right
 
-            ESP_LOGD(TAG, "Draw text '%s' @ screen(%d,%d) size=%d color=0x%04x",
-                     txt.c_str(), screenX, screenY, state.size, state.color);
-
-            // Highlight background if active
-            if (state.highlight_bg != 0) {
-                int bg_w = txt.length() * font_glyph_size.x * state.size;
-                int bg_h = font_glyph_size.y * state.size;
-                fb_rect(true, 0,
-                        screenX, screenY,
-                        bg_w, bg_h,
-                        state.highlight_bg, state.highlight_bg);
-            }
-			ESP_LOGI(TAG, "TEXT CHUNK: '%s'", txt.c_str());
-            fb_draw_ptext(
-                0, //issue noted, text does not render if at positions other than 0
-                screenX, screenY,
-              // 25,25,
-                txt, 
-                state.color,
-                state.size,
-                avrclassic_font6x8,
-                0,
-                false,
-                win_internal_color_background,
-                999,  // large enough to not wrap unless needed
-                font_glyph_size
-            );
-
-            // Advance cursor
-            int advance = txt.length() * font_glyph_size.x * state.size;
-            curLX += advance;
-
-            if (state.size > max_size_this_line) max_size_this_line = state.size;
-            last_line_height_mult = state.size;
-
-            // Simple wrap (can be improved)
-            if (curLX >= drawW - 20) {
+            curLX += txt.length() * font_glyph_size.x * Tstate.size;
+            if (curLX >= rawW - 4) {
                 curLX = 2;
-                curLY += font_glyph_size.y * last_line_height_mult + 2;
-                max_size_this_line = state.size;
+                curLY += font_glyph_size.y * last_line_height + 4;
             }
-
+            last_line_height = Tstate.size;
             break;
         }
 
         case TagType::LineBreak:
             curLX = 2;
-            curLY += font_glyph_size.y * last_line_height_mult + 2;
-            max_size_this_line = state.size;
-            ESP_LOGD(TAG, "Line break → cursor %d,%d", curLX, curLY);
+            curLY += font_glyph_size.y * last_line_height + 4;
             break;
 
         case TagType::PosChange: {
-            auto pos = std::get<PosTag>(chunk.content);
-            curLX = pos.x;
-            curLY = pos.y;
-            ESP_LOGD(TAG, "Pos → %d,%d", curLX, curLY);
+            auto p = std::get<PosTag>(chunk.content);
+            curLX = p.x; curLY = p.y;
             break;
         }
 
-        case TagType::ColorChange:
-            state.color = std::get<ColorTag>(chunk.content).value;
-            ESP_LOGD(TAG, "Color → 0x%04x", state.color);
-            break;
-
+        case TagType::ColorChange:   Tstate.color = std::get<ColorTag>(chunk.content).value; break;
         case TagType::SizeChange: {
-            int sz = std::get<SizeTag>(chunk.content).value;
-            if (sz >= 1 && sz <= 16) {  // reasonable limit
-                state.size = sz;
-                ESP_LOGD(TAG, "Size → %d", state.size);
-            }
+            int s = std::get<SizeTag>(chunk.content).value;
+            if (s >= 1 && s <= 16) Tstate.size = s;
             break;
         }
-
         case TagType::HighlightChange: {
-            auto hl = std::get<HighlighterTag>(chunk.content);
-            state.highlight_bg = hl.enabled ? hl.color : 0;
-            ESP_LOGD(TAG, "Highlight %s color=0x%04x", hl.enabled ? "ON" : "OFF", hl.color);
+            auto h = std::get<HighlighterTag>(chunk.content);
+            Tstate.highlight_bg = h.enabled ? h.color : 0;
             break;
         }
-
-        // Toggles (simple)
-        case TagType::UnderlineToggle:   state.underline = true;    ESP_LOGD(TAG, "Underline ON"); break;
-        case TagType::UnderlineOff:      state.underline = false;   ESP_LOGD(TAG, "Underline OFF"); break;
-        case TagType::StrikethroughToggle: state.strikethrough = true;  ESP_LOGD(TAG, "Strike ON"); break;
-        case TagType::StrikethroughOff:  state.strikethrough = false;   ESP_LOGD(TAG, "Strike OFF"); break;
-        case TagType::BoldToggle:        state.bold = true;         ESP_LOGD(TAG, "Bold ON"); break;
-        case TagType::BoldOff:           state.bold = false;        ESP_LOGD(TAG, "Bold OFF"); break;
-        case TagType::ItalicToggle:      state.italic = true;       ESP_LOGD(TAG, "Italic ON"); break;
-        case TagType::ItalicOff:         state.italic = false;      ESP_LOGD(TAG, "Italic OFF"); break;
-
-        default:
-            ESP_LOGW(TAG, "Unknown tag type: %d", (int)chunk.kind);
-            break;
+        case TagType::UnderlineToggle:    Tstate.underline = true;  break;
+        case TagType::UnderlineOff:       Tstate.underline = false; break;
+        case TagType::StrikethroughToggle:Tstate.strikethrough = true;  break;
+        case TagType::StrikethroughOff:   Tstate.strikethrough = false; break;
+        case TagType::BoldToggle:         Tstate.bold = true; break;
+        case TagType::BoldOff:            Tstate.bold = false; break;
+        case TagType::ItalicToggle:       Tstate.italic = true; break;
+        case TagType::ItalicOff:          Tstate.italic = false; break;
+        default: break;
         }
     }
 
+    currentPhysX = physX;
+    currentPhysY = physY;
     dirty = false;
     lastUpdateTime = esp_timer_get_time();
-
-    ESP_LOGI(TAG, "WinDraw complete - %zu chunks processed", cachedChunks.size());
 }
-
-
-
-
 
 //guess who found out she needed to do this a lot after making the window system and working on other drivers
 //i swear to god bruh

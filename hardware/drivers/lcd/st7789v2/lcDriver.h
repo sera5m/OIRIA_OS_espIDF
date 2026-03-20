@@ -44,7 +44,7 @@ extern "C" {
 #define CHUNK_SIZE (4096)  // max DMA buffer — we'll use smaller effective chunks
 #endif
 
-extern spi_device_handle_t spi;           // from main – must be SPI2_HOST for LCD
+extern spi_device_handle_t spi_lcd;           // from main – must be SPI2_HOST for LCD
 extern uint16_t *framebuffer;
 // --------------------- ENUMS ---------------------
 typedef enum {
@@ -82,6 +82,7 @@ typedef enum {
 void framebuffer_alloc(void);
 void fb_clear(uint16_t color);
 void lcd_init_simple(void);
+void lcd_init_angry(void);
 void lcd_refresh_screen(void);              // renamed for clarity
 
 // --------------------- DISPLAY ---------------------

@@ -315,8 +315,13 @@ struct TextState {
     bool     italic        = false;        // ← add
     uint16_t highlight_bg  = 0;            // ← add
 };
-    
+TextState Tstate ; //new var should default to defaults
+
+
+
     public:
+    uint16_t currentPhysX = 0;
+uint16_t currentPhysY = 0;
     
     // One tokenize – takes the native type
     stdpsram::Vector<TextChunk> tokenize(const stdpsram::String& s);

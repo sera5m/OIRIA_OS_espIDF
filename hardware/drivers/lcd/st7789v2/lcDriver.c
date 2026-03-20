@@ -67,17 +67,39 @@ void framebuffer_alloc(void) {
     if (allocated) return;
 
     size_t sz = SCREEN_W * SCREEN_H * sizeof(uint16_t);
-    ESP_LOGI(TAG, "Alloc FB: %u bytes (%.1f KiB)", sz, sz / 1024.0f);
 
-    framebuffer = heap_caps_malloc(sz, MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG, "Allocating framebuffer: %u bytes (%.1f KiB)", sz, sz / 1024.0f);
+
+    // ────────────────────────────────────────────────────────
+    // This is the only line that actually needed fixing
+    framebuffer = (uint16_t*) heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+    // ────────────────────────────────────────────────────────
+
     if (!framebuffer) {
-        ESP_LOGE(TAG, "FB alloc failed!");
+        ESP_LOGE(TAG, "Framebuffer allocation failed! (PSRAM requested)");
+        allocated = false;
         return;
     }
 
-    fb_clear(0x0000);
+    ESP_LOGI(TAG, "Framebuffer allocated at %p", framebuffer);
+    ESP_LOGI(TAG, "Is in PSRAM? %s",
+             esp_ptr_external_ram(framebuffer) ? "YES" : "NO");
+
+    if (!esp_ptr_external_ram(framebuffer)) {
+        ESP_LOGE(TAG, "!!! WARNING: Framebuffer ended up in internal SRAM !!!");
+        // Optional: free it here if you want to fail loudly
+        // heap_caps_free(framebuffer);
+        // framebuffer = NULL;
+        // return;
+    }
+
     allocated = true;
+
+    vTaskDelay(pdMS_TO_TICKS(10));  // keep if you feel it's needed
+    // fb_clear(0x0000);           // commented as before
 }
+
+
 
 void fb_clear(uint16_t color) {
     if (!framebuffer) return;
@@ -100,7 +122,7 @@ static esp_err_t lcd_cmd(uint8_t cmd) {
         .tx_data = {cmd}
     };
     gpio_set_level(LCD_DC, 0);
-    esp_err_t ret = spi_device_polling_transmit(spi, &t);
+    esp_err_t ret = spi_device_polling_transmit(spi_lcd, &t);
     if (ret != ESP_OK) ESP_LOGE(TAG, "lcd_cmd(0x%02x) failed: %s", cmd, esp_err_to_name(ret));
     return ret;
 }
@@ -112,7 +134,7 @@ static esp_err_t lcd_data(uint8_t data) {
         .tx_data = {data}
     };
     gpio_set_level(LCD_DC, 1);
-    esp_err_t ret = spi_device_polling_transmit(spi, &t);
+    esp_err_t ret = spi_device_polling_transmit(spi_lcd, &t);
     if (ret != ESP_OK) ESP_LOGE(TAG, "lcd_data(0x%02x) failed: %s", data, esp_err_to_name(ret));
     return ret;
 }
@@ -124,7 +146,7 @@ static esp_err_t lcd_data_bulk(const void *data, size_t len) {
         .tx_buffer = data
     };
     gpio_set_level(LCD_DC, 1);
-    esp_err_t ret = spi_device_polling_transmit(spi, &t);
+    esp_err_t ret = spi_device_polling_transmit(spi_lcd, &t);
     if (ret != ESP_OK) ESP_LOGE(TAG, "lcd_data_bulk(%u bytes) failed: %s", (unsigned)len, esp_err_to_name(ret));
     return ret;
 }
@@ -150,7 +172,11 @@ static void lcd_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
 // ──────────────────────────────────────────────
 // Safe framebuffer display (chunked)
 // ──────────────────────────────────────────────
+
 void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
+    if(!framebuffer){
+        ESP_LOGE(TAG, "FRAMEBUFFER ISN'T ALLOCATED YET DUMBFUCK");
+    }else{
     ESP_LOGI(TAG, "Display FB: delta=%d cope=%d", only_delta, cope_mode);
 
     const uint32_t row_bytes = SCREEN_W * 2;
@@ -206,6 +232,7 @@ void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
 
     ESP_LOGI(TAG, "Display push complete");
 }
+}
 // ──────────────────────────────────────────────
 // Simple init (unchanged but with error checking)
 // ──────────────────────────────────────────────
@@ -213,6 +240,7 @@ void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
 
  void lcd_init_simple(void)
 {
+    ESP_LOGI(TAG, "readying lcd init and setting gipo");
     gpio_set_level(LCD_RST, 0);
     vTaskDelay(pdMS_TO_TICKS(20));
     gpio_set_level(LCD_RST, 1);
@@ -225,6 +253,7 @@ void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
     // Sleep out
     lcd_cmd(0x11);
     vTaskDelay(pdMS_TO_TICKS(120));
+    ESP_LOGI(TAG, "setting up color modes");
 
     // Color mode: 16-bit/pixel (RGB565)
     lcd_cmd(0x3A);
@@ -238,7 +267,7 @@ void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
     // 0xC0 = X-Y-Mirror
     lcd_cmd(0x36);
     lcd_data(0x00);  // Try different values if display is rotated
-    
+    ESP_LOGI(TAG, "column and row addr set and porch");
     // ---------- CRITICAL FOR 240x320 ----------
     // Set display resolution to 240x320
     lcd_cmd(lcd_c_adr_set);  // Column address set 
@@ -309,13 +338,118 @@ void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
     vTaskDelay(pdMS_TO_TICKS(120));
     
     // Clear screen to black
-    fb_clear(0x0000);
-   framebuffer_alloc();
+    //fb_clear(0x0000);
+  // framebuffer_alloc();
     
-        lcd_fb_display_framebuffer(0, 0); //yes, we're using this specific fb push here, ebcause its the lcd  not the general other whatever the fucklery 
-    
+      //  lcd_fb_display_framebuffer(0, 0); //yes, we're using this specific fb push here, ebcause its the lcd  not the general other whatever the fucklery 
+      ESP_LOGI(TAG, "done");
 }
+void lcd_init_angry(void)
+{
+    ESP_LOGI(TAG, "readying lcd init and setting gipo");
+    gpio_set_level(LCD_RST, 0);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    gpio_set_level(LCD_RST, 1);
+    vTaskDelay(pdMS_TO_TICKS(120));
 
+    // Software reset
+    lcd_cmd(0x01);
+    vTaskDelay(pdMS_TO_TICKS(150));
+
+    // Sleep out
+    lcd_cmd(0x11);
+    vTaskDelay(pdMS_TO_TICKS(120));
+    ESP_LOGI(TAG, "setting up color modes");
+
+    // Color mode: 16-bit/pixel (RGB565)
+    lcd_cmd(0x3A);
+    lcd_data(0x55);  // 0x55 = 16 bits/pixel
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // Memory data access control
+    // 0x00 = Normal orientation, RGB order
+    // 0x40 = X-Mirror
+    // 0x80 = Y-Mirror  
+    // 0xC0 = X-Y-Mirror
+    lcd_cmd(0x36);
+    lcd_data(0x00);  // Try different values if display is rotated
+    ESP_LOGI(TAG, "column and row addr set and porch");
+    // ---------- CRITICAL FOR 240x320 ----------
+    // Set display resolution to 240x320
+    lcd_cmd(lcd_c_adr_set);  // Column address set 
+    lcd_data(0x00); lcd_data(0x00);      // Start column = 0
+    lcd_data(0x00); lcd_data(0xEF);      // End column = 239 (0xEF = 239)
+    
+    lcd_cmd(0x2B);  // Row address set  
+    lcd_data(0x00); lcd_data(0x00);      // Start row = 0
+    lcd_data(0x01); lcd_data(0x3F);      // End row = 319 (0x13F = 319)
+    
+    // Porch settings for 240x320
+    lcd_cmd(0xB2);  // Porch control
+    lcd_data(0x0C); lcd_data(0x0C); lcd_data(0x00);
+    lcd_data(0x33); lcd_data(0x33);
+    
+    // Gate control
+    lcd_cmd(0xB7);
+    lcd_data(0x35);  // VGH=14.22V, VGL=-7.14V
+    
+    // VCOM setting
+    lcd_cmd(0xBB);
+    lcd_data(0x1F);  // VCOM=1.775V
+    
+    // LCM control
+    lcd_cmd(0xC0);
+    lcd_data(0x2C);
+    
+    // VDV and VRH command enable
+    lcd_cmd(0xC2);
+    lcd_data(0x01);
+    
+    // VRH set
+    lcd_cmd(0xC3);
+    lcd_data(0x12);  // VRH=4.45+VCOM
+    
+    // VDV set
+    lcd_cmd(0xC4);
+    lcd_data(0x20);  // VDV=0V
+    
+    // Frame rate control
+    lcd_cmd(0xC6);
+    lcd_data(0x0F);  // 60Hz
+    
+    // Power control 1
+    lcd_cmd(0xD0);
+    lcd_data(0xA4); lcd_data(0xA1);
+    
+    // Positive gamma correction
+    lcd_cmd(0xE0);
+    lcd_data(0xD0); lcd_data(0x08); lcd_data(0x11); lcd_data(0x08);
+    lcd_data(0x0C); lcd_data(0x15); lcd_data(0x39); lcd_data(0x33);
+    lcd_data(0x50); lcd_data(0x36); lcd_data(0x13); lcd_data(0x14);
+    lcd_data(0x29); lcd_data(0x2D);
+    
+    // Negative gamma correction
+    lcd_cmd(0xE1);
+    lcd_data(0xD0); lcd_data(0x08); lcd_data(0x10); lcd_data(0x08);
+    lcd_data(0x06); lcd_data(0x06); lcd_data(0x39); lcd_data(0x44);
+    lcd_data(0x51); lcd_data(0x0B); lcd_data(0x16); lcd_data(0x14);
+    lcd_data(0x2F); lcd_data(0x31);
+    
+    // Display inversion ON (helps with colors)
+    lcd_cmd(0x21);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    
+    // Display ON
+    lcd_cmd(0x29);
+    vTaskDelay(pdMS_TO_TICKS(120));
+    
+    // Clear screen to black
+    //fb_clear(0x0000);
+  // framebuffer_alloc();
+    
+      //  lcd_fb_display_framebuffer(0, 0); //yes, we're using this specific fb push here, ebcause its the lcd  not the general other whatever the fucklery 
+      ESP_LOGI(TAG, "done");
+}
 // ──────────────────────────────────────────────
 // Refresh wrapper
 // ──────────────────────────────────────────────
