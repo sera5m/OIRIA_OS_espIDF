@@ -65,7 +65,7 @@ idf_component_register(
         esp_http_server
         esp_psram
         esp_timer
-        
+        esp_driver_i2c
         
 )
 # 

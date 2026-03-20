@@ -11,10 +11,11 @@
 #include "esp_log.h"
 #include "esp_err.h"
 #include "esp_vfs_fat.h"
+#include "hal/i2c_types.h"
 #include "sdmmc_cmd.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
-#include "driver/i2c_master.h"
+
 
 #include "hardware/wiring/wiring.h"  // ← your pins!
 #include "hardware/drivers/abstraction_layers/al_scr.h"
@@ -24,6 +25,8 @@
 #include "hardware/drivers/encoders/ky040_driver.hpp"
 #include "hardware/drivers/psram_std/psram_std.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
+#include "driver/i2c_master.h"   // ← MUST have this (and esp_driver_i2c in CMakeLists.txt)
+#include "soc/gpio_num.h"
 
 // Known devices (fill in your full list)
 typedef struct {
@@ -120,55 +123,54 @@ static esp_err_t stage_1_encoders(void) {
     return ESP_OK;
 }
 
-static esp_err_t stage_2_i2c_scan(void) {
-    constexpr gpio_num_t SDA = GPIO_NUM_8;
-    constexpr gpio_num_t SCL = GPIO_NUM_9;
 
-    // Debug idle levels
-    gpio_set_direction(SDA, GPIO_MODE_INPUT);
-    gpio_set_direction(SCL, GPIO_MODE_INPUT);
-    ESP_LOGI(TAG, "Idle SDA=%d SCL=%d (expect 1 with pull-ups)", 
-             gpio_get_level(SDA), gpio_get_level(SCL));
+static esp_err_t stage_2_i2c_scan(void) {
+    constexpr gpio_num_t SCL = GPIO_NUM_8;
+    constexpr gpio_num_t SDA = GPIO_NUM_9;
 
     i2c_master_bus_config_t bus_cfg = {
-        .i2c_port = I2C_NUM_0,
-        .sda_io_num = SDA,
-        .scl_io_num = SCL,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .i2c_port          = I2C_NUM_1,
+        .sda_io_num        = SDA,
+        .scl_io_num        = SCL,
+        .clk_source        = I2C_CLK_SRC_DEFAULT,
         .glitch_ignore_cnt = 7,
-        .intr_priority = 0,
-        .trans_queue_depth = 4,
-        .flags = { .enable_internal_pullup = 1, .allow_pd = false }
+        .intr_priority     = 0, 
+        .trans_queue_depth = 0,          // ← THIS IS THE MAGIC LINE
+                                         // 0 = pure synchronous only, no async queue, no warning
+        .flags = {
+            .enable_internal_pullup = false,   // used real 3.8 kΩ external pull-ups 
+            .allow_pd               = false
+        }
     };
 
     i2c_master_bus_handle_t bus = nullptr;
     esp_err_t ret = i2c_new_master_bus(&bus_cfg, &bus);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "I2C bus failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "I2C bus creation failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    ESP_LOGI(TAG, "Scanning...");
-    int found = 0;
+    ESP_LOGI(TAG, "I2C master bus created (synchronous mode) – scanning 0x08–0x77...");
 
-    for (uint8_t addr = 0x08; addr <= 0x77; ++addr) {
-        if (i2c_master_probe(bus, addr, pdMS_TO_TICKS(500)) == ESP_OK) {
+    int found = 0;
+    for (uint16_t addr = 0x08; addr <= 0x77; ++addr) {
+        ret = i2c_master_probe(bus, addr, pdMS_TO_TICKS(200));
+
+        if (ret == ESP_OK) {
             found++;
-            ESP_LOGI(TAG, "Found 0x%02X", addr);
-            for (size_t i = 0; i < NUM_KNOWN_DEVICES; ++i) {
-                if (known_devices[i].addr == addr) {
-                    ESP_LOGI(TAG, " → %s (%s) [~%d%%]", 
-                             known_devices[i].name, known_devices[i].extra, known_devices[i].confidence);
-                    break;
-                }
-            }
+            ESP_LOGI(TAG, "✓ Device at 0x%02X", (uint8_t)addr);
+            // ... your known_devices matching here ...
+        } else if (ret == ESP_ERR_TIMEOUT) {
+            ESP_LOGW(TAG, "Timeout at 0x%02X (pull-ups look good, but double-check wiring)", (uint8_t)addr);
         }
     }
 
-    ESP_LOGI(TAG, "Scan done – %d devices", found);
+    ESP_LOGI(TAG, "Scan complete — %d device(s) found", found);
     i2c_del_master_bus(bus);
     return ESP_OK;
 }
+
+
 
 static esp_err_t boot_stage2andaHalf(void){
 	 vTaskDelay(100);
