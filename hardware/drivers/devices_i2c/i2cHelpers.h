@@ -16,7 +16,7 @@ typedef struct {
     int confidence;         // 0-100, arbitrary
 } i2c_device_info_t;
 
-static const i2c_device_info_t known_devices[];
+//static const i2c_device_info_t known_devices[];
 
 
 

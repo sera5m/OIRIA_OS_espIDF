@@ -36,14 +36,222 @@
 // Custom allocator for std::string that prefers PSRAM
 #include "esp_log.h"
 
-static const char* TAG = "WindowDraw";
+
+static const char *TAG = "MWenv"; 
+
+
+//backgroundfill will use a seperate small buffer to avoid regenerating complex patterns or images, fortunately it's smaller than the actual screen size, and loops, so we'll just render one tile and translate it from position a to b in memory
+//i think we'll have to transfer the blocks over to the adjacent position in memory, therefore redrawing it over text
+//i'll have to account for text rotation, and store this in psram as bitmap segments
+//i hate to do this but i'll encapsulate the background tile in an object
+
+PsramBackgroundTile::PsramBackgroundTile(uint16_t tileSizeX, uint16_t tileSizeY) {
+    if (allocated) return;
+
+    pbt_cfg.tileSize_x = tileSizeX;
+    pbt_cfg.tileSize_y = tileSizeY;
+
+    size_t sz = (size_t)tileSizeX * tileSizeY * sizeof(uint16_t);
+    ESP_LOGI("PsramBG", "Allocating %u×%u tile (%u bytes)", tileSizeX, tileSizeY, sz);
+
+    pseudoframebuffer = (uint16_t*)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+
+    if (pseudoframebuffer) {
+        allocated = true;
+        ESP_LOGI("PsramBG", "PSRAM tile allocated at %p", pseudoframebuffer);
+    } else {
+        ESP_LOGE("PsramBG", "Failed to allocate background tile!");
+    }
+}
+
+PsramBackgroundTile::~PsramBackgroundTile() {
+    if (pseudoframebuffer) {
+        heap_caps_free(pseudoframebuffer);
+        pseudoframebuffer = nullptr;
+        allocated = false;
+    }
+}
+
+void PsramBackgroundTile::generate_pattern(BgFillType type, uint16_t primary, uint16_t secondary) {
+    if (!allocated || !pseudoframebuffer) return;
+
+    primaryColor = primary;
+    secondaryColor = secondary;
+    uint16_t* bmp = pseudoframebuffer;
+    const uint16_t SX = pbt_cfg.tileSize_x;
+    const uint16_t SY = pbt_cfg.tileSize_y;
+    //type=BgFillType::waves;
+    ESP_LOGE("PsramBG", "colors %u %u", primary, secondary);
+
+    switch (type) {
+
+        case BgFillType::Solid:
+            for (uint16_t i = 0; i < SX * SY; ++i) 
+                bmp[i] = primary;
+            break;
+
+        case BgFillType::GradientVertical:
+            for (uint16_t y = 0; y < SY; ++y) {
+                uint16_t c = primary + ((secondary - primary) * y) / (SY - 1);
+                for (uint16_t x = 0; x < SX; ++x) 
+                    bmp[y * SX + x] = c;
+            }
+            break;
+
+        case BgFillType::GradientHorizontal:
+            for (uint16_t y = 0; y < SY; ++y)
+                for (uint16_t x = 0; x < SX; ++x) {
+                    uint16_t c = primary + ((secondary - primary) * x) / (SX - 1);
+                    bmp[y * SX + x] = c;
+                }
+            break;
+
+        case BgFillType::Checkerboard:
+            for (uint16_t y = 0; y < SY; ++y)
+                for (uint16_t x = 0; x < SX; ++x)
+                    bmp[y * SX + x] = ((x / 4 + y / 4) % 2 == 0) ? primary : secondary;
+            break;
+
+        case BgFillType::Noise:
+            for (uint16_t i = 0; i < SX * SY; ++i)
+                bmp[i] = (rand() & 1) ? primary : secondary;
+            break;
+
+        case BgFillType::Diagonal_lines:
+            for (uint16_t y = 0; y < SY; ++y)
+                for (uint16_t x = 0; x < SX; ++x)
+                    bmp[y * SX + x] = ((x + y) % 8 < 4) ? primary : secondary;
+            break;
+
+        case BgFillType::Transparent:
+            // Leave untouched (useful when you want to keep previous content 
+            // or draw on top of another layer)
+            break;
+
+        case BgFillType::waves: //WARNING NOT EFFICIENT I THINK
+        for (uint16_t y = 0; y < SY; ++y) {
+            for (uint16_t x = 0; x < SX; ++x) {
+        
+                float t = (float)x * 0.19635f; // ~2π / 32
+                int y_center = (int)(sinf(t) * 8 + 16);
+        
+                if (abs((int)y - y_center) <= 2)
+                    bmp[y * SX + x] = secondary;
+                else
+                    bmp[y * SX + x] = primary;
+            }
+        }
+            break;
+
+        case BgFillType::triangles:
+            for (uint16_t y = 0; y < SY; ++y)
+                for (uint16_t x = 0; x < SX; ++x) {
+                    // Simple repeating triangle / diagonal stripe pattern
+                    int val = (x + y) % 16;
+                    bmp[y * SX + x] = (val < 8) ? primary : secondary;
+                }
+            break;
+
+        case BgFillType::dots:
+            for (uint16_t y = 0; y < SY; ++y)
+                for (uint16_t x = 0; x < SX; ++x) {
+                    // Small dot pattern (every 4 pixels)
+                    bool is_dot = ((x % 4 == 0) && (y % 4 == 0));
+                    bmp[y * SX + x] = is_dot ? primary : secondary;
+                }
+            break;
+
+        case BgFillType::count:
+            // Should never reach here - added for completeness
+            ESP_LOGW("PsramBG", "BgFillType::count should not be used as a pattern");
+            [[fallthrough]];
+
+        default:
+            ESP_LOGW("PsramBG", "Unknown pattern %d – using Solid", (int)type);
+            for (uint16_t i = 0; i < SX * SY; ++i) 
+                bmp[i] = primary;
+            break;
+    }
+}
+
+
+void Window::setupBackgroundTile() {
+    if (!bgTile) {
+        bgTile = std::make_shared<PsramBackgroundTile>(32, 32);
+    }
+
+    bgTile->pbt_cfg.fill_type = win_backgroundpattern;
+    bgTile->generate_pattern(win_backgroundpattern, bgPrimaryColor, bgSecondaryColor);
+
+    ESP_LOGI(TAG, "Background tile generated: pattern %d, primary=0x%04X, secondary=0x%04X",
+             (int)win_backgroundpattern, bgPrimaryColor, bgSecondaryColor);
+}
+
+// Helper – copies one tile into the framebuffer with rotation
+static void blit_tile(                 // renamed for clarity
+    uint16_t targetX, uint16_t targetY,
+    uint16_t* framebuffer,
+    uint16_t* tileBuffer,
+    uint16_t tileW, uint16_t tileH)
+{
+    for (uint16_t ty = 0; ty < tileH; ++ty) {
+        for (uint16_t tx = 0; tx < tileW; ++tx) {
+            int sx = targetX + tx;
+            int sy = targetY + ty;
+
+            if (sx < 0 || sy < 0 || sx >= SCREEN_W || sy >= SCREEN_H)
+                continue;
+
+            uint16_t color = tileBuffer[ty * tileW + tx];
+            framebuffer[sy * SCREEN_W + sx] = color;
+        }
+    }
+}
+ //pushes origin buffer to target framebuffer at position xy with rotation
+//rot quadrant is the cartesian quadrant the tile is meant to be rotated into when placed. typically just follows the window
+//start x is rotated by rot quadrant before it begins
+
+static void blit_tile_clipped(
+    uint16_t targetX, uint16_t targetY,           // where the tile top-left would go on screen
+    uint16_t clipX,   uint16_t clipY,
+    uint16_t clipW,   uint16_t clipH,             // window's physical bounding box
+    uint16_t* framebuffer,
+    uint16_t* tileBuffer,
+    uint16_t tileW,   uint16_t tileH)
+{
+    // Compute overlapping rectangle between the placed tile and the window clip area
+    int left   = std::max(static_cast<int>(targetX), static_cast<int>(clipX));
+    int top    = std::max(static_cast<int>(targetY), static_cast<int>(clipY));
+    int right  = std::min(static_cast<int>(targetX + tileW), static_cast<int>(clipX + clipW));
+    int bottom = std::min(static_cast<int>(targetY + tileH), static_cast<int>(clipY + clipH));
+
+    if (left >= right || top >= bottom) return;
+
+    uint16_t src_x = left - targetX;
+    uint16_t src_y = top  - targetY;
+    uint16_t copy_w = right - left;
+    uint16_t copy_h = bottom - top;
+
+    for (uint16_t dy = 0; dy < copy_h; ++dy) {
+        for (uint16_t dx = 0; dx < copy_w; ++dx) {
+            int sx = left + dx;
+            int sy = top + dy;
+
+            // still respect screen edges
+            if (sx < 0 || sy < 0 || sx >= SCREEN_W || sy >= SCREEN_H) continue;
+
+            uint16_t color = tileBuffer[(src_y + dy) * tileW + (src_x + dx)];
+            framebuffer[sy * SCREEN_W + sx] = color;
+        }
+    }
+}
+
 
 Window::Window(const WindowCfg& cfg, const std::string& initialContent)
     : content(stdpsram::String(initialContent.begin(), initialContent.end())),
       Initialcfg(cfg),
       Currentcfg(cfg)
 {
-	
     // Make sure name is null-terminated
     Currentcfg.name[sizeof(Currentcfg.name) - 1] = '\0';
 
@@ -52,18 +260,26 @@ Window::Window(const WindowCfg& cfg, const std::string& initialContent)
     wi_sizing.Ypos   = Currentcfg.Posy;
     wi_sizing.Width  = Currentcfg.win_width;
     wi_sizing.Height = Currentcfg.win_height;
-	wi_sizing.rotation=Currentcfg.win_rotation;
+    wi_sizing.rotation = Currentcfg.win_rotation;
+
     win_internal_color_background = Currentcfg.BgColor;
     win_internal_color_border     = Currentcfg.BorderColor;
     win_internal_color_text       = Currentcfg.WinTextColor;
     win_internal_textsize_mult    = Currentcfg.TextSizeMult;
 
     UpdateTickRate = Currentcfg.UpdateRate;
-    
-    win_internal_optionsBitmask=Currentcfg.optionsbitmask;
-    
-    //vec2_ui16t LocalXYPos={0,0}; //needs to use rotpointlocal to set this uint16 vector...idk seems fine i'll leave this
-    //vec2_ui16t internalWH=//needs to have the rotation set and fixed here precomputed
+    win_internal_optionsBitmask = Currentcfg.optionsbitmask;
+
+    // ✅ FIX: assign to member
+    win_backgroundpattern = cfg.backgroundType;
+
+    // ✅ CRITICAL FIX: properly initialize the background colors
+    // (your old in-class initializer was broken / using garbage)
+    bgPrimaryColor   = win_internal_color_background;
+    bgSecondaryColor = Currentcfg.Bg_secondaryColor;
+
+    // Create small fixed-size tile (32×32 is perfect for repeating patterns)
+    bgTile = std::make_shared<PsramBackgroundTile>(32, 32);
 }
 
 static inline void rotPointLocal(
@@ -89,7 +305,7 @@ void Window::LocalToScreen(int lx, int ly, int& sx, int& sy)
 }
 
 // Helper function (add to MWenv.cpp or a utils header)
-static int16_t parse_int(const stdpsram::String& str, int base) {
+[[maybe_unused]] static int16_t parse_int(const stdpsram::String& str, int base) {
     int16_t result = 0;
     bool negative = false;
     size_t i = 0;
@@ -326,6 +542,10 @@ stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& s) {
 // ──────────────────────────────────────────────
 // COMPLETELY REWRITTEN WinDraw() – logical origin fixed at (Posx, Posy) for ALL rotations
 // ──────────────────────────────────────────────
+
+
+
+
 void Window::WinDraw() {
     if (!IsWindowShown) return;
 
@@ -345,16 +565,97 @@ void Window::WinDraw() {
 
     // Clamp to screen (change these to your real screen size)
     const int screenW = 240;
-    const int screenH = 320;
+    const int screenH = 280;
     physX = std::max(0, std::min(physX, screenW - physW));
     physY = std::max(0, std::min(physY, screenH - physH));
 
     ESP_LOGI(TAG, "WinDraw rot=%d | logical(%dx%d) @ (%d,%d) → phys(%d,%d %dx%d)",
              rot, rawW, rawH, wi_sizing.Xpos, wi_sizing.Ypos, physX, physY, physW, physH);
 
-    // === Draw background + single border (this fixes the double-line bug) ===
-    fb_rect(true,  0, physX, physY, physW, physH,
-            win_internal_color_background, win_internal_color_border);
+                     
+             // === BACKGROUND FILL ===
+             // === BACKGROUND FILL (now properly clipped – no more overflow) ===
+             uint16_t clipX = physX;
+             uint16_t clipY = physY;
+             uint16_t clipW = physW;
+             uint16_t clipH = physH;
+ 
+             if (win_backgroundpattern == BgFillType::Solid) {
+                 fb_rect(true, 1, physX, physY, physW, physH,
+                         win_internal_color_background, win_internal_color_border);
+             } 
+             else {
+                 if (!bgTile || bgTile->pbt_cfg.fill_type != win_backgroundpattern ||
+                     bgTile->primaryColor != bgPrimaryColor ||
+                     bgTile->secondaryColor != bgSecondaryColor) {
+                     setupBackgroundTile();
+                 }
+ 
+                 if (bgTile && bgTile->allocated) {
+                     const uint16_t TW = bgTile->pbt_cfg.tileSize_x;
+                     const uint16_t TH = bgTile->pbt_cfg.tileSize_y;
+ 
+                     // Tile in LOGICAL window space
+                     for (uint16_t ly = 0; ly < rawH; ly += TH) {
+                         for (uint16_t lx = 0; lx < rawW; lx += TW) {
+                             int sx, sy;
+                             rotPointLocal(lx, ly, rawW, rawH, rot, sx, sy);
+                             sx += physX;
+                             sy += physY;
+ 
+                             blit_tile_clipped(static_cast<uint16_t>(sx),
+                                               static_cast<uint16_t>(sy),
+                                               clipX, clipY, clipW, clipH,
+                                               framebuffer,
+                                               bgTile->pseudoframebuffer,
+                                               TW, TH);
+                         }
+                     }
+                 } else {
+                     // fallback
+                     fb_rect(true, 1, physX, physY, physW, physH,
+                             win_internal_color_background, win_internal_color_border);
+                 }
+             }
+ 
+             // === TOP BAR + BORDER (new) ===
+             if (win_internal_optionsBitmask & WIN_OPT_SHOW_TOP_BAR_MENU ||
+                 Currentcfg.ShowNameAtTopOfWindow) {
+ 
+                 const int bar_height = 24;  // adjust to taste
+ 
+                 // Top bar background (always at the physical top of this window)
+                 fb_rect(true, 1,
+                         physX, physY, physW, bar_height,
+                         win_internal_color_border,  // bar color
+                         win_internal_color_border);
+ 
+                 // Title text (centered or left-aligned)
+                 fb_draw_text(physX + 6, physY + 4, physW - 40,
+                              Currentcfg.name,
+                              0xFFFF, 1,
+                              avrclassic_font6x8, 0, true, 0x0000, 40, {6,8});
+             }
+ 
+             if (!Currentcfg.borderless) {
+                 // outer border (now drawn AFTER top bar so it doesn't get overwritten)
+                 fb_rect(false, 1, physX, physY, physW, physH, 0x0000, win_internal_color_border);
+             }
+
+//differ to generate tile if it is not valid, then if it is valid, draw on screen
+//is it normal? 
+//looks like it's valid, tile that motherfucker into the right positions in psram
+//get the size of this window, and it's rotation, then tile by puking it into the sram.
+// we'll need to cut it off, because they're 32*32 tiles, which are 2d, but the arrays are 1d
+//so we'll just get the buffer width(relative because the coord space) and see the "width/height remaining" so if we hit the end, we say "oh, skip (32-remaining) pixels in our pseudoframebuffer tile"
+//then we return to the NEXT line and do it again
+//i should add a check to make sure we don't regen the pattern every time we draw, i'lljust check if it's changed. eg LastDraw=!pattern_this_draw
+//it does not exist, presumably because it didn't exist when this window started existing
+//create a new one and bind it to our psram reference
+//create the background tile and set our object pointer to it
+//whatever the fresh hell it may be
+//okay now try again to push it
+    
 
     if (!Currentcfg.borderless) {
         fb_rect(false, 1, physX, physY, physW, physH, 0x0000, win_internal_color_border);
@@ -501,6 +802,39 @@ cachedChunks
     ↓
 render cached chunks every frame
 */
+WindowManager::WindowManager(){
+    //DON'T REALLY need to do anything outside of initialize the window manager freerots task
+}
+WindowManager::~WindowManager(){
+    //i have no idea what you would do here
+}
 
+void WindowManager::UpdateAll() {
+    // Remove expired weak_ptrs and update active windows
+    for (auto it = windows.begin(); it != windows.end(); ) {
+        if (!*it || !(*it)->IsWindowShown) {
+            ESP_LOGD(TAG, "WindowManager: Removing dead window");
+            it = windows.erase(it);
+            continue;
+        }
 
+        (*it)->WinDraw();        // This is what actually draws
+        ++it;
+    }
+}
 
+bool WindowManager::PruneDeadWindows() {
+    /*
+    windows.erase(std::remove_if(windows.begin(), windows.end(),
+        [](const auto& w) {
+            return !w || !w->IsWindowShown;
+        }), windows.end());*/
+        return false; //get out my way for aminute
+}
+
+bool WindowManager::registerWindow(std::shared_ptr<Window> window) {
+    if (!window) return false;
+
+    windows.push_back(window);
+    return true;
+}

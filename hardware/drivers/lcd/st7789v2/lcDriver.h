@@ -128,6 +128,10 @@ void fb_ngon(
     uint16_t fillColor,
     uint16_t borderColor
 );
+//bitmaps, tiles, images
+void fb_draw_bitmap(int dst_x, int dst_y, int w, int h,const uint16_t* bitmap);
+
+
 
 // --------------------- TEXT ---------------------
 void fb_draw_text( uint8_t angle, int x, int y, const char* str, uint16_t color, uint8_t size, 

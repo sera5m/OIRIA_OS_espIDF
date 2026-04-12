@@ -1,0 +1,2 @@
+mass storage (via sd card on spi) or read usb drives (we'll save this for later, because it's complex)
+and rubber ducky

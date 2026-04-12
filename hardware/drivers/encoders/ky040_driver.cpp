@@ -41,6 +41,8 @@ struct ky040_impl_t {
     int pending_steps;          // accumulated net steps in current direction
     int last_direction;         // +1 or -1 — the direction we're building toward
     int64_t last_step_us;       // when we last saw any step (for timeout)
+    bool last_button_state;     // true = pressed
+    ky040_button_cb_t on_button;
 };
 
 
@@ -59,6 +61,9 @@ esp_err_t ky040_new(const ky040_config_t *cfg, ky040_handle_t *out_handle) {
 
     self->detents_per_rev   = cfg->detents_per_rev ? cfg->detents_per_rev : KY040_DEFAULT_DETENTS_PER_REV;
     self->on_twist          = cfg->on_twist;
+    self->on_button         = cfg->on_button;
+    self->last_button_state = false; //might need a review later on because buttons MAY be depressed and therefore cause edge cases
+    //todo fix me
     self->user_ctx          = cfg->user_ctx;
     self->sw_pin            = cfg->sw_pin;
     self->last_count        = 0;
@@ -122,7 +127,7 @@ esp_err_t ky040_new(const ky040_config_t *cfg, ky040_handle_t *out_handle) {
             .intr_type    = GPIO_INTR_DISABLE,
         };
         ESP_ERROR_CHECK(gpio_config(&io));
-    }
+    } 
 
     *out_handle = self;
     ESP_LOGI(TAG, "KY-040 init OK: CLK=%d DT=%d SW=%d detents=%d",
@@ -136,6 +141,11 @@ cleanup:
     }
     free(self);
     return ret;
+
+    
+    
+
+
 }
 
 esp_err_t ky040_del(ky040_handle_t self) {
@@ -163,6 +173,20 @@ void ky040_poll(ky040_handle_t self) {
     }
 
     ESP_LOGI(TAG, "Raw delta_total = %+d   (count now %d)", delta_total, count);
+
+
+    if (self->sw_pin != KY040_PIN_UNUSED && self->on_button) {
+        bool currently_pressed = (gpio_get_level(self->sw_pin) == 0);  // active low
+
+        if (currently_pressed != self->last_button_state) {
+            // State changed → call callback
+            self->on_button(self->user_ctx, currently_pressed);
+            self->last_button_state = currently_pressed;
+
+            ESP_LOGD(TAG, "Button %s", currently_pressed ? "PRESSED" : "RELEASED");
+        }
+    }
+
 
     self->last_count = count;
     int64_t now_us = esp_timer_get_time();

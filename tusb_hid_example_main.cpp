@@ -22,11 +22,34 @@
 #include "hardware/drivers/lcd/st7789v2/lcDriver.h"
 #include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
 #include "hardware/drivers/lcd/fonts/font_avr_classics.h"
-#include "hardware/drivers/encoders/ky040_driver.hpp"
+
 #include "hardware/drivers/psram_std/psram_std.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "driver/i2c_master.h"   // ← MUST have this (and esp_driver_i2c in CMakeLists.txt)
+#include "os_code/middle_layer/input/input_handler.hpp"
 #include "soc/gpio_num.h"
+
+#include "os_code/middle_layer/input/input_devs_agg.hpp"
+ 
+#include "os_code/middle_layer/input/input_handler.hpp" 	
+#include "hardware/drivers/encoders/ky040_driver.hpp"
+#include "tusb.h"
+#include "class/hid/hid.h"
+#include <memory>
+#include "freertos/FreeRTOS.h"      // ← MUST be the absolute first FreeRTOS include
+#include "freertos/queue.h"
+#include "freertos/task.h"
+
+// Then other includes
+#include "os_code/middle_layer/input/input_devs_agg.hpp"
+#include <cstdio>
+#include "code_stuff/types.h"
+#include "esp_log.h"
+#include "esp_timer.h"
+#include <memory>
+#include "esp_task_wdt.h"
+
+#include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
 
 // Known devices (fill in your full list)
 typedef struct {
@@ -41,23 +64,35 @@ static const i2c_device_info_t known_devices[] = {
     // ... add the rest from your earlier list ...
 };
 #define NUM_KNOWN_DEVICES (sizeof(known_devices) / sizeof(known_devices[0]))
+// ────────────────────────────────────────────────
+//boot singleton
+DeviceManager deviceManager;
+QueueHandle_t ProcInputQueTarget = nullptr;
 
 static const char* TAG = "main";
 
 // Globals
+/*
 static ky040_handle_t enc_left = nullptr;
 static ky040_handle_t enc_right = nullptr;
 static int32_t ticks_left = 0;
 static int32_t ticks_right = 0;
+*/
 spi_device_handle_t spi_lcd = nullptr;
 
+
+
+
+
 // Encoder callback
+/*
+
 static void IRAM_ATTR on_encoder_event(void* ctx, int delta) {
     uintptr_t which = (uintptr_t)ctx;
     if (which == 0) ticks_left += delta;
     else            ticks_right += delta;
     ESP_LOGI(TAG, "%s encoder: %+d", which ? "Right" : "Left", delta);
-}
+}*/
 
 // ────────────────────────────────────────────────
 // Function prototypes (must come before app_main!)
@@ -69,104 +104,198 @@ static esp_err_t stage_3_sd_mount(void);
 static void       stage_4_main_app(bool sd_mounted);
 
 // ────────────────────────────────────────────────
+
+
+
+
+
+
+
+
+
 // Entry point
 extern "C" void app_main(void) {
     ESP_LOGI(TAG, "===== ESP32-S3 Boot =====");
 
-    bool sd_ok = false;  // 👈 declare early
-/*
-    if (stage_1_encoders() != ESP_OK) goto panic;
-    if (stage_2_i2c_scan() != ESP_OK) goto panic;
-    boot_stage2andaHalf(); //jus run this
-    if (stage_3_spi_init() != ESP_OK) goto panic;
+    // === Stage 1: Encoders FIRST ===
+    stage_1_encoders();                     // ← create devices + add to manager
 
-    sd_ok = (stage_3_sd_mount() == ESP_OK);  // 👈 assign later
+    // === INPUT SYSTEM INITIALISATION (now safe) ===
+    ProcInputQueTarget = xQueueCreate(32, sizeof(InputEvent));
+    if (ProcInputQueTarget == nullptr) {
+        ESP_LOGE(TAG, "Failed to create input queue");
+    } else {
+        ESP_LOGI(TAG, "Input queue created");
+    }
 
-    stage_4_main_app(sd_ok);  // never returns
-*/
-	stage_1_encoders();  stage_2_i2c_scan();  boot_stage2andaHalf(); stage_3_spi_init(); stage_3_sd_mount(); stage_4_main_app(sd_ok);
+    // Start consumer task AFTER devices exist
+    startInputHandlerTask();
 
-
-
-
-//panic:
-   // ESP_LOGE(TAG, "Critical failure – halting");
-  //  while (1) vTaskDelay(1000);
-    
+    // Continue with rest of boot
+   // stage_2_i2c_scan();
+    boot_stage2andaHalf();
+    stage_3_spi_init();
+    stage_3_sd_mount();
+    stage_4_main_app(false);   // sd_ok was false anyway
 }
 
 // ────────────────────────────────────────────────
 // Stage definitions (now after prototypes and app_main)
 
-static esp_err_t stage_1_encoders(void) {
+static esp_err_t stage_1_encoders()
+{
+    // Left encoder (Vertical)
+    auto left_knob = std::make_unique<KnobDevice>();
+    left_knob->props.cw_key  = KEY_DOWN;
+    left_knob->props.ccw_key = KEY_UP;
+    left_knob->props.button_key = KEY_ENTER;   // ← button press = ENTER
+
     ky040_config_t cfg_left = {
         .clk_pin = ENCODER0_CLK_PIN,
-        .dt_pin = ENCODER0_DT_PIN,
-        .sw_pin = ENCODER0_SW_PIN,
+        .dt_pin  = ENCODER0_DT_PIN,
+        .sw_pin  = ENCODER0_SW_PIN,
         .detents_per_rev = 20,
-        .on_twist = on_encoder_event,
-        .user_ctx = (void*)0
+        .on_twist = nullptr,
+        .user_ctx = nullptr
     };
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ky040_new(&cfg_left, &enc_left));
+    left_knob->initialize(&cfg_left);
+    deviceManager.addDevice(std::move(left_knob));
+
+    // Right encoder (Horizontal)
+    auto right_knob = std::make_unique<KnobDevice>();
+    right_knob->props.cw_key  = KEY_RIGHT;
+    right_knob->props.ccw_key = KEY_LEFT;
+right_knob->props.button_key = KEY_BACK; 
 
     ky040_config_t cfg_right = {
         .clk_pin = ENCODER1_CLK_PIN,
-        .dt_pin = ENCODER1_DT_PIN,
-        .sw_pin = ENCODER1_SW_PIN,
+        .dt_pin  = ENCODER1_DT_PIN,
+        .sw_pin  = ENCODER1_SW_PIN,
         .detents_per_rev = 20,
-        .on_twist = on_encoder_event,
-        .user_ctx = (void*)1
+        .on_twist = nullptr,
+        .user_ctx = nullptr
     };
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ky040_new(&cfg_right, &enc_right));
+    right_knob->initialize(&cfg_right);
+    deviceManager.addDevice(std::move(right_knob));
 
-    ESP_LOGI(TAG, "Encoders OK");
+    ESP_LOGI("ENCODERS", "Encoders registered successfully");
     return ESP_OK;
 }
 
 
-static esp_err_t stage_2_i2c_scan(void) {
+
+static esp_err_t stage_2_i2c_scan(void)
+{
     constexpr gpio_num_t SCL = GPIO_NUM_8;
     constexpr gpio_num_t SDA = GPIO_NUM_9;
 
     i2c_master_bus_config_t bus_cfg = {
-        .i2c_port          = I2C_NUM_1,
-        .sda_io_num        = SDA,
-        .scl_io_num        = SCL,
-        .clk_source        = I2C_CLK_SRC_DEFAULT,
+        .i2c_port = I2C_NUM_1,
+        .sda_io_num = SDA,
+        .scl_io_num = SCL,
+        .clk_source = I2C_CLK_SRC_DEFAULT,
         .glitch_ignore_cnt = 7,
-        .intr_priority     = 0, 
-        .trans_queue_depth = 0,          // ← THIS IS THE MAGIC LINE
-                                         // 0 = pure synchronous only, no async queue, no warning
+        .intr_priority = 0,
+        .trans_queue_depth = 0,
         .flags = {
-            .enable_internal_pullup = false,   // used real 3.8 kΩ external pull-ups 
-            .allow_pd               = false
+            .enable_internal_pullup = false,
+            .allow_pd = false
         }
     };
 
     i2c_master_bus_handle_t bus = nullptr;
+
     esp_err_t ret = i2c_new_master_bus(&bus_cfg, &bus);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "I2C bus creation failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "I2C bus creation failed");
         return ret;
     }
 
-    ESP_LOGI(TAG, "I2C master bus created (synchronous mode) – scanning 0x08–0x77...");
+    // -----------------------------
+    // UI INIT
+    // -----------------------------
+    fb_clear(0x0000);
 
-    int found = 0;
-    for (uint16_t addr = 0x08; addr <= 0x77; ++addr) {
-        ret = i2c_master_probe(bus, addr, pdMS_TO_TICKS(200));
+    fb_draw_text(4, 25, 169, "i2c scan", 0xF00F, 2,
+        avrclassic_font6x8, 0, true, 0x0000, 40, {6,8});
 
-        if (ret == ESP_OK) {
-            found++;
-            ESP_LOGI(TAG, "✓ Device at 0x%02X", (uint8_t)addr);
-            // ... your known_devices matching here ...
-        } else if (ret == ESP_ERR_TIMEOUT) {
-            ESP_LOGW(TAG, "Timeout at 0x%02X (pull-ups look good, but double-check wiring)", (uint8_t)addr);
+    // Grid config - 4×4 = 16 circles, one per low nibble (v = 0-F)
+    const int spacing_x = 32;
+    const int spacing_y = 32;
+    const int start_x = 128;
+    const int start_y = (64);
+
+    // -----------------------------
+    // SCAN SUPERBLOCKS (one n at a time)
+    // -----------------------------
+    for (uint8_t n = 0; n <= 7; ++n)
+    {
+        // --- Draw superblock label "0xN-" ---
+        char label_str[5] = "0x0-";
+        label_str[2] = '0' + n;
+        fb_draw_text(4, 128, 169, label_str, 0xFFFF, 3,
+            avrclassic_font6x8, 0, true,
+             0x0000, 40, {6,8});
+
+        // --- Draw fresh 4×4 grid (all gray = pending) ---
+        for (int i = 0; i < 16; ++i)
+        {
+            int row = i / 4;
+            int col = i % 4;
+
+            int x = start_x + col * spacing_x;
+            int y = start_y + row * spacing_y;
+
+            fb_circle(x, y, 8,
+                      shapefillpattern::plain,
+                      0x8410, // gray
+                      0xFFFF);
         }
+
+        lcd_refresh_screen();
+
+        // --- Scan the 16 addresses in this superblock ---
+        for (int v = 0; v < 16; ++v)
+        {
+            uint8_t addr = (n << 4) | v;
+
+            uint16_t color = 0x08F1; // red = no device (default)
+
+            if (addr >= 0x08 && addr <= 0x77)
+            {
+                ret = i2c_master_probe(bus, addr, pdMS_TO_TICKS(30));
+
+                if (ret == ESP_OK)
+                {
+                    color = 0x02FF; // green = device found
+                    ESP_LOGI(TAG, "✓ Found device at 0x%02X", addr);
+                }
+            }
+            // else: addresses outside official I2C range stay red (no device)
+
+            // Update only this one circle (live)
+            int row = v / 4;
+            int col = v % 4;
+            int x = start_x + col * spacing_x;
+            int y = start_y + row * spacing_y;
+
+            fb_circle(x, y, 16,
+                      shapefillpattern::plain,
+                      color,
+                      0xFFFF);
+
+            lcd_refresh_screen(); // ← LIVE UPDATE
+			//maybe i should add some moving lines or somethigng to look cool idk
+           // vTaskDelay(pdMS_TO_TICKS(8)); // small animation delay
+        }
+
+        // After finishing all v for this n, the next iteration will
+        // automatically switch to the next superblock (new label + fresh gray grid)
     }
 
-    ESP_LOGI(TAG, "Scan complete — %d device(s) found", found);
     i2c_del_master_bus(bus);
+
+    ESP_LOGI(TAG, "I2C scan complete");
     return ESP_OK;
 }
 
@@ -263,7 +392,7 @@ static void stage_4_main_app(bool sd_mounted) {
     vTaskDelay(100);
 	   //moved framebuffer alloc earlier to not interfere with spi
 	   ESP_LOGI(TAG, "attempting lcd init");
-   lcd_init_angry();
+   lcd_init_simple();
 vTaskDelay(100);
 ESP_LOGI(TAG, "invoking fb clear");
  fb_clear(0x0000);
@@ -272,6 +401,8 @@ ESP_LOGI(TAG, "invoking fb clear");
   	vTaskDelay(100);
     lcd_fb_display_framebuffer(false, false);
     vTaskDelay(pdMS_TO_TICKS(200));
+    stage_2_i2c_scan();
+    fb_clear(0x0000);
 
 /*
     constexpr int MAX_FILES = 64;
@@ -307,57 +438,41 @@ ESP_LOGI(TAG, "invoking fb clear");
     auto win = std::make_shared<Window>(
         WindowCfg{
             .Posx = 0,
-            .Posy = 64,
-            .win_width = 180,
-            .win_height = 100,
-            .win_rotation = 1,
-            .borderless = 0,
-            .TextSizeMult = 1,
-            .BgColor = 0xBBBB,
-            .WinTextColor = 0xFFFF,
-            .UpdateRate = 1.0f
+    .Posy = 64,
+    .Layer = 0,
+    .renderPriority = 0,             // added missing value
+    .win_width = 180,
+    .win_height = 100,
+    .win_rotation = 1,
+    .AutoAlignment = false,          // optional, but explicit
+    .WrapText = true,                // optional, but explicit
+    .borderless = false,
+    .ShowNameAtTopOfWindow = false,  // optional
+    .TextSizeMult = 1,
+    .name = {0},                     // empty string
+    .optionsbitmask = 0,             // optional, default
+    .BorderColor = 0x12FF,           // optional, default
+    .BgColor = 0xAA00,
+    .Bg_secondaryColor=0xFF34,
+    .WinTextColor = 0xFFFF,
+    .backgroundType = BgFillType::waves,
+    .UpdateRate = 1.0f
+            
         },
         "meowwy"
     );
     
+    //fb_line(0, 32, 0, 64, 0xFF0F); fb_line(32,  32, 32, 64, 0xFF0F);
+    
 
     // Boot splash
-    fb_rect(0, 8, 25, 25, 100, 100, 0xFF34, 0x5432);
+   // fb_rect(0, 8, 25, 25, 100, 100, 0xFF34, 0x5432);
     display_framebuffer(true, false);
-    fb_draw_ptext(4, 40, 80, stdpsram::String("PSRAM LINK READY"), 0xFFFF, 2, avrclassic_font6x8, 0, 0, 0x0000, 40, {6,8});
+   // fb_draw_ptext(4, 40, 80, stdpsram::String("PSRAM LINK READY"), 0xFFFF, 2, avrclassic_font6x8, 0, 0, 0x0000, 40, {6,8});
     lcd_fb_display_framebuffer(false, false);
     vTaskDelay(pdMS_TO_TICKS(50));
 win->WinDraw();
         display_framebuffer(true, false);
     int sel = 0, scr = 0;
-/*
 
-    while (true) {
-        if (enc_left) ky040_poll(enc_left);
-        if (enc_right) ky040_poll(enc_right);
-
-        bool redraw = false;
-        if (ticks_left) { sel += ticks_left; ticks_left = 0; sel = std::clamp(sel, 0, file_count-1); redraw = true; }
-        if (ticks_right) { scr += ticks_right * 3; ticks_right = 0; scr = std::clamp(scr, 0, std::max(0, file_count-12)); redraw = true; }
-
-        if (!redraw) { vTaskDelay(pdMS_TO_TICKS(30)); continue; }
-
-        stdpsram::String txt;
-        txt.reserve(2048);
-        txt += "<|size=1|><|b|>SD Card: /sdcard<|/b|><|/size|>\n\n";
-
-        for (int i = scr; i < file_count && i < scr + 12; ++i) {
-            if (i == sel) txt += "<|hl=0xF800|><|b|>" + stdpsram::String(file_list[i]) + "<|/b|><|/hl|>\n";
-            else txt += stdpsram::String(file_list[i]) + "\n";
-        }
-
-        char foot[96];
-        snprintf(foot, sizeof(foot), "\nItems: %d Sel: %d/%d <> sel ^v scroll", file_count, sel+1, file_count);
-        txt += foot;
-
-        win->SetText(txt);
-        win->WinDraw();
-        display_framebuffer(true, false);
-        vTaskDelay(pdMS_TO_TICKS(30));
-    }*/
 }

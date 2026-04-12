@@ -45,8 +45,7 @@
 #define LED_PIN GPIO_NUM_48
 //i2c pins
 //hardware known connected: max30012 hr sensor, mpu6050 gyro, 
-#define SDA_PIN GPIO_NUM_38
-#define SCL_PIN GPIO_NUM_39
+//ic2 is on 8 and 9 but defined elsewhere
 //if i read the data right these are also acessable by the ulp co-proscessor
 // I2C config — choose free GPIOs that don't conflict with your SPI/encoders/LCD
 //#define I2C_PORT        I2C_NUM_1     // or I2C_NUM_1 if port 0 is used elsewhere
@@ -117,7 +116,7 @@ void StartSPI() {
 //y axis, back
 
 #define ENCODER1_CLK_PIN GPIO_NUM_21
-#define ENCODER1_DT_PIN  GPIO_NUM_47
+#define ENCODER1_DT_PIN  GPIO_NUM_13
 #define ENCODER1_SW_PIN  GPIO_NUM_18
 
 

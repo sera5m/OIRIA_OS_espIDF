@@ -39,11 +39,16 @@ idf_component_register(
    				 "hardware/drivers/lcd/fonts/font_avr_classics.c"
    				 
    				 
-   	#rotorary_encoders			 
+   	#handle input		 
    			"hardware/drivers/encoders/ky040_driver.cpp"
    			"hardware/drivers/encoders/ky040_driver.hpp"
-  	
-  
+   			"os_code/middle_layer/input/input_devs_agg.hpp"
+   			"os_code/middle_layer/input/input_handler.cpp"
+  			"os_code/middle_layer/input/input_handler.hpp"
+  			#"os_code/middle_layer/input/hostusb/usb_hid_host.cpp"
+  			#"os_code/middle_layer/input/hostusb/usb_hid_host.hpp"
+  			"os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
+  			"os_code/middle_layer/input/inputProscessorTask/ipt_x.cpp"
     #os code
 
     
@@ -68,8 +73,10 @@ idf_component_register(
         esp_driver_i2c
         
 )
-# 
-target_compile_options(${COMPONENT_LIB} PRIVATE -fexceptions -Wno-missing-field-initializers -Wno-error=missing-field-initializers -Wno-format-truncation)
+#set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/components/EspUsbHost")
+# yes this is cloned from github https://github.com/tanakamasayuki/EspUsbHost.git
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unused -fexceptions -Wno-missing-field-initializers -Wno-error=missing-field-initializers -Wno-format-truncation)
 # Switch C standard if needed
+
 # set(CMAKE_C_STANDARD 99)   # or 17
 # set(CMAKE_C_STANDARD_REQUIRED ON)

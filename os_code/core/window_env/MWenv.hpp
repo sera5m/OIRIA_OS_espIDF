@@ -144,7 +144,7 @@ static int16_t parse_int(const stdpsram::String& str, int base = 10);
 enum WindowOptionBits : uint16_t {
     // Bit 0–3 (lowest bits – most commonly changed / cheapest features)-------------------------
     WIN_OPT_USE_BORDERGRADIENT          = 1 << 0,   // 0x0001
-    //makes border use gradinent fill
+    //makes border use Gradient fill
     WIN_OPT_ANIMATED_BORDER       = 1 << 1,   // 0x0002
     //border now has - - - - - animated movement "shimmer"
     WIN_OPT_SHOW_TOP_BAR_MENU     = 1 << 2,   // 0x0004
@@ -159,7 +159,7 @@ enum WindowOptionBits : uint16_t {
     WIN_OPT_TRANSPARENCY          = 1 << 5,   // 0x0020
     //enables transparency (0-255) for overlay windows
     WIN_OPT_INTERIOR_SPECIALFILL     = 1 << 6,   // 0x0040  
-    //context note: enables interior of window to be filled according to internal pattern or gradinent fill
+    //context note: enables interior of window to be filled according to internal pattern or Gradient fill
 
     WIN_OPT_CHILDFREE      = 1 << 7,   // 0x0080   
     //context note: optimization step keeping it to skip update checks, and blocks this from having children added
@@ -173,7 +173,71 @@ enum WindowOptionBits : uint16_t {
     // ...
 };
 
-// Then in your struct:
+ 
+
+enum class BgFillType : uint8_t {
+ Solid,GradientVertical,GradientHorizontal,Checkerboard,Noise,
+ Diagonal_lines,Transparent,triangles,waves,dots,count
+};
+
+struct HasDelta {
+    bool dx;
+    bool dy;
+};
+//const lookup table to describe rules for tiling on x and y axis. 
+//true means that it repeats on this axis and can be copied or referenced in rendering
+constexpr HasDelta fillTypeRules[] = {
+    /* Solid */              {1, 1},
+    /* GradientVertical */   {true,  false},
+    /* GradientHorizontal */ {false, true },
+    /* Checkerboard */       {true,  true },
+    /* Noise */              {false, false},
+    /* Diagonal_lines */     {true,  true },
+    /* Transparent */        {false, false},
+    /* Waves */              {false, true },
+    /*dots*/                {false, false }
+};
+
+struct p_bgTile_cfg {
+    uint8_t  win_rotation = 1; 
+    BgFillType fill_type = BgFillType::Solid;
+    uint16_t tileSize_x = 32;
+    uint16_t tileSize_y = 32;
+};
+
+
+static void blit_tile(uint16_t targetX, uint16_t targetY,
+    uint16_t* framebuffer,
+    uint16_t* tileBuffer,
+    uint16_t tileW, uint16_t tileH);
+   //where to put it and what rotation. usually under text
+   //we are putting transfer tile outside of the background tile object so that we can use it for other thingslike emojis or bitmaps
+
+
+   //it's pretty simple lol
+   class PsramBackgroundTile : public std::enable_shared_from_this<PsramBackgroundTile> {
+    public:
+        bool allocated = false;
+        uint16_t* pseudoframebuffer = nullptr;
+        p_bgTile_cfg pbt_cfg;           // your existing cfg struct
+        uint16_t primaryColor = 0xFFFF;
+        uint16_t secondaryColor = 0x0000;
+    
+        // Constructor – fixed size 32×32 (you can make it configurable later)
+        explicit PsramBackgroundTile(uint16_t tileSizeX = 32, uint16_t tileSizeY = 32);
+    
+        // Generate pattern ONCE into PSRAM
+        void generate_pattern(BgFillType type, uint16_t primary, uint16_t secondary);
+    
+        ~PsramBackgroundTile();
+    };
+
+
+
+
+
+
+
 struct WindowCfg {
     uint16_t Posx = 0;
     uint16_t Posy = 0;
@@ -193,8 +257,9 @@ struct WindowCfg {
 
     uint16_t BorderColor           = 0xFFFF;
     uint16_t BgColor               = 0x0000;
+    uint16_t Bg_secondaryColor=0x4040;
     uint16_t WinTextColor          = 0xFFFF;
-
+    BgFillType backgroundType=BgFillType::Solid;
     float    UpdateRate            = 0.5f;
 };
 /* ---------------- helpers ---------------- */
@@ -270,7 +335,7 @@ class Window : public std::enable_shared_from_this<Window> {
         void LocalToScreen(int lx, int ly, int& sx, int& sy);
         stdpsram::String content;
         stdpsram::Vector<TextChunk> cachedChunks;
-
+        
         // Members you are using
        // std::string content;
        // In Window class definition:
@@ -278,6 +343,15 @@ class Window : public std::enable_shared_from_this<Window> {
         WindowCfg Initialcfg;
         WindowCfg Currentcfg;
     
+        // Background tile (PSRAM)
+std::shared_ptr<PsramBackgroundTile> bgTile;
+
+// Background configuration
+BgFillType win_backgroundpattern;
+
+// Call this once after changing pattern/colors
+
+
         struct {
             uint16_t Xpos   = 0;
             uint16_t Ypos   = 0;
@@ -297,8 +371,12 @@ class Window : public std::enable_shared_from_this<Window> {
         bool     IsWindowShown = true;
         bool     dirty         = true;
         uint64_t lastUpdateTime = 0;
-    
-        // Optional: if you want to hide implementation details later,
+        uint16_t   bgPrimaryColor = win_internal_color_background;   // your window BgColor by default
+        uint16_t   bgSecondaryColor = Currentcfg.Bg_secondaryColor;
+        
+
+        void setupBackgroundTile();
+        // Optional: if i want to hide implementation details later,
         // move tokenize() and TextState to private
     private:
    
@@ -322,6 +400,7 @@ TextState Tstate ; //new var should default to defaults
     public:
     uint16_t currentPhysX = 0;
 uint16_t currentPhysY = 0;
+
     
     // One tokenize – takes the native type
     stdpsram::Vector<TextChunk> tokenize(const stdpsram::String& s);
@@ -346,6 +425,19 @@ uint16_t currentPhysY = 0;
             }
         }
     };
+
+    class WindowManager : public std::enable_shared_from_this<WindowManager> {
+        public:
+            WindowManager(); 
+            ~WindowManager();
+        
+            void UpdateAll();
+            bool PruneDeadWindows();   
+            bool registerWindow(std::shared_ptr<Window> window);
+        
+        private:
+            std::vector<std::shared_ptr<Window>> windows;
+        };
 
 
 #endif
