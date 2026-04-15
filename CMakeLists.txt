@@ -50,12 +50,21 @@ idf_component_register(
   			"os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
   			"os_code/middle_layer/input/inputProscessorTask/ipt_x.cpp"
     #os code
-
-    
+	 "os_code/core/rShell/enviroment/env_vars.h"
+    "os_code/core/rShell/enviroment/env_vars.c"
     #enviroment----warning not tested
     
    "os_code/core/window_env/MWenv.cpp"
     "os_code/core/window_env/MWenv.hpp"
+    "os_code/core/rShell/s_hell.hpp"
+    "os_code/core/rShell/s_hell.cpp"
+    
+    #------APPLICATIONS
+    "os_code/applications/watch/MS_watchapp.hpp"
+    "os_code/applications/watch/MS_watchapp.cpp"
+    
+    
+    
     
     INCLUDE_DIRS "."
     PRIV_REQUIRES

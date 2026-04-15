@@ -678,19 +678,17 @@ static  void fb_rect_gradient(int x, int y, int w, int h,
 
 
   void fb_draw_text(
-    uint8_t angle,
+    uint8_t angle, 
     int x, int y,
-    const char* str,
-    uint16_t color,
-    uint8_t size,
-   // text_modifier* modifiers,
-    const uint8_t* font,
-    uint8_t transparency,
-    bool drawblocksforbackground,
-    uint16_t blockBackground_color,
-    uint16_t maxTLenBeforeAutoWrapToNextLine,
-    struct fontcharsize  fontSize
+     const char* str, 
+     uint16_t color, uint8_t size, 
+  uint8_t transparency, bool drawblocksforbackground, 
+  uint16_t blockBackground_color,
+  uint16_t maxTLenBeforeAutoWrapToNextLine,
+   fontdata fdat //member fontdata, has .fontref for the font ptr, and .fcs for size data and .useExactColors if it needs to do weird color math
+    
 ) {
+
 	
     int ax=1, ay=0;   // advance
     int ux=0, uy=1;   // up (glyph rows)
@@ -713,20 +711,20 @@ static  void fb_rect_gradient(int x, int y, int w, int h,
         }
 
         const uint8_t* glyph =
-            &font[(c - ' ') * fontSize.x];
+            &fdat.fontRef[(c - ' ') * fdat.fcs.x];
 
-        for (int col = 0; col < fontSize.x; col++) {
+        for (int col = 0; col < fdat.fcs.x; col++) {
             uint8_t bits = glyph[col];
 
             int row = 0;
-            while (row < fontSize.y) {
+            while (row < fdat.fcs.y) {
                 if (!(bits & (1 << row))) {
                     row++;
                     continue;
                 }
 
                 int start = row;
-                while (row < fontSize.y && (bits & (1 << row)))
+                while (row < fdat.fcs.y && (bits & (1 << row)))
                     row++;
 
                 int end = row - 1;
@@ -735,7 +733,7 @@ static  void fb_rect_gradient(int x, int y, int w, int h,
                 int span_len = (end - start + 1) * size;
 
                 // base pixel position (unrotated glyph space)
-                int gx = (cursor * fontSize.x + col) * size;
+                int gx = (cursor * fdat.fcs.x + col) * size;
                 int gy = start * size;
 
                 // convert to screen space

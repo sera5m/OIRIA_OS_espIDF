@@ -34,7 +34,8 @@
 
 #include "../../../hardware/drivers/psram_std/psram_std.hpp" //my custom work for psram stdd things
 #include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
-
+#include <memory>
+#include "os_code/core/rShell/enviroment/env_vars.h"
 //get this from psram string and whatnot
 // forward declarations
 class Window;
@@ -330,7 +331,7 @@ class Window : public std::enable_shared_from_this<Window> {
     
         void AppendText(const std::string& moreText);
         void AppendText(const stdpsram::String& moreText);
-    
+        void calculateLogicalDimensions();
         void ClearText();
         void LocalToScreen(int lx, int ly, int& sx, int& sy);
         stdpsram::String content;
@@ -342,7 +343,10 @@ class Window : public std::enable_shared_from_this<Window> {
 
         WindowCfg Initialcfg;
         WindowCfg Currentcfg;
-    
+
+        uint16_t logicalW;uint16_t logicalH; 
+        //phisical dims
+        fontdata w_font_info; //ffont info incl size
         // Background tile (PSRAM)
 std::shared_ptr<PsramBackgroundTile> bgTile;
 
@@ -437,6 +441,7 @@ uint16_t currentPhysY = 0;
         
         private:
             std::vector<std::shared_ptr<Window>> windows;
+            
         };
 
 

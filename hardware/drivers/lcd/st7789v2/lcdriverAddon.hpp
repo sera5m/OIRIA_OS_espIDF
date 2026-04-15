@@ -13,12 +13,11 @@ void fb_draw_ptext(
     const stdpsram::String& str,
     uint16_t color,
     uint8_t size,
-    const uint8_t* font,
     uint8_t transparency,
     bool drawblocksforbackground,
     uint16_t blockBackground_color,
     uint16_t maxTLenBeforeAutoWrapToNextLine,
-    struct fontcharsize fontSize
-);
+    fontdata fdat
+    );
 
 #endif

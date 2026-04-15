@@ -30,7 +30,7 @@ void fb_draw_ptext(
     bool drawblocksforbackground,
     uint16_t blockBackground_color,
     uint16_t maxTLenBeforeAutoWrapToNextLine,
-    struct fontcharsize fontSize
+    struct fontcharsize fdat.fcs
 ) {
 
     int ax=1, ay=0;
@@ -56,15 +56,15 @@ void fb_draw_ptext(
         }
 
         const uint8_t* glyph =
-            &font[(c - ' ') * fontSize.x];
+            &font[(c - ' ') * fdat.fcs.x];
 
-        for (int col = 0; col < fontSize.x; col++) {
+        for (int col = 0; col < fdat.fcs.x; col++) {
 
             uint8_t bits = glyph[col];
 
             int row = 0;
 
-            while (row < fontSize.y) {
+            while (row < fdat.fcs.y) {
 
                 if (!(bits & (1 << row))) {
                     row++;
@@ -73,14 +73,14 @@ void fb_draw_ptext(
 
                 int start = row;
 
-                while (row < fontSize.y && (bits & (1 << row)))
+                while (row < fdat.fcs.y && (bits & (1 << row)))
                     row++;
 
                 int end = row - 1;
 
                 int span_len = (end - start + 1) * size;
 
-                int gx = (cursor * fontSize.x + col) * size;
+                int gx = (cursor * fdat.fcs.x + col) * size;
                 int gy = start * size;
 
                 int px = x + gx * ax + gy * ux;
@@ -110,13 +110,13 @@ void fb_draw_ptext(
     const stdpsram::String& str,
     uint16_t color,
     uint8_t size,
-    const uint8_t* font,
+   // const uint8_t* font,
     uint8_t transparency,
     bool drawblocksforbackground,
     uint16_t blockBackground_color,
     uint16_t maxTLenBeforeAutoWrapToNextLine,
-    struct fontcharsize fontSize
-) {
+    fontdata fdat
+    ) {
 
     int ax=1, ay=0;
     int ux=0, uy=1;
@@ -145,8 +145,8 @@ void fb_draw_ptext(
             }
             
             // Calculate block position with rotation
-            int block_width = fontSize.x * size;
-            int block_height = fontSize.y * size;
+            int block_width = fdat.fcs.x * size;
+            int block_height = fdat.fcs.y * size;
             
             // Get rotated block corners
             int gx_base = cursor * block_width;
@@ -199,15 +199,15 @@ void fb_draw_ptext(
         }
 
         const uint8_t* glyph =
-            &font[(c - ' ') * fontSize.x];
+            &fdat.fontRef[(c - ' ') * fdat.fcs.x];
 
-        for (int col = 0; col < fontSize.x; col++) {
+        for (int col = 0; col < fdat.fcs.x; col++) {
 
             uint8_t bits = glyph[col];
 
             int row = 0;
 
-            while (row < fontSize.y) {
+            while (row < fdat.fcs.y) {
 
                 if (!(bits & (1 << row))) {
                     row++;
@@ -216,14 +216,14 @@ void fb_draw_ptext(
 
                 int start = row;
 
-                while (row < fontSize.y && (bits & (1 << row)))
+                while (row < fdat.fcs.y && (bits & (1 << row)))
                     row++;
 
                 int end = row - 1;
 
                 int span_len = (end - start + 1) * size;
 
-                int gx = (cursor * fontSize.x + col) * size;
+                int gx = (cursor * fdat.fcs.x + col) * size;
                 int gy = start * size;
 
                 int px = x + gx * ax + gy * ux;

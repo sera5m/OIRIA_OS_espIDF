@@ -35,7 +35,7 @@
 #include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
 // Custom allocator for std::string that prefers PSRAM
 #include "esp_log.h"
-
+#include "os_code/core/rShell/enviroment/env_vars.h"
 
 static const char *TAG = "MWenv"; 
 
@@ -245,7 +245,16 @@ static void blit_tile_clipped(
         }
     }
 }
+void Window::calculateLogicalDimensions()
+{
+    const int rot   = wi_sizing.rotation & 3;
+    const int rawW  = wi_sizing.Width;
+    const int rawH  = wi_sizing.Height;
 
+    // Same logic as in WinDraw()
+    logicalW = (rot % 2 == 0) ? rawW : rawH;
+    logicalH = (rot % 2 == 0) ? rawH : rawW;
+}
 
 Window::Window(const WindowCfg& cfg, const std::string& initialContent)
     : content(stdpsram::String(initialContent.begin(), initialContent.end())),
@@ -256,10 +265,10 @@ Window::Window(const WindowCfg& cfg, const std::string& initialContent)
     Currentcfg.name[sizeof(Currentcfg.name) - 1] = '\0';
 
     // Sync sizing & colors
-    wi_sizing.Xpos   = Currentcfg.Posx;
-    wi_sizing.Ypos   = Currentcfg.Posy;
-    wi_sizing.Width  = Currentcfg.win_width;
-    wi_sizing.Height = Currentcfg.win_height;
+    wi_sizing.Xpos     = Currentcfg.Posx;
+    wi_sizing.Ypos     = Currentcfg.Posy;
+    wi_sizing.Width    = Currentcfg.win_width;
+    wi_sizing.Height   = Currentcfg.win_height;
     wi_sizing.rotation = Currentcfg.win_rotation;
 
     win_internal_color_background = Currentcfg.BgColor;
@@ -267,19 +276,19 @@ Window::Window(const WindowCfg& cfg, const std::string& initialContent)
     win_internal_color_text       = Currentcfg.WinTextColor;
     win_internal_textsize_mult    = Currentcfg.TextSizeMult;
 
-    UpdateTickRate = Currentcfg.UpdateRate;
+    UpdateTickRate          = Currentcfg.UpdateRate;
     win_internal_optionsBitmask = Currentcfg.optionsbitmask;
 
-    // ✅ FIX: assign to member
-    win_backgroundpattern = cfg.backgroundType;
-
-    // ✅ CRITICAL FIX: properly initialize the background colors
-    // (your old in-class initializer was broken / using garbage)
-    bgPrimaryColor   = win_internal_color_background;
-    bgSecondaryColor = Currentcfg.Bg_secondaryColor;
-
+    // Background pattern and colors
+    win_backgroundpattern   = cfg.backgroundType;
+    bgPrimaryColor          = win_internal_color_background;
+    bgSecondaryColor        = Currentcfg.Bg_secondaryColor;
+    fontdata w_font_info=ft_AVR_classic_6x8; //we'll just set this here as a default... 
     // Create small fixed-size tile (32×32 is perfect for repeating patterns)
     bgTile = std::make_shared<PsramBackgroundTile>(32, 32);
+
+    // ✅ FIXED: Calculate logicalW and logicalH using the same formula as WinDraw()
+    calculateLogicalDimensions();
 }
 
 static inline void rotPointLocal(
@@ -545,16 +554,18 @@ stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& s) {
 
 
 
-
 void Window::WinDraw() {
     if (!IsWindowShown) return;
+
+    // Reuse the same calculation (DRY principle)
+    calculateLogicalDimensions();
 
     const int rot   = wi_sizing.rotation & 3;
     const int rawW  = wi_sizing.Width;
     const int rawH  = wi_sizing.Height;
 
-    const int physW = (rot % 2 == 0) ? rawW : rawH;
-    const int physH = (rot % 2 == 0) ? rawH : rawW;
+    const int physW = logicalW;   // now consistent
+    const int physH = logicalH;
 
     // === CRITICAL: logical window (0,0) must be exactly at screen (Xpos, Ypos) ===
     int offsetX, offsetY;
@@ -563,22 +574,19 @@ void Window::WinDraw() {
     int physX = wi_sizing.Xpos - offsetX;
     int physY = wi_sizing.Ypos - offsetY;
 
-    // Clamp to screen (change these to your real screen size)
-    const int screenW = 240;
-    const int screenH = 280;
-    physX = std::max(0, std::min(physX, screenW - physW));
-    physY = std::max(0, std::min(physY, screenH - physH));
+    // Clamp to screen
+    
+    physX = std::max(0, std::min(physX, v_env.screen_dim_w - physW));
+    physY = std::max(0, std::min(physY, v_env.screen_dim_h - physH));
 
     ESP_LOGI(TAG, "WinDraw rot=%d | logical(%dx%d) @ (%d,%d) → phys(%d,%d %dx%d)",
              rot, rawW, rawH, wi_sizing.Xpos, wi_sizing.Ypos, physX, physY, physW, physH);
 
-                     
-             // === BACKGROUND FILL ===
-             // === BACKGROUND FILL (now properly clipped – no more overflow) ===
-             uint16_t clipX = physX;
-             uint16_t clipY = physY;
-             uint16_t clipW = physW;
-             uint16_t clipH = physH;
+    // === BACKGROUND FILL ===
+    uint16_t clipX = physX;
+    uint16_t clipY = physY;
+    uint16_t clipW = physW;
+    uint16_t clipH = physH;
  
              if (win_backgroundpattern == BgFillType::Solid) {
                  fb_rect(true, 1, physX, physY, physW, physH,
@@ -631,10 +639,11 @@ void Window::WinDraw() {
                          win_internal_color_border);
  
                  // Title text (centered or left-aligned)
-                 fb_draw_text(physX + 6, physY + 4, physW - 40,
+                 fb_draw_text(physX + 6, physY + 4, physW - 40, //why is this hardcoded? 
                               Currentcfg.name,
                               0xFFFF, 1,
-                              avrclassic_font6x8, 0, true, 0x0000, 40, {6,8});
+                              0, true, 0x0000, 40, 
+                              w_font_info);
              }
  
              if (!Currentcfg.borderless) {
@@ -676,7 +685,7 @@ void Window::WinDraw() {
     Tstate.highlight_bg  = 0;
 
     const int text_rot_flag = rot * 4;
-    fontcharsize font_glyph_size = font6x8;
+    
 
     int curLX = 2;
     int curLY = 2;
@@ -697,13 +706,13 @@ void Window::WinDraw() {
 
             fb_draw_ptext(text_rot_flag, 
             sx, sy, txt, Tstate.color, Tstate.size,
-            
-                          avrclassic_font6x8, 12, Tstate.highlight_bg, win_internal_color_background, 999, font_glyph_size); //i don't think i'm using the highlight command right
+             12, Tstate.highlight_bg, win_internal_color_background,
+              999, w_font_info); //i don't think i'm using the highlight command right
 
-            curLX += txt.length() * font_glyph_size.x * Tstate.size;
+            curLX += txt.length() * (w_font_info.fcs.x) * Tstate.size;
             if (curLX >= rawW - 4) {
                 curLX = 2;
-                curLY += font_glyph_size.y * last_line_height + 4;
+                curLY += (w_font_info.fcs.y) * last_line_height + 4;
             }
             last_line_height = Tstate.size;
             break;
@@ -711,7 +720,7 @@ void Window::WinDraw() {
 
         case TagType::LineBreak:
             curLX = 2;
-            curLY += font_glyph_size.y * last_line_height + 4;
+            curLY += w_font_info.fcs.y * last_line_height + 4;
             break;
 
         case TagType::PosChange: {

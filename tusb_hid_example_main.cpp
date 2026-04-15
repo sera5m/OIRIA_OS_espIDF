@@ -50,6 +50,12 @@
 #include "esp_task_wdt.h"
 
 #include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
+#include "os_code/core/rShell/enviroment/env_vars.h"
+
+
+#include "os_code/core/rShell/s_hell.hpp"
+#include "os_code/applications/watch/MS_watchapp.hpp"
+
 
 // Known devices (fill in your full list)
 typedef struct {
@@ -101,7 +107,7 @@ static esp_err_t stage_2_i2c_scan(void);
 static esp_err_t boot_stage2andaHalf(void);
 static esp_err_t stage_3_spi_init(void);
 static esp_err_t stage_3_sd_mount(void);
-static void       stage_4_main_app(bool sd_mounted);
+static void       task_app_manager(bool sd_mounted);
 
 // ────────────────────────────────────────────────
 
@@ -136,7 +142,7 @@ extern "C" void app_main(void) {
     boot_stage2andaHalf();
     stage_3_spi_init();
     stage_3_sd_mount();
-    stage_4_main_app(false);   // sd_ok was false anyway
+    task_app_manager(false);   // sd_ok was false anyway
 }
 
 // ────────────────────────────────────────────────
@@ -217,7 +223,7 @@ static esp_err_t stage_2_i2c_scan(void)
     fb_clear(0x0000);
 
     fb_draw_text(4, 25, 169, "i2c scan", 0xF00F, 2,
-        avrclassic_font6x8, 0, true, 0x0000, 40, {6,8});
+         0, true, 0x0000, 40, ft_AVR_classic_6x8);
 
     // Grid config - 4×4 = 16 circles, one per low nibble (v = 0-F)
     const int spacing_x = 32;
@@ -234,8 +240,8 @@ static esp_err_t stage_2_i2c_scan(void)
         char label_str[5] = "0x0-";
         label_str[2] = '0' + n;
         fb_draw_text(4, 128, 169, label_str, 0xFFFF, 3,
-            avrclassic_font6x8, 0, true,
-             0x0000, 40, {6,8});
+             0, true,
+             0x0000, 40, ft_AVR_classic_6x8);
 
         // --- Draw fresh 4×4 grid (all gray = pending) ---
         for (int i = 0; i < 16; ++i)
@@ -385,7 +391,9 @@ static esp_err_t stage_3_sd_mount(void) {
     return ESP_OK;
 }
 
-static void stage_4_main_app(bool sd_mounted) {
+
+//handles some boot stuff and will also update sensors (not input, it's got it's own task)
+static void main_app_handles(bool sd_mounted) {
 	//added delays to stop weird timing from causing crashes
 	vTaskDelay(100);
     screen_set_driver(&onboard_screen_driver);
@@ -396,83 +404,31 @@ static void stage_4_main_app(bool sd_mounted) {
 vTaskDelay(100);
 ESP_LOGI(TAG, "invoking fb clear");
  fb_clear(0x0000);
-  fb_draw_text(4, 20, 80, "booting", 0xFFFF, 2, avrclassic_font6x8, 0, true, 0x0000, 40, {6,8});
+  fb_draw_text(4, 20, 80, "booting", 0xFFFF, 2,
+   0, true, 0x0000,
+    40,ft_AVR_classic_6x8 );
   	ESP_LOGI(TAG, "invoking fb display framebuffer -total mode");
   	vTaskDelay(100);
     lcd_fb_display_framebuffer(false, false);
     vTaskDelay(pdMS_TO_TICKS(200));
     stage_2_i2c_scan();
     fb_clear(0x0000);
+    //start application manager object, we will tick and own it inside this task
+	auto& manager = appManager::instance();
+	vTaskDelay(8);
+	ApplicationConfig cfg;
+		cfg.capabilities = static_cast<uint32_t>(AppCapability::FULLSCREEN) |
+                   static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
+		cfg.stack_size_bytes = 8192;
+		cfg.priority = 5;
+		cfg.name = "WatchApp";
 
-/*
-    constexpr int MAX_FILES = 64;
-    constexpr int MAX_NAME_LEN = 256;
-    char file_list[MAX_FILES][MAX_NAME_LEN] = {};
-    int file_count = 0;
-
-    if (sd_mounted) {
-        DIR* dir = opendir("/sdcard");
-        if (dir) {
-            struct dirent* e;
-            while ((e = readdir(dir)) && file_count < MAX_FILES) {
-                if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
-
-                char p[128];
-                snprintf(p, sizeof(p), "/sdcard/%s", e->d_name);
-                struct stat st{};
-                bool is_dir = (stat(p, &st) == 0 && S_ISDIR(st.st_mode));
-
-                snprintf(file_list[file_count], sizeof(file_list[0]),
-                         "%s%s", is_dir ? "[DIR] " : " ", e->d_name);
-                file_count++;
-            }
-            closedir(dir);
-        }
-    }
-
-    if (!file_count) {
-        strcpy(file_list[0], "No SD / empty");
-        file_count = 1;
-    }*/
-
-    auto win = std::make_shared<Window>(
-        WindowCfg{
-            .Posx = 0,
-    .Posy = 64,
-    .Layer = 0,
-    .renderPriority = 0,             // added missing value
-    .win_width = 180,
-    .win_height = 100,
-    .win_rotation = 1,
-    .AutoAlignment = false,          // optional, but explicit
-    .WrapText = true,                // optional, but explicit
-    .borderless = false,
-    .ShowNameAtTopOfWindow = false,  // optional
-    .TextSizeMult = 1,
-    .name = {0},                     // empty string
-    .optionsbitmask = 0,             // optional, default
-    .BorderColor = 0x12FF,           // optional, default
-    .BgColor = 0xAA00,
-    .Bg_secondaryColor=0xFF34,
-    .WinTextColor = 0xFFFF,
-    .backgroundType = BgFillType::waves,
-    .UpdateRate = 1.0f
-            
-        },
-        "meowwy"
-    );
-    
-    //fb_line(0, 32, 0, 64, 0xFF0F); fb_line(32,  32, 32, 64, 0xFF0F);
-    
-
-    // Boot splash
-   // fb_rect(0, 8, 25, 25, 100, 100, 0xFF34, 0x5432);
-    display_framebuffer(true, false);
-   // fb_draw_ptext(4, 40, 80, stdpsram::String("PSRAM LINK READY"), 0xFFFF, 2, avrclassic_font6x8, 0, 0, 0x0000, 40, {6,8});
-    lcd_fb_display_framebuffer(false, false);
-    vTaskDelay(pdMS_TO_TICKS(50));
-win->WinDraw();
-        display_framebuffer(true, false);
-    int sel = 0, scr = 0;
+auto app = std::make_shared<MyWatchApp>(cfg);
+app->init();            // ✅ phase 2: registration with appManager
+app->start_task();      // ✅ phase 3: run the FreeRTOS tas
+while (1) { //now handle sensor loops and update because it's main
+    update_display_time(&v_env.displayTime); //updates system variable, pulled down by other items
+    vTaskDelay(pdMS_TO_TICKS(10)); // 100 Hz is already plenty
+}
 
 }
