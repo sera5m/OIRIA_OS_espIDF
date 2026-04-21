@@ -321,11 +321,16 @@ void clearScreenEveryXCalls(uint16_t x);
 
 class Window : public std::enable_shared_from_this<Window> {
     public:
+
+
+
         explicit Window(const WindowCfg& cfg, const std::string& initialContent = "");
     
         void WinDraw();
-    
-        // Overloads – both are useful
+        
+        // Overloads 
+        void SetText(const char* newText);
+        void SetText(std::string_view text);
         void SetText(const std::string& newText);
         void SetText(const stdpsram::String& newText);
     
@@ -378,12 +383,17 @@ BgFillType win_backgroundpattern;
         uint16_t   bgPrimaryColor = win_internal_color_background;   // your window BgColor by default
         uint16_t   bgSecondaryColor = Currentcfg.Bg_secondaryColor;
         
-
+        bool use_edge_shimmer; //edges of window will either be dotted or even animated when filling. 
         void setupBackgroundTile();
         // Optional: if i want to hide implementation details later,
         // move tokenize() and TextState to private
+        bool enable_refresh_override    ; //by default no need to enable, but ok if you want
     private:
-   
+
+    BgFillType lastBackgroundPattern = BgFillType::Solid;
+    uint16_t   lastPrimaryColor      = 0;
+    uint16_t   lastSecondaryColor    = 0;
+    
 bool isTokenized = false;
 
 struct TextState {
@@ -430,19 +440,26 @@ uint16_t currentPhysY = 0;
         }
     };
 
-    class WindowManager : public std::enable_shared_from_this<WindowManager> {
+    class WindowManager {
         public:
-            WindowManager(); 
-            ~WindowManager();
+            static WindowManager& getInstance() {
+                static WindowManager instance;  // created once
+                return instance;
+            }
         
-            void UpdateAll();
+            void UpdateAll(bool force);
             bool PruneDeadWindows();   
             bool registerWindow(std::shared_ptr<Window> window);
         
+            // prevent copying
+            WindowManager(const WindowManager&) = delete;
+            WindowManager& operator=(const WindowManager&) = delete;
+        
         private:
+            WindowManager(); 
+            ~WindowManager();
+        
             std::vector<std::shared_ptr<Window>> windows;
-            
         };
-
 
 #endif

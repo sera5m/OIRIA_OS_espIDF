@@ -77,6 +77,9 @@ QueueHandle_t ProcInputQueTarget = nullptr;
 
 static const char* TAG = "main";
 
+//the window manager too
+
+
 // Globals
 /*
 static ky040_handle_t enc_left = nullptr;
@@ -108,7 +111,7 @@ static esp_err_t boot_stage2andaHalf(void);
 static esp_err_t stage_3_spi_init(void);
 static esp_err_t stage_3_sd_mount(void);
 static void       task_app_manager(bool sd_mounted);
-
+static void main_app_handles(void);
 // ────────────────────────────────────────────────
 
 
@@ -142,7 +145,7 @@ extern "C" void app_main(void) {
     boot_stage2andaHalf();
     stage_3_spi_init();
     stage_3_sd_mount();
-    task_app_manager(false);   // sd_ok was false anyway
+    main_app_handles();   // sd_ok was false anyway
 }
 
 // ────────────────────────────────────────────────
@@ -223,7 +226,8 @@ static esp_err_t stage_2_i2c_scan(void)
     fb_clear(0x0000);
 
     fb_draw_text(4, 25, 169, "i2c scan", 0xF00F, 2,
-         0, true, 0x0000, 40, ft_AVR_classic_6x8);
+         0, true, 0x0000,
+          40, ft_AVR_classic_6x8);
 
     // Grid config - 4×4 = 16 circles, one per low nibble (v = 0-F)
     const int spacing_x = 32;
@@ -258,7 +262,7 @@ static esp_err_t stage_2_i2c_scan(void)
                       0xFFFF);
         }
 
-        lcd_refresh_screen();
+        refreshScreen();
 
         // --- Scan the 16 addresses in this superblock ---
         for (int v = 0; v < 16; ++v)
@@ -290,7 +294,7 @@ static esp_err_t stage_2_i2c_scan(void)
                       color,
                       0xFFFF);
 
-            lcd_refresh_screen(); // ← LIVE UPDATE
+            refreshScreen(); // ← LIVE UPDATE
 			//maybe i should add some moving lines or somethigng to look cool idk
            // vTaskDelay(pdMS_TO_TICKS(8)); // small animation delay
         }
@@ -299,8 +303,9 @@ static esp_err_t stage_2_i2c_scan(void)
         // automatically switch to the next superblock (new label + fresh gray grid)
     }
 
-    i2c_del_master_bus(bus);
-
+   //i2c_del_master_bus(bus); //oop had this enabled, why did i do that! how silly
+	fb_clear(0x0000);
+	 refreshScreen();
     ESP_LOGI(TAG, "I2C scan complete");
     return ESP_OK;
 }
@@ -393,11 +398,11 @@ static esp_err_t stage_3_sd_mount(void) {
 
 
 //handles some boot stuff and will also update sensors (not input, it's got it's own task)
-static void main_app_handles(bool sd_mounted) {
+static void main_app_handles() {
 	//added delays to stop weird timing from causing crashes
-	vTaskDelay(100);
+	vTaskDelay(50);
     screen_set_driver(&onboard_screen_driver);
-    vTaskDelay(100);
+    vTaskDelay(50);
 	   //moved framebuffer alloc earlier to not interfere with spi
 	   ESP_LOGI(TAG, "attempting lcd init");
    lcd_init_simple();
@@ -408,27 +413,50 @@ ESP_LOGI(TAG, "invoking fb clear");
    0, true, 0x0000,
     40,ft_AVR_classic_6x8 );
   	ESP_LOGI(TAG, "invoking fb display framebuffer -total mode");
-  	vTaskDelay(100);
-    lcd_fb_display_framebuffer(false, false);
+  	vTaskDelay(50);
+  	refreshScreen();
+    //lcd_fb_display_framebuffer(false, false);
     vTaskDelay(pdMS_TO_TICKS(200));
-    stage_2_i2c_scan();
+    
+    
+    //--------------------i'll just skip this it takes forever with all my testing
+  //  stage_2_i2c_scan();
+  //-------------------------
+  
     fb_clear(0x0000);
+        // Initialize WindowManager
+    auto& wm = WindowManager::getInstance();
+ESP_LOGI(TAG, "WindowManager init-d");
+    
+    ESP_LOGI(TAG, "WindowManager created");
+    
     //start application manager object, we will tick and own it inside this task
 	auto& manager = appManager::instance();
-	vTaskDelay(8);
-	ApplicationConfig cfg;
-		cfg.capabilities = static_cast<uint32_t>(AppCapability::FULLSCREEN) |
-                   static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
-		cfg.stack_size_bytes = 8192;
-		cfg.priority = 5;
-		cfg.name = "WatchApp";
+    vTaskDelay(8);
+    ApplicationConfig cfg;
+    cfg.capabilities = static_cast<uint32_t>(AppCapability::FULLSCREEN) |
+                       static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
+    cfg.stack_size_bytes = 8192;
+    cfg.priority = 5;
+    cfg.name = "WatchApp";
 
-auto app = std::make_shared<MyWatchApp>(cfg);
-app->init();            // ✅ phase 2: registration with appManager
-app->start_task();      // ✅ phase 3: run the FreeRTOS tas
-while (1) { //now handle sensor loops and update because it's main
-    update_display_time(&v_env.displayTime); //updates system variable, pulled down by other items
-    vTaskDelay(pdMS_TO_TICKS(10)); // 100 Hz is already plenty
+    auto app = std::make_shared<MyWatchApp>(cfg);
+    app->init();
+    app->start_task();     // ✅ phase 3: run the FreeRTOS tas
+    
+    
+    
+    //added dynamic throttle because display overperforms above target to ease cpu
+const TickType_t targetTicks = pdMS_TO_TICKS(1000 / v_env.fpsTarget);
+
+TickType_t lastWakeTime = xTaskGetTickCount();
+
+while (1) {
+    update_display_time(&v_env.displayTime);
+    WindowManager::getInstance().UpdateAll(0);
+    refreshScreen();
+
+    vTaskDelayUntil(&lastWakeTime, targetTicks);
 }
 
 }

@@ -6,6 +6,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "os_code/core/rShell/enviroment/env_vars.h"
+#include "os_code/middle_layer/input/input_devs_agg.hpp"
+#include "os_code/middle_layer/input/input_handler.hpp"
+
 #include <vector>
 #include <memory>
 // -------------------------------------------------------------------
@@ -21,7 +24,9 @@ enum class AppCapability : uint32_t {
     USES_SD_CARD        = 1 << 6,   // accesses SD card
     RAW_GPIO_ACCESS     = 1 << 7,   // touches GPIO directly
     NEEDS_WINDOW        = 1 << 8,   // requires at least one window
-    NEEDS_MULTI_WINDOW  = 1 << 9    // needs more than one window
+    NEEDS_MULTI_WINDOW  = 1 << 9,    // needs more than one window
+    PINNED_TO_CORE      =   1<<10  //PIN TO CORE 1 (core 0 runs spi and wifi and hence should be avoided in 
+    //overload, but this adds some potential issues with threading
 };
 
 // Bitmask type
@@ -29,9 +34,10 @@ using AppCapabilities = uint32_t;
 
 struct ApplicationConfig {
     AppCapabilities capabilities;
-    size_t           stack_size_bytes = 4096;   // FreeRTOS stack size
-    UBaseType_t      priority        = 5;       // task priority
-    const char*      name            = "app";
+    size_t           stack_size_bytes = 4096;
+    UBaseType_t      priority        = 5;
+    const char*      name            = "appname";
+    int              tick_rate_hz    = 10;  
 };
 
 // Forward declarations
@@ -46,9 +52,10 @@ void request_stack_size_change(size_t new_bytes);
 void request_priority(int new_priority);
 
 // -------------------------------------------------------------------
-// Base class for all applications
+// Base class for all applications which will never work anyway
 class AppBase : public std::enable_shared_from_this<AppBase> {
 public:
+const char* get_app_name() const { return cfg_.name; } //getter because we love input handling so much!!!
     explicit AppBase(const ApplicationConfig& cfg);
     virtual ~AppBase();
     void init();
@@ -66,7 +73,7 @@ public:
     virtual void on_draw(){}
     // Window access
     std::shared_ptr<Window> get_window() const { return window_; }
-
+    int appTickRateHZ; //tick rate of the app in hz
     // Configuration queries
     AppCapabilities get_capabilities() const { return cfg_.capabilities; }
     bool has_capability(AppCapability cap) const {
@@ -106,6 +113,14 @@ class appManager {
         void draw_all();
         void DestroyAllApps();
     
+
+        void set_focused_app(std::shared_ptr<AppBase> app);
+        std::shared_ptr<AppBase> get_focused_app() const;
+        void route_input_to_focused(const InputEvent& ev);
+        
+
+
+
     private:
         appManager();   // private constructor
         ~appManager();  // private destructor
@@ -115,4 +130,5 @@ class appManager {
     
     private:
         std::vector<std::shared_ptr<AppBase>> apps;
+        std::shared_ptr<AppBase> focused_app; //so now we can have the app manager know what we're focused on
     };

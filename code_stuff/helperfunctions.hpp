@@ -22,4 +22,18 @@ inline T CLAMP(const T& val, const T& min, const T& max) {
     return (val < min) ? min : (val > max) ? max : val;
 }
 
+
+
+inline void ui8To2char(uint8_t v, char* out) {
+    static const char digits[] = "0123456789";
+
+    uint8_t tens = (v * 205) >> 11;
+    uint8_t ones = v - tens * 10;
+
+    out[0] = digits[tens];
+    out[1] = digits[ones];
+}
+//weird magic number bitchift lut fuckery that i don't understand well
+
+
 #endif//end HELPERFUNCTIONS_H

@@ -18,3 +18,4 @@ void split_u32_to_24(uint32_t input, uint8_t *last8, uint8_t *color) {
 
 
 //far as i know the clamp template only goes in the h
+

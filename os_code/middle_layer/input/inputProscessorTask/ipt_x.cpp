@@ -1,12 +1,17 @@
 #include "os_code/middle_layer/input/input_handler.hpp"
 
 #include "esp_log.h"
+#include "os_code/core/rShell/s_hell.hpp"
+#include "os_code/middle_layer/input/input_devs_agg.hpp"
+#include "os_code/middle_layer/input/input_handler.hpp"
 
 static const char* TAG = "InputHandler";
 
 
 
-
+void route_input_to_app_manager(const InputEvent& ev) {
+    appManager::instance().route_input_to_focused(ev);
+}
 
 static void input_consumer_task(void* pvParameters)
 {
@@ -43,14 +48,13 @@ static void input_consumer_task(void* pvParameters)
                     }
                     break;
 
-                case HIDTarget::toTask:
-                    // Forward to main app task (you define handleTaskInput)
-                   // handleTaskInput(ev);
+                    case HIDTarget::toTask:
+                    route_input_to_app_manager(ev);
                     break;
-
-                case HIDTarget::actAsUsbHID:
-                    // Forward to USB HID layer
-                    //sendUsbHidEvent(ev);
+                
+                case HIDTarget::toTask_and_usbHid:
+                    route_input_to_app_manager(ev);
+                    // sendUsbHidEvent(ev);  // if needed
                     break;
 
                 case HIDTarget::wireless_hid:
@@ -58,10 +62,7 @@ static void input_consumer_task(void* pvParameters)
                    // sendWirelessHidEvent(ev);
                     break;
 
-                case HIDTarget::toTask_and_usbHid:
-                   // handleTaskInput(ev);
-                    //sendUsbHidEvent(ev);
-                    break;
+               
 
                 case HIDTarget::everything:
                     // Optional: fallback / special debug

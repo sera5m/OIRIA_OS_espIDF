@@ -2,7 +2,9 @@
 
 
      
-
+#include "os_code/core/rShell/enviroment/env_vars.h"
+#include "os_code/middle_layer/input/input_devs_agg.hpp"
+#include "os_code/middle_layer/input/input_handler.hpp"
 
 
 #include "os_code/core/rShell/s_hell.hpp"
@@ -34,11 +36,11 @@ void request_priority(int new_priority) {
 
 // -------------------------------------------------------------------
 // AppBase implementation
-AppBase::AppBase(const ApplicationConfig& cfg) : cfg_(cfg) {
-
-    // Create a window (replace with actual window creation)
-    // window_ = std::make_shared<Window>(...);
-    ESP_LOGI(TAG, "AppBase created with capabilities 0x%08lx", cfg_.capabilities);
+AppBase::AppBase(const ApplicationConfig& cfg) 
+    : appTickRateHZ(cfg.tick_rate_hz),  // ← USE cfg value
+      cfg_(cfg) 
+{
+    ESP_LOGI(TAG, "app created with tick rate %d Hz", appTickRateHZ);
 }
 
 AppBase::~AppBase() {
@@ -47,6 +49,7 @@ AppBase::~AppBase() {
 
 void AppBase::init() {
     appManager::instance().register_app(shared_from_this());
+    int appTickRateHZ=100;
 }
 
 void AppBase::start_task() {
@@ -54,19 +57,35 @@ void AppBase::start_task() {
         ESP_LOGW(TAG, "Task already running");
         return;
     }
-    BaseType_t res = xTaskCreate(
-        task_func,
-        cfg_.name,
-        cfg_.stack_size_bytes,
-        this,               // pass 'this' as argument
-        cfg_.priority,
-        &task_handle_
-    );
+
+    BaseType_t res;
+
+    if (has_capability(AppCapability::PINNED_TO_CORE)) {
+        res = xTaskCreatePinnedToCore(
+            task_func,
+            cfg_.name,
+            cfg_.stack_size_bytes,
+            this,
+            cfg_.priority,
+            &task_handle_,
+            1
+        );
+    } else {
+        res = xTaskCreate(
+            task_func,
+            cfg_.name,
+            cfg_.stack_size_bytes,
+            this,
+            cfg_.priority,
+            &task_handle_
+        );
+    }
+
     if (res != pdPASS) {
         ESP_LOGE(TAG, "Failed to create task for app");
         task_handle_ = nullptr;
     } else {
-        ESP_LOGI(TAG, "App task started");
+        ESP_LOGI(TAG, "Application task started");
     }
 }
 
@@ -86,21 +105,15 @@ void AppBase::task_func(void* arg) {
 }
 
 void AppBase::run() {
-    // Notify that the app is starting
     on_start();
-
-    TickType_t last_wake = xTaskGetTickCount();
-    const TickType_t period_ms = 50;   // 20 Hz tick – adjust as needed
-
+    
+    const uint32_t interval_ms = 1000 / appTickRateHZ;
+    ESP_LOGI(TAG, "run() starting with interval %lu ms", interval_ms);
+    
     while (true) {
-        // Call the derived tick_app with the actual elapsed time
-        tick_app(period_ms);
-
-        // Delay for the remainder of the period
-        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(period_ms));
+        tick_app(interval_ms);
+        vTaskDelay(pdMS_TO_TICKS(interval_ms));
     }
-
-    on_stop(); // never reached in this simple loop
 }
 
 // -------------------------------------------------------------------
@@ -144,4 +157,20 @@ void appManager::DestroyAllApps() {
     }
 
     apps.clear();
+}
+void appManager::set_focused_app(std::shared_ptr<AppBase> app) {
+    focused_app = app;
+    ESP_LOGI(TAG, "Focus set to app: %s", app ? app->get_app_name() : "none");
+}
+
+std::shared_ptr<AppBase> appManager::get_focused_app() const {
+    return focused_app;
+}
+
+void appManager::route_input_to_focused(const InputEvent& ev) {
+    if (focused_app) {
+        focused_app->receive_event_input(&ev);
+    } else {
+        ESP_LOGW(TAG, "No focused app to receive input");
+    }
 }

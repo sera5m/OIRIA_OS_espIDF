@@ -6,9 +6,8 @@
 #include <memory>
 #include <sstream>
 #include <algorithm>
-#include <variant>//unions for the code
+#include <variant>
 #include "code_stuff/types.h"
-#include <memory>
 #include <math.h>
 #include "hardware/wiring/wiring.h"
 #include "freertos/FreeRTOS.h"
@@ -21,27 +20,26 @@
 #include "esp_psram.h"
 #include "rom/cache.h"
 #include <string.h>
-#include <math.h>
 #include "hardware/drivers/abstraction_layers/al_scr.h"
-
 #include "hardware/drivers/lcd/fonts/font_avr_classics.h"
 #include "hardware/drivers/lcd/st7789v2/lcDriver.h"
-#include "hardware/drivers/lcd/fonts/font_avr_classics.h"
-#include "os_code\core\window_env\wenv_basicThemes.h"
+#include "os_code/core/window_env/wenv_basicThemes.h"
 #include <vector>
-
-#include "../../../hardware/drivers/psram_std/psram_std.hpp" //my custom work for psram stdd things
+#include "../../../hardware/drivers/psram_std/psram_std.hpp"
 #include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
-#include <memory>
 #include "os_code/core/rShell/enviroment/env_vars.h"
-
-#include "os_code/core/rShell/s_hell.hpp"   // app framework
-#include "os_code/core/rShell/enviroment/env_vars.h"
-
-
+#include "os_code/core/rShell/s_hell.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
 
-//fuck it i'll just throw all the includes and hope it works
+// Helper function to convert numbers to string with 2-digit formatting
+inline std::string tostr(int value) {
+    char buffer[3];
+    snprintf(buffer, sizeof(buffer), "%02d", value);
+    return std::string(buffer);
+}
+
+extern char time_str[];
+
 class MyWatchApp : public AppBase {
 public:
     explicit MyWatchApp(const ApplicationConfig& cfg);
@@ -51,15 +49,12 @@ public:
     void suspend() override;
     void force_close() override;
 
-    // Linux-style lifecycle
     void on_start() override;
     void on_stop() override;
-    void on_pause() override;   // optional
-    void on_resume() override;  // optional
-
-    // New drawing hook you added
+    void on_pause() override;
+    void on_resume() override;
     void on_draw() override;
 
 private:
-    std::shared_ptr<Window> main_window_;   // store your watch window here
+    std::shared_ptr<Window> watch_window;
 };

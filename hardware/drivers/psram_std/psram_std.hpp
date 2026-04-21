@@ -76,5 +76,84 @@ using Vector = std::vector<T, Allocator<T>>;
 // template <typename K, typename V>
 // using Map = std::map<K, V, std::less<K>, Allocator<std::pair<const K, V>>>;
 
+// Create a String with initial content (avoids double allocation)
+inline String make_string(const char* cstr) {
+    return String(cstr, Allocator<char>{});
+}
+
+inline String make_string(const std::string_view sv) {
+    return String(sv.data(), sv.size(), Allocator<char>{});
+}
+
+inline String make_string(const char* cstr, size_t len) {
+    return String(cstr, len, Allocator<char>{});
+}
+
+// Reserve + assign in one go (good for performance)
+inline String make_string_reserved(size_t capacity, const char* cstr = nullptr) {
+    String s(Allocator<char>{});
+    s.reserve(capacity);
+    if (cstr) s = cstr;
+    return s;
+}
+
+// ------------------------------------------------------------------
+// Safe numeric conversion helpers (you already have safe_parse_*)
+// ------------------------------------------------------------------
+
+// to_string equivalents that go into PSRAM
+inline String to_string(int value) {
+    char buf[12];  // enough for int32 + sign
+    snprintf(buf, sizeof(buf), "%d", value);
+    return make_string(buf);
+}
+
+inline String to_string(unsigned int value) {
+    char buf[11];
+    snprintf(buf, sizeof(buf), "%u", value);
+    return make_string(buf);
+}
+
+inline String to_string(uint16_t value) {   // useful for your colors
+    char buf[6];
+    snprintf(buf, sizeof(buf), "%u", value);
+    return make_string(buf);
+}
+
+// Hex version (very useful for colors, debug, etc.)
+inline String to_hex_string(uint32_t value, bool uppercase = false, bool prefix = true) {
+    char buf[11];  // 0x + 8 hex digits + null
+    const char* fmt = prefix ? (uppercase ? "0X%08X" : "0x%08x") : (uppercase ? "%08X" : "%08x");
+    snprintf(buf, sizeof(buf), fmt, value);
+    return make_string(buf);
+}
+
+// ------------------------------------------------------------------
+// Debug / statistics helpers (very handy on ESP32)
+// ------------------------------------------------------------------
+
+// Get current PSRAM usage (approximate)
+inline size_t get_psram_used() {
+    multi_heap_info_t info;
+    heap_caps_get_info(&info, MALLOC_CAP_SPIRAM);
+    return info.total_allocated_bytes;
+}
+
+inline size_t get_psram_free() {
+    return heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+}
+
+inline size_t get_psram_largest_free_block() {
+    return heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+}
+
+// Optional: print summary
+inline void print_psram_info(const char* tag = "PSRAM") {
+    ESP_LOGI(tag, "PSRAM - Used: %zu bytes, Free: %zu bytes, Largest block: %zu bytes",
+             get_psram_used(), get_psram_free(), get_psram_largest_free_block());
+}
+
+
+
 } // namespace psram
 #endif

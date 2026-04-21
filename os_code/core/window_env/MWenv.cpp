@@ -180,11 +180,22 @@ void Window::setupBackgroundTile() {
         bgTile = std::make_shared<PsramBackgroundTile>(32, 32);
     }
 
-    bgTile->pbt_cfg.fill_type = win_backgroundpattern;
-    bgTile->generate_pattern(win_backgroundpattern, bgPrimaryColor, bgSecondaryColor);
+    // Only regenerate if something actually changed
+    if (bgTile->pbt_cfg.fill_type != win_backgroundpattern ||
+        bgTile->primaryColor != bgPrimaryColor ||
+        bgTile->secondaryColor != bgSecondaryColor) {
 
-    ESP_LOGI(TAG, "Background tile generated: pattern %d, primary=0x%04X, secondary=0x%04X",
-             (int)win_backgroundpattern, bgPrimaryColor, bgSecondaryColor);
+        bgTile->pbt_cfg.fill_type = win_backgroundpattern;
+        bgTile->generate_pattern(win_backgroundpattern, bgPrimaryColor, bgSecondaryColor);
+
+        // Update last-known values
+        lastBackgroundPattern = win_backgroundpattern;
+        lastPrimaryColor      = bgPrimaryColor;
+        lastSecondaryColor    = bgSecondaryColor;
+
+        ESP_LOGI(TAG, "Background tile regenerated: pattern %d, primary=0x%04X, secondary=0x%04X",
+                 (int)win_backgroundpattern, bgPrimaryColor, bgSecondaryColor);
+    }
 }
 
 // Helper – copies one tile into the framebuffer with rotation
@@ -259,11 +270,15 @@ void Window::calculateLogicalDimensions()
 Window::Window(const WindowCfg& cfg, const std::string& initialContent)
     : content(stdpsram::String(initialContent.begin(), initialContent.end())),
       Initialcfg(cfg),
-      Currentcfg(cfg)
+      Currentcfg(cfg),
+      w_font_info(ft_AVR_classic_6x8)   //init with default font
 {
     // Make sure name is null-terminated
     Currentcfg.name[sizeof(Currentcfg.name) - 1] = '\0';
 
+
+	bool enable_refresh_override=0;
+		
     // Sync sizing & colors
     wi_sizing.Xpos     = Currentcfg.Posx;
     wi_sizing.Ypos     = Currentcfg.Posy;
@@ -283,7 +298,7 @@ Window::Window(const WindowCfg& cfg, const std::string& initialContent)
     win_backgroundpattern   = cfg.backgroundType;
     bgPrimaryColor          = win_internal_color_background;
     bgSecondaryColor        = Currentcfg.Bg_secondaryColor;
-    fontdata w_font_info=ft_AVR_classic_6x8; //we'll just set this here as a default... 
+    //fontdata w_font_info=ft_AVR_classic_6x8; //we'll just set this here as a default... 
     // Create small fixed-size tile (32×32 is perfect for repeating patterns)
     bgTile = std::make_shared<PsramBackgroundTile>(32, 32);
 
@@ -357,35 +372,55 @@ int16_t y = parse_int(inside.substr(comma + 1));
 // Anonymous namespace = visible only in this .cpp file
 
 
- int safe_parse_int(const stdpsram::String& str, int default_val = 0) {
+// ====================== FAST UI8 TO 2 CHARS ======================
+inline void ui8Tostr(uint8_t v, std::string& out, size_t pos = std::string::npos) {
+    static const char digits[] = "0123456789";
+    uint8_t tens = (static_cast<uint16_t>(v) * 205U) >> 11;
+    uint8_t ones = v - tens * 10U;
+
+    if (pos == std::string::npos) {
+        out.push_back(digits[tens]);
+        out.push_back(digits[ones]);
+    } else {
+        if (pos + 2 > out.size()) out.resize(pos + 2);
+        out[pos] = digits[tens];
+        out[pos + 1] = digits[ones];
+    }
+}
+
+
+
+// ====================== FASTER PARSERS ======================
+
+int safe_parse_int(std::string_view str, int default_val = 0) {
     if (str.empty()) return default_val;
 
     int sign = 1;
     size_t i = 0;
 
-    if (!str.empty() && str[0] == '-') { sign = -1; ++i; }
-    if (!str.empty() && str[0] == '+') { ++i; }
+    if (str[0] == '-') { sign = -1; ++i; }
+    else if (str[0] == '+') { ++i; }
 
     int result = 0;
     bool digits_found = false;
 
     while (i < str.size()) {
-        char c = str[i++];
+        char c = str[i];
         if (c < '0' || c > '9') break;
         result = result * 10 + (c - '0');
         digits_found = true;
+        ++i;
     }
 
     return digits_found ? result * sign : default_val;
 }
 
- uint16_t safe_parse_color(const stdpsram::String& str, uint16_t default_val = 0xFFFF) {
+uint16_t safe_parse_color(std::string_view str, uint16_t default_val = 0xFFFF) {
     if (str.empty()) return default_val;
 
     size_t start = 0;
     int base = 10;
 
-    // Check for 0x / 0X prefix
     if (str.size() >= 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
         base = 16;
         start = 2;
@@ -407,141 +442,124 @@ int16_t y = parse_int(inside.substr(comma + 1));
         result = result * base + digit;
         digits_found = true;
 
-        // Early overflow protection (16-bit color)
         if (result > 0xFFFF) return default_val;
     }
 
     return digits_found ? static_cast<uint16_t>(result) : default_val;
 }
 
-  // end anonymous namespace  // end anonymous namespace
+// ====================== IMPROVED TOKENIZER ======================
 
-// ──────────────────────────────────────────────
-// Main tokenize function – cleaner structure
-// ──────────────────────────────────────────────
-stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& s) {
+stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& input) {
     stdpsram::Vector<TextChunk> chunks;
-    if (s.empty()) {
-        ESP_LOGI(TAG, "Tokenize: empty input → empty chunks");
+    if (input.empty()) {
         return chunks;
     }
 
+    std::string_view s(input.c_str(), input.length());  // zero-copy view
     stdpsram::String text_buffer;
-    text_buffer.reserve(s.length() / 2 + 64);  // rough guess, helps perf
+    text_buffer.reserve((input.length() + 1) / 2 + 32);
 
     auto flush = [&]() {
         if (!text_buffer.empty()) {
             chunks.emplace_back(TextChunk(std::move(text_buffer)));
-            text_buffer.clear();
-            ESP_LOGD(TAG, "Flushed text chunk, total chunks now: %zu", chunks.size());
+            text_buffer.clear();   // note, moved-from string is now empty again
         }
     };
 
     size_t i = 0;
     while (i < s.length()) {
-        if (s[i] == '<' && i + 1 < s.length() && s[i + 1] == '|') {
-            flush();
+        // Fast path: normal character
+        if (s[i] != '<' || i + 1 >= s.length() || s[i + 1] != '|') {
+            text_buffer += s[i];
+            ++i;
+            continue;
+        }
 
-            size_t end = s.find("|>", i + 2);
-            if (end == stdpsram::String::npos) {
-                ESP_LOGW(TAG, "Unclosed tag at pos %zu → treat rest as text", i);
-                text_buffer = s.substr(i);
-                break;
+        // Found potential tag: "<|"
+        flush();
+
+        size_t end = s.find("|>", i + 2);
+        if (end == std::string_view::npos) {
+            // Unclosed tag → treat rest as text
+            text_buffer = s.substr(i);
+            break;
+        }
+
+        std::string_view inside = s.substr(i + 2, end - i - 2);
+        i = end + 2;
+
+        if (inside.empty()) continue;
+
+        // ───── Short toggle tags ─────
+        if (inside.length() <= 2) {
+            bool is_off = (inside.length() == 2 && inside[0] == '/');
+            char first = is_off ? inside[1] : inside[0];
+
+            switch (first) {
+                case 'n':
+                    if (!is_off) chunks.emplace_back(TagType::LineBreak);
+                    break;
+
+                case 'u':
+                    chunks.emplace_back(is_off ? TagType::UnderlineOff : TagType::UnderlineToggle);
+                    break;
+
+                case 's':
+                    chunks.emplace_back(is_off ? TagType::StrikethroughOff : TagType::StrikethroughToggle);
+                    break;
+
+                case 'b':
+                    chunks.emplace_back(is_off ? TagType::BoldOff : TagType::BoldToggle);
+                    break;
+
+                case 'i':
+                    chunks.emplace_back(is_off ? TagType::ItalicOff : TagType::ItalicToggle);
+                    break;
+
+                default:
+                    // Unknown short tag → treat as literal text
+                    text_buffer.append(inside.data(), inside.size());
+                    break;
             }
+            continue;
+        }
 
-            stdpsram::String inside = s.substr(i + 2, end - i - 2);
-            i = end + 2;
-
-            if (inside.empty()) continue;
-
-            ESP_LOGD(TAG, "Found tag: <%s>", inside.c_str());
-
-            // ────────────────────── Short toggle tags ──────────────────────
-            if (inside.length() == 1 || inside.length() == 2) {
-                char first = inside[0];
-                bool is_off = (inside.length() == 2 && inside[0] == '/');
-
-                switch (first) {
-                    case 'n':
-                      if (inside == "n" ) {
-                            chunks.emplace_back(TagType::LineBreak);
-                            ESP_LOGD(TAG, "LineBreak");
-                        }
-                        break;
-
-                    case 'u':
-                        chunks.emplace_back(is_off ? TagType::UnderlineOff : TagType::UnderlineToggle);
-                        ESP_LOGD(TAG, "Underline %s", is_off ? "OFF" : "ON");
-                        break;
-
-                    case 's':
-                        chunks.emplace_back(is_off ? TagType::StrikethroughOff : TagType::StrikethroughToggle);
-                        ESP_LOGD(TAG, "Strikethrough %s", is_off ? "OFF" : "ON");
-                        break;
-
-                    case 'b':
-                        chunks.emplace_back(is_off ? TagType::BoldOff : TagType::BoldToggle);
-                        ESP_LOGD(TAG, "Bold %s", is_off ? "OFF" : "ON");
-                        break;
-
-                    case 'i':
-                        chunks.emplace_back(is_off ? TagType::ItalicOff : TagType::ItalicToggle);
-                        ESP_LOGD(TAG, "Italic %s", is_off ? "OFF" : "ON");
-                        break;
-
-                    default:
-                        ESP_LOGD(TAG, "Unknown short tag: %s → treat as text", inside.c_str());
-                        text_buffer += inside;
-                        break;
-                }
-                continue;
-            }
-
-            // ────────────────────── Value tags ──────────────────────
-            if (inside.starts_with("color=")) {
-                auto val = inside.substr(6);
-                uint16_t col = safe_parse_color(val);
-                chunks.emplace_back(TagType::ColorChange, ColorTag{col});
-                ESP_LOGD(TAG, "Color → 0x%04x", col);
-            }
-            else if (inside.starts_with("size=")) {
-                auto val = inside.substr(5);
-                int sz = safe_parse_int(val, 1);
-                if (sz >= 1 && sz <= 255) {
-                    chunks.emplace_back(TagType::SizeChange, SizeTag{static_cast<uint8_t>(sz)});
-                    ESP_LOGD(TAG, "Size → %d", sz);
-                }
-            }
-            else if (inside.starts_with("pos=")) {
-                size_t comma = inside.find(',', 4);
-                if (comma != stdpsram::String::npos) {
-                    auto x_str = inside.substr(4, comma - 4);
-                    auto y_str = inside.substr(comma + 1);
-                    int16_t x = safe_parse_int(x_str);
-                    int16_t y = safe_parse_int(y_str);
-                    chunks.emplace_back(TagType::PosChange, PosTag{x, y});
-                    ESP_LOGD(TAG, "Pos → %d,%d", x, y);
-                }
-            }
-            else if (inside.starts_with("hl=")) {
-                auto val = inside.substr(3);
-                uint16_t col = safe_parse_color(val, 0xFFFF);
-                chunks.emplace_back(TagType::HighlightChange, HighlighterTag{col, true});
-                ESP_LOGD(TAG, "Highlight ON color=0x%04x", col);
-            }
-            else {
-                ESP_LOGD(TAG, "Unknown tag: %s → treat as literal text", inside.c_str());
-                text_buffer += inside;
+        // ───── Value tags ─────
+        if (inside.starts_with("color=")) {
+            auto val = inside.substr(6);
+            uint16_t col = safe_parse_color(val);
+            chunks.emplace_back(TagType::ColorChange, ColorTag{col});
+        }
+        else if (inside.starts_with("size=")) {
+            auto val = inside.substr(5);
+            int sz = safe_parse_int(val, 1);
+            if (sz >= 1 && sz <= 255) {
+                chunks.emplace_back(TagType::SizeChange, SizeTag{static_cast<uint8_t>(sz)});
             }
         }
+        else if (inside.starts_with("pos=")) {
+            size_t comma = inside.find(',', 4);
+            if (comma != std::string_view::npos) {
+                auto x_str = inside.substr(4, comma - 4);
+                auto y_str = inside.substr(comma + 1);
+                int16_t x = safe_parse_int(x_str);
+                int16_t y = safe_parse_int(y_str);
+                chunks.emplace_back(TagType::PosChange, PosTag{x, y});
+            }
+        }
+        else if (inside.starts_with("hl=")) {
+            auto val = inside.substr(3);
+            uint16_t col = safe_parse_color(val, 0xFFFF);
+            chunks.emplace_back(TagType::HighlightChange, HighlighterTag{col, true});
+        }
         else {
-            text_buffer += s[i++];
+            // Unknown tag → treat as literal text
+            text_buffer.append(inside.data(), inside.size());
         }
     }
 
     flush();
-    ESP_LOGI(TAG, "Tokenization complete: %zu chunks", chunks.size());
-    ESP_LOGI(TAG, "%s", s.c_str());
     return chunks;
 }
 
@@ -549,14 +567,16 @@ stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& s) {
 
 
 // ──────────────────────────────────────────────
-// COMPLETELY REWRITTEN WinDraw() – logical origin fixed at (Posx, Posy) for ALL rotations
+// WinDraw() – logical origin fixed at (Posx, Posy) for ALL rotations
 // ──────────────────────────────────────────────
 
 
-
+//todo: draw a rect for the -[]x thing windows have at the top, plus their name in the middle
+//i guess i can do this via using a miniturized version of the blit function, using three bitmaps with seperate colrors i think
 void Window::WinDraw() {
     if (!IsWindowShown) return;
-
+    if(!dirty && !enable_refresh_override) return; //might want to override this in the event ... ah hell i'ljust add a flag 
+   // if (dirty)
     // Reuse the same calculation (DRY principle)
     calculateLogicalDimensions();
 
@@ -671,84 +691,101 @@ void Window::WinDraw() {
     }
 
     // === Text rendering (unchanged, uses same rotation math) ===
-    if (!isTokenized) {
-        cachedChunks = tokenize(content);
-        isTokenized = true;
+    // === Text rendering ===
+if (!isTokenized) {
+    cachedChunks = tokenize(content);
+    isTokenized = true;
+}
+
+Tstate.color         = win_internal_color_text;
+Tstate.size          = Currentcfg.TextSizeMult;
+Tstate.underline     = false;
+Tstate.strikethrough = false;
+Tstate.bold          = false;
+Tstate.italic        = false;
+Tstate.highlight_bg  = 0;
+
+const int text_rot_flag = rot * 4;
+
+int curLX = 2;
+int curLY = 2;
+uint8_t last_line_height = Currentcfg.TextSizeMult;
+
+// Use the cached chunks directly (the copy was unnecessary and risky)
+for (const auto& chunk : cachedChunks){
+    switch (chunk.kind) {
+    case TagType::PlainText: {
+        // SAFE version - never throws, zero extra copy
+        const stdpsram::String* pTxt = std::get_if<stdpsram::String>(&chunk.content);
+        if (!pTxt || pTxt->empty()) break;
+
+        const auto& txt = *pTxt;          // const reference = zero cost
+
+        int rx, ry;
+        rotPointLocal(curLX, curLY, rawW, rawH, rot, rx, ry);
+        int sx = physX + rx;
+        int sy = physY + ry;
+
+        fb_draw_ptext(text_rot_flag,
+                      sx, sy,
+                      txt,                    // pass the reference
+                      Tstate.color,
+                      Tstate.size,
+                      12,
+                      Tstate.highlight_bg,
+                      win_internal_color_background,
+                      100,
+                      w_font_info);
+
+        curLX += txt.length() * (w_font_info.fcs.x) * Tstate.size;
+        if (curLX >= rawW - 4) {
+            curLX = 2;
+            curLY += (w_font_info.fcs.y) * last_line_height + 4;
+        }
+        last_line_height = Tstate.size;
+        break;
     }
 
-    Tstate.color         = win_internal_color_text;
-    Tstate.size          = Currentcfg.TextSizeMult;
-    Tstate.underline     = false;
-    Tstate.strikethrough = false;
-    Tstate.bold          = false;
-    Tstate.italic        = false;
-    Tstate.highlight_bg  = 0;
+    case TagType::LineBreak:
+        curLX = 2;
+        curLY += w_font_info.fcs.y * last_line_height + 4;
+        break;
 
-    const int text_rot_flag = rot * 4;
-    
+    case TagType::PosChange: {
+        auto p = std::get<PosTag>(chunk.content);   // these are tiny, safe
+        curLX = p.x;
+        curLY = p.y;
+        break;
+    }
 
-    int curLX = 2;
-    int curLY = 2;
-    uint8_t last_line_height = Currentcfg.TextSizeMult;
+    case TagType::ColorChange:
+        Tstate.color = std::get<ColorTag>(chunk.content).value;
+        break;
 
-    for (const auto& chunk : cachedChunks) {
-        switch (chunk.kind) {
-        case TagType::PlainText: {
-            const auto& txt = std::get<stdpsram::String>(chunk.content);
-            if (txt.empty()) break;
+    case TagType::SizeChange: {
+        int s = std::get<SizeTag>(chunk.content).value;
+        if (s >= 1 && s <= 16) Tstate.size = s;
+        break;
+    }
 
-            int rx, ry;
-            rotPointLocal(curLX, curLY, rawW, rawH, rot, rx, ry);
-            int sx = physX + rx;
-            int sy = physY + ry;
+    case TagType::HighlightChange: {
+        auto h = std::get<HighlighterTag>(chunk.content);
+        Tstate.highlight_bg = h.enabled ? h.color : 0;
+        break;
+    }
 
-            
+    // all the toggle cases (unchanged)
+    case TagType::UnderlineToggle:    Tstate.underline = true;  break;
+    case TagType::UnderlineOff:       Tstate.underline = false; break;
+    case TagType::StrikethroughToggle:Tstate.strikethrough = true;  break;
+    case TagType::StrikethroughOff:   Tstate.strikethrough = false; break;
+    case TagType::BoldToggle:         Tstate.bold = true; break;
+    case TagType::BoldOff:            Tstate.bold = false; break;
+    case TagType::ItalicToggle:       Tstate.italic = true; break;
+    case TagType::ItalicOff:          Tstate.italic = false; break;
 
-            fb_draw_ptext(text_rot_flag, 
-            sx, sy, txt, Tstate.color, Tstate.size,
-             12, Tstate.highlight_bg, win_internal_color_background,
-              999, w_font_info); //i don't think i'm using the highlight command right
-
-            curLX += txt.length() * (w_font_info.fcs.x) * Tstate.size;
-            if (curLX >= rawW - 4) {
-                curLX = 2;
-                curLY += (w_font_info.fcs.y) * last_line_height + 4;
-            }
-            last_line_height = Tstate.size;
-            break;
-        }
-
-        case TagType::LineBreak:
-            curLX = 2;
-            curLY += w_font_info.fcs.y * last_line_height + 4;
-            break;
-
-        case TagType::PosChange: {
-            auto p = std::get<PosTag>(chunk.content);
-            curLX = p.x; curLY = p.y;
-            break;
-        }
-
-        case TagType::ColorChange:   Tstate.color = std::get<ColorTag>(chunk.content).value; break;
-        case TagType::SizeChange: {
-            int s = std::get<SizeTag>(chunk.content).value;
-            if (s >= 1 && s <= 16) Tstate.size = s;
-            break;
-        }
-        case TagType::HighlightChange: {
-            auto h = std::get<HighlighterTag>(chunk.content);
-            Tstate.highlight_bg = h.enabled ? h.color : 0;
-            break;
-        }
-        case TagType::UnderlineToggle:    Tstate.underline = true;  break;
-        case TagType::UnderlineOff:       Tstate.underline = false; break;
-        case TagType::StrikethroughToggle:Tstate.strikethrough = true;  break;
-        case TagType::StrikethroughOff:   Tstate.strikethrough = false; break;
-        case TagType::BoldToggle:         Tstate.bold = true; break;
-        case TagType::BoldOff:            Tstate.bold = false; break;
-        case TagType::ItalicToggle:       Tstate.italic = true; break;
-        case TagType::ItalicOff:          Tstate.italic = false; break;
-        default: break;
+     default:
+          break;
         }
     }
 
@@ -760,7 +797,27 @@ void Window::WinDraw() {
 
 //guess who found out she needed to do this a lot after making the window system and working on other drivers
 //i swear to god bruh
+void Window::SetText(const char* newText){
+    if (!newText) {
+        content.clear();
+        isTokenized = false;
+        dirty = true;
+        return;
+    }
 
+    // Direct assignment = copy + null termination handled correctly
+    content = stdpsram::String(newText);
+
+    isTokenized = false;
+    dirty = true;
+}
+
+void Window::SetText(std::string_view text)
+{
+    content = stdpsram::String(text.data(), text.size());
+    isTokenized = false;
+    dirty = true;
+}
 
 void Window::SetText(const std::string& newText) { //std string variant with explicit conversion
     content = stdpsram::String(newText.begin(), newText.end());  // force PSRAM copy
@@ -811,6 +868,7 @@ cachedChunks
     ↓
 render cached chunks every frame
 */
+
 WindowManager::WindowManager(){
     //DON'T REALLY need to do anything outside of initialize the window manager freerots task
 }
@@ -818,8 +876,8 @@ WindowManager::~WindowManager(){
     //i have no idea what you would do here
 }
 
-void WindowManager::UpdateAll() {
-    // Remove expired weak_ptrs and update active windows
+void WindowManager::UpdateAll(bool force) {
+
     for (auto it = windows.begin(); it != windows.end(); ) {
         if (!*it || !(*it)->IsWindowShown) {
             ESP_LOGD(TAG, "WindowManager: Removing dead window");
@@ -827,7 +885,12 @@ void WindowManager::UpdateAll() {
             continue;
         }
 
-        (*it)->WinDraw();        // This is what actually draws
+        if (force) {
+            (*it)->enable_refresh_override = true;
+        }
+
+        (*it)->WinDraw();
+
         ++it;
     }
 }
