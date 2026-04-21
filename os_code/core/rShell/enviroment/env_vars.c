@@ -8,6 +8,15 @@
 #include <time.h>
 #include "esp_timer.h"
 
+
+
+
+const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", //i miss when we had pride month but nooo conservitard cult-ure war
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+
+
+
+
 EnvConfig v_env = { //vars_env
     // =========================
     // SYSTEM / TEMPERATURE

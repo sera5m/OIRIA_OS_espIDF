@@ -25,6 +25,7 @@ typedef struct __attribute__((packed)) {
     uint16_t ms; 
 } s_displayTime;
 
+extern const char* months[];
 
 
 typedef struct {

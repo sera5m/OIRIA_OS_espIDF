@@ -54,7 +54,7 @@ inline char* write_small_int(char* p, int value)
     return p;
 }
 
-char time_str[64];
+char time_str[128];
  //this is stupid but i'll just alloc it here. gotta figure out how to get the alloc on runtime
 // ===================================================================
 
@@ -71,7 +71,7 @@ void MyWatchApp::on_start()
     watch_window = std::make_shared<Window>(
         WindowCfg{
             .Posx = static_cast<uint16_t>(0),
-            .Posy = static_cast<uint16_t>(v_env.screen_dim_w / 4),
+            .Posy = static_cast<uint16_t>(0),
             .Layer = 0,
             .renderPriority = 0,
             .win_width = static_cast<uint16_t>(v_env.screen_dim_w),
@@ -115,19 +115,28 @@ void MyWatchApp::on_draw() {
     static int last_second = -1;
     int current_second = v_env.displayTime.ss;
     
-    ESP_LOGI(TAG, "on_draw: current_second=%d, last_second=%d", current_second, last_second);  // ← ADD THIS
-    
     if (current_second != last_second) {
-        snprintf(time_str, sizeof(time_str), "<|size=3|>Time: %02d:%02d:%02d", 
-                 v_env.displayTime.hh, v_env.displayTime.mm, v_env.displayTime.ss);
+        int month_idx = v_env.displayTime.month - 1;
+        if (month_idx < 0) month_idx = 0;
+        if (month_idx > 11) month_idx = 11;
         
-        ESP_LOGI(TAG, "Updating text to: %s", time_str);  // ← ADD THIS
+        snprintf(time_str, sizeof(time_str), 
+                 "<|size=5|><|color=0xAD0F|>%02d:%02d<|size=2|>:%02d<|n|><|n|><|size=2|>%s %d, %d", 
+                 v_env.displayTime.hh, 
+                 v_env.displayTime.mm, 
+                 v_env.displayTime.ss,
+                 months[month_idx],
+                 v_env.displayTime.day,
+                 v_env.displayTime.year);
+        
+        ESP_LOGI(TAG, "Time string: %s", time_str);  // Debug
         
         watch_window->SetText(time_str);
         watch_window->dirty = true;
         last_second = current_second;
     }
 }
+
 void MyWatchApp::tick_app(uint32_t delta_ms)
 {
     static int call_count = 0;
