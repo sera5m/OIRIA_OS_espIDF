@@ -897,7 +897,7 @@ mark_rows_range_dirty(
 
 // --------------------- GLOBALS ---------------------
 // --------------------- GLOBALS ---------------------
-uint64_t frame = 0;
+uint32_t frame = 0;
 
 
 void lcd_refreshScreen(void) {
@@ -988,4 +988,5 @@ void lcd_refreshScreen(void) {
     }
 
     frame++;
+    if(frame>2147483600){frame=0}; //reset it to not overflow. doubt this will ever come up but you never know
 }
