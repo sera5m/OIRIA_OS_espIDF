@@ -97,7 +97,14 @@ void fb_rect(
     uint16_t secondarycolor
 );
 
+void fb_rect_border(
+    bool isfilled,
+    uint16_t borderThickness,
+    int x, int y, int w, int h,
+    uint16_t colorA,
+    uint16_t colorB, uint8_t segment_len
 
+); //special highlighted rect for window types or focused square things
 
 void fb_line(
     int x0, int y0,

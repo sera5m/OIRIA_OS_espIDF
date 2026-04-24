@@ -453,7 +453,7 @@ TickType_t lastWakeTime = xTaskGetTickCount();
 
 while (1) {
     update_display_time(&v_env.displayTime);
-    WindowManager::getInstance().UpdateAll(0);
+    WindowManager::getInstance().UpdateAll(0,1);
     refreshScreen();
 
     vTaskDelayUntil(&lastWakeTime, targetTicks);

@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include <time.h>
 #include "esp_timer.h"
-
+#include "code_stuff/types.h"
 
 
 
@@ -40,9 +40,13 @@ EnvConfig v_env = { //vars_env
     .brightness = 128,
     .fpsTarget = 45,
     .displayEnabled = true,
-    .screen_dim_w=240,
+    //change this to the actual screen size in the driver, retard
+    //but i do not want to load drivers for screens dynamically rn because i have bigger towers to topple
+    .screen_dim_w=240, 
     .screen_dim_h=280,
-
+    //these two variables may change at any time, but screen dim basics won't, so cope harder LLLLIBERRUUUULLLL
+    .clamped_screen_dim_w=240, 
+    .clamped_screen_dim_h=280, 
     // =========================
     // STORAGE
     // =========================

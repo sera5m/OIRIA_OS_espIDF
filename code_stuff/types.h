@@ -36,10 +36,17 @@ struct vec2_ui16t {
 };
 
 
+
+typedef struct {
+        uint8_t width;
+        uint8_t height;
+        uint16_t *data;   // RGB565 pixels
+    } s_bmp_t;
+//16 bit bitmap description
+
 //application info-modes-full type implementations of whatever in types.cpp
 
 //enums
-typedef enum{WM_MAIN, WM_STOPWATCH,WM_ALARMS,WM_TIMER,WM_NTP_SYNCH, WM_SET_TIME,WM_SET_TIMEZONE,WM_APPMENU,WM_COUNT}WatchMode;
 
 typedef enum{HMM_BIOMONITOR, //Current fuckshit like that beep boop beeip in hopital
 HMM_DAYHISTORY,    //a bar graph over the past x days.
@@ -78,11 +85,13 @@ typedef struct {
     AlertSource source;
 } AlertsSettings;
 
-typedef struct {
-    uint8_t brightness; // 0-255
-    int greyscale;      // bool
-    int fast_refresh;   // bool
-} DisplaySettings;
+typedef struct __attribute__((packed)) {
+	uint16_t x;
+	uint16_t y;
+	uint16_t w;
+	uint16_t h;
+	}s_bounds_16u;
+
 /*
 typedef struct {
     int nfc_enabled;  // bool

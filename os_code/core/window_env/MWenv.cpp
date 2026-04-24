@@ -39,6 +39,18 @@
 
 static const char *TAG = "MWenv"; 
 
+toolbarconfig g_defaultToolbarConfig = {
+    .tb_overlay = false,
+    .tb_update_hz = 2,
+    .tb_rot = 1,
+    .showToolbar = true,
+    .disableTouch = false,
+    .expandsDownOnTap = false,
+    .ref_iconptrs = {nullptr},
+    .icons_shown = static_cast<toolbar_items_t>(0),
+    .color = 0x2104
+};
+
 
 //backgroundfill will use a seperate small buffer to avoid regenerating complex patterns or images, fortunately it's smaller than the actual screen size, and loops, so we'll just render one tile and translate it from position a to b in memory
 //i think we'll have to transfer the blocks over to the adjacent position in memory, therefore redrawing it over text
@@ -573,103 +585,6 @@ stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& input) {
 
 //todo: draw a rect for the -[]x thing windows have at the top, plus their name in the middle
 //i guess i can do this via using a miniturized version of the blit function, using three bitmaps with seperate colrors i think
-void Window::WinDraw() {
-    if (!IsWindowShown) return;
-    if(!dirty && !enable_refresh_override) return; //might want to override this in the event ... ah hell i'ljust add a flag 
-   // if (dirty)
-    // Reuse the same calculation (DRY principle)
-    calculateLogicalDimensions();
-
-    const int rot   = wi_sizing.rotation & 3;
-    const int rawW  = wi_sizing.Width;
-    const int rawH  = wi_sizing.Height;
-
-    const int physW = logicalW;   // now consistent
-    const int physH = logicalH;
-
-    // === CRITICAL: logical window (0,0) must be exactly at screen (Xpos, Ypos) ===
-    int offsetX, offsetY;
-    rotPointLocal(0, 0, rawW, rawH, rot, offsetX, offsetY);
-
-    int physX = wi_sizing.Xpos - offsetX;
-    int physY = wi_sizing.Ypos - offsetY;
-
-    // Clamp to screen
-    
-    physX = std::max(0, std::min(physX, v_env.screen_dim_w - physW));
-    physY = std::max(0, std::min(physY, v_env.screen_dim_h - physH));
-
-    ESP_LOGI(TAG, "WinDraw rot=%d | logical(%dx%d) @ (%d,%d) → phys(%d,%d %dx%d)",
-             rot, rawW, rawH, wi_sizing.Xpos, wi_sizing.Ypos, physX, physY, physW, physH);
-
-    // === BACKGROUND FILL ===
-    uint16_t clipX = physX;
-    uint16_t clipY = physY;
-    uint16_t clipW = physW;
-    uint16_t clipH = physH;
- 
-             if (win_backgroundpattern == BgFillType::Solid) {
-                 fb_rect(true, 1, physX, physY, physW, physH,
-                         win_internal_color_background, win_internal_color_border);
-             } 
-             else {
-                 if (!bgTile || bgTile->pbt_cfg.fill_type != win_backgroundpattern ||
-                     bgTile->primaryColor != bgPrimaryColor ||
-                     bgTile->secondaryColor != bgSecondaryColor) {
-                     setupBackgroundTile();
-                 }
- 
-                 if (bgTile && bgTile->allocated) {
-                     const uint16_t TW = bgTile->pbt_cfg.tileSize_x;
-                     const uint16_t TH = bgTile->pbt_cfg.tileSize_y;
- 
-                     // Tile in LOGICAL window space
-                     for (uint16_t ly = 0; ly < rawH; ly += TH) {
-                         for (uint16_t lx = 0; lx < rawW; lx += TW) {
-                             int sx, sy;
-                             rotPointLocal(lx, ly, rawW, rawH, rot, sx, sy);
-                             sx += physX;
-                             sy += physY;
- 
-                             blit_tile_clipped(static_cast<uint16_t>(sx),
-                                               static_cast<uint16_t>(sy),
-                                               clipX, clipY, clipW, clipH,
-                                               framebuffer,
-                                               bgTile->pseudoframebuffer,
-                                               TW, TH);
-                         }
-                     }
-                 } else {
-                     // fallback
-                     fb_rect(true, 1, physX, physY, physW, physH,
-                             win_internal_color_background, win_internal_color_border);
-                 }
-             }
- 
-             // === TOP BAR + BORDER (new) ===
-             if (win_internal_optionsBitmask & WIN_OPT_SHOW_TOP_BAR_MENU ||
-                 Currentcfg.ShowNameAtTopOfWindow) {
- 
-                 const int bar_height = 24;  // adjust to taste
- 
-                 // Top bar background (always at the physical top of this window)
-                 fb_rect(true, 1,
-                         physX, physY, physW, bar_height,
-                         win_internal_color_border,  // bar color
-                         win_internal_color_border);
- 
-                 // Title text (centered or left-aligned)
-                 fb_draw_text(physX + 6, physY + 4, physW - 40, //why is this hardcoded? 
-                              Currentcfg.name,
-                              0xFFFF, 1,
-                              0, true, 0x0000, 40, 
-                              w_font_info);
-             }
- 
-             if (!Currentcfg.borderless) {
-                 // outer border (now drawn AFTER top bar so it doesn't get overwritten)
-                 fb_rect(false, 1, physX, physY, physW, physH, 0x0000, win_internal_color_border);
-             }
 
 //differ to generate tile if it is not valid, then if it is valid, draw on screen
 //is it normal? 
@@ -686,111 +601,208 @@ void Window::WinDraw() {
 //okay now try again to push it
     
 
+void Window::WinDraw() {
+	
+	
+
+    
+    if (!IsWindowShown) return;
+    
+    
+       
+    
+    
+    if (!window_highlighted && (!dirty && !enable_refresh_override)) return;
+     //changed, highlighted window will NOT allow early ret
+    
+	
+    calculateLogicalDimensions();
+
+    const int rot   = wi_sizing.rotation & 3;
+    const int rawW  = wi_sizing.Width;
+    const int rawH  = wi_sizing.Height;
+
+    const int physW = logicalW;
+    const int physH = logicalH;
+
+    // === Window position with rotation offset ===
+    int offsetX, offsetY;
+    rotPointLocal(0, 0, rawW, rawH, rot, offsetX, offsetY);
+    int physX = wi_sizing.Xpos - offsetX;
+    int physY = wi_sizing.Ypos - offsetY;
+
+    // Clamp to screen
+    physX = std::max(0, std::min(physX, v_env.clamped_screen_dim_w - physW));
+    physY = std::max(0, std::min(physY, v_env.clamped_screen_dim_h - physH));
+
+    ESP_LOGI(TAG, "WinDraw rot=%d | logical(%dx%d) @ (%d,%d) → phys(%d,%d %dx%d)",rot, rawW, rawH, wi_sizing.Xpos, wi_sizing.Ypos, physX, physY, physW, physH);
+
+    // === 1. BACKGROUND ===
+    uint16_t clipX = physX;
+    uint16_t clipY = physY;
+    uint16_t clipW = physW;
+    uint16_t clipH = physH;
+
+    if (win_backgroundpattern == BgFillType::Solid) {
+        fb_rect(true, 1, physX, physY, physW, physH,
+                win_internal_color_background, win_internal_color_border);
+    } else {
+        if (!bgTile || bgTile->pbt_cfg.fill_type != win_backgroundpattern ||
+            bgTile->primaryColor != bgPrimaryColor ||
+            bgTile->secondaryColor != bgSecondaryColor) {
+            setupBackgroundTile();
+        }
+
+        if (bgTile && bgTile->allocated) {
+            const uint16_t TW = bgTile->pbt_cfg.tileSize_x;
+            const uint16_t TH = bgTile->pbt_cfg.tileSize_y;
+
+            for (uint16_t ly = 0; ly < rawH; ly += TH) {
+                for (uint16_t lx = 0; lx < rawW; lx += TW) {
+                    int sx, sy;
+                    rotPointLocal(lx, ly, rawW, rawH, rot, sx, sy);
+                    sx += physX;
+                    sy += physY;
+                    blit_tile_clipped(static_cast<uint16_t>(sx),
+                                      static_cast<uint16_t>(sy),
+                                      clipX, clipY, clipW, clipH,
+                                      framebuffer,
+                                      bgTile->pseudoframebuffer,
+                                      TW, TH);
+                }
+            }
+        } else {
+            // Fallback to solid colour if tile failed
+            fb_rect(true, 1, physX, physY, physW, physH,
+                    win_internal_color_background, win_internal_color_border);
+        }
+    }
+
+    // === 2. TOP BAR (if enabled) ===
+    if (win_internal_optionsBitmask & WIN_OPT_SHOW_TOP_BAR_MENU ||
+        Currentcfg.ShowNameAtTopOfWindow) {
+        const int bar_height = 24;
+        fb_rect(true, 1, physX, physY, physW, bar_height,
+                win_internal_color_border, win_internal_color_border);
+        fb_draw_text(physX + 6, physY + 4, physW - 40,
+                     Currentcfg.name,
+                     0xFFFF, 1, 0, true, 0x0000, 40,
+                     w_font_info);
+    }
+
+    // === 3. NORMAL OUTER BORDER (only if not borderless) ===
     if (!Currentcfg.borderless) {
         fb_rect(false, 1, physX, physY, physW, physH, 0x0000, win_internal_color_border);
     }
 
-    // === Text rendering (unchanged, uses same rotation math) ===
-    // === Text rendering ===
-if (!isTokenized) {
-    cachedChunks = tokenize(content);
-    isTokenized = true;
+    // === 4. TEXT & CONTENT (unchanged from your working version) ===
+    if (!isTokenized) {
+        cachedChunks = tokenize(content);
+        isTokenized = true;
+    }
+
+    Tstate.color         = win_internal_color_text;
+    Tstate.size          = Currentcfg.TextSizeMult;
+    Tstate.underline     = false;
+    Tstate.strikethrough = false;
+    Tstate.bold          = false;
+    Tstate.italic        = false;
+    Tstate.highlight_bg  = 0;
+
+    const int text_rot_flag = rot * 4;
+
+    int curLX = 2;
+    int curLY = 2;
+    uint8_t last_line_height = Currentcfg.TextSizeMult;
+
+    for (const auto& chunk : cachedChunks) {
+        switch (chunk.kind) {
+        case TagType::PlainText: {
+            const stdpsram::String* pTxt = std::get_if<stdpsram::String>(&chunk.content);
+            if (!pTxt || pTxt->empty()) break;
+            const auto& txt = *pTxt;
+
+            int rx, ry;
+            rotPointLocal(curLX, curLY, rawW, rawH, rot, rx, ry);
+            int sx = physX + rx;
+            int sy = physY + ry;
+
+            fb_draw_ptext(text_rot_flag,
+                          sx, sy,
+                          txt,
+                          Tstate.color,
+                          Tstate.size,
+                          12,
+                          Tstate.highlight_bg,
+                          win_internal_color_background,
+                          100,
+                          w_font_info);
+
+            curLX += txt.length() * (w_font_info.fcs.x) * Tstate.size;
+            if (curLX >= rawW - 4) {
+                curLX = 2;
+                curLY += (w_font_info.fcs.y) * last_line_height + 4;
+            }
+            last_line_height = Tstate.size;
+            break;
+        }
+        case TagType::LineBreak:
+            curLX = 2;
+            curLY += w_font_info.fcs.y * last_line_height + 4;
+            break;
+        case TagType::PosChange: {
+            auto p = std::get<PosTag>(chunk.content);
+            curLX = p.x;
+            curLY = p.y;
+            break;
+        }
+        case TagType::ColorChange:
+            Tstate.color = std::get<ColorTag>(chunk.content).value;
+            break;
+        case TagType::SizeChange: {
+            int s = std::get<SizeTag>(chunk.content).value;
+            if (s >= 1 && s <= 16) Tstate.size = s;
+            break;
+        }
+        case TagType::HighlightChange: {
+            auto h = std::get<HighlighterTag>(chunk.content);
+            Tstate.highlight_bg = h.enabled ? h.color : 0;
+            break;
+        }
+        case TagType::UnderlineToggle:    Tstate.underline = true; break;
+        case TagType::UnderlineOff:       Tstate.underline = false; break;
+        case TagType::StrikethroughToggle:Tstate.strikethrough = true; break;
+        case TagType::StrikethroughOff:   Tstate.strikethrough = false; break;
+        case TagType::BoldToggle:         Tstate.bold = true; break;
+        case TagType::BoldOff:            Tstate.bold = false; break;
+        case TagType::ItalicToggle:       Tstate.italic = true; break;
+        case TagType::ItalicOff:          Tstate.italic = false; break;
+        default: break;
+        }
+    }
+
+    // === 5. HIGHLIGHT DASHED BORDER (ONLY if window is highlighted) ===
+    if (window_highlighted) {
+        // isfilled = false → only the dashed outline, not a filled rectangle
+        // Adjust thickness, colors and segment_len to your liking
+        fb_rect_border(false, 2, physX, physY, physW, physH,
+               Currentcfg.BorderColor,
+               ((OtherTick & 1) ? 0x0000 : 0xFFFF),
+               //what's wild is when in the cpp cert exam i never thought i'd use a?b:c in the real world, and here i am. wild
+               8);          // segment_len (dash length)
+               //ESP_LOGI(TAG, "highlighted this window!");
+    }else {
+//i could put more args here if needed
+//ESP_LOGI(TAG, "no highlight today");
+
 }
 
-Tstate.color         = win_internal_color_text;
-Tstate.size          = Currentcfg.TextSizeMult;
-Tstate.underline     = false;
-Tstate.strikethrough = false;
-Tstate.bold          = false;
-Tstate.italic        = false;
-Tstate.highlight_bg  = 0;
-
-const int text_rot_flag = rot * 4;
-
-int curLX = 2;
-int curLY = 2;
-uint8_t last_line_height = Currentcfg.TextSizeMult;
-
-// Use the cached chunks directly (the copy was unnecessary and risky)
-for (const auto& chunk : cachedChunks){
-    switch (chunk.kind) {
-    case TagType::PlainText: {
-        // SAFE version - never throws, zero extra copy
-        const stdpsram::String* pTxt = std::get_if<stdpsram::String>(&chunk.content);
-        if (!pTxt || pTxt->empty()) break;
-
-        const auto& txt = *pTxt;          // const reference = zero cost
-
-        int rx, ry;
-        rotPointLocal(curLX, curLY, rawW, rawH, rot, rx, ry);
-        int sx = physX + rx;
-        int sy = physY + ry;
-
-        fb_draw_ptext(text_rot_flag,
-                      sx, sy,
-                      txt,                    // pass the reference
-                      Tstate.color,
-                      Tstate.size,
-                      12,
-                      Tstate.highlight_bg,
-                      win_internal_color_background,
-                      100,
-                      w_font_info);
-
-        curLX += txt.length() * (w_font_info.fcs.x) * Tstate.size;
-        if (curLX >= rawW - 4) {
-            curLX = 2;
-            curLY += (w_font_info.fcs.y) * last_line_height + 4;
-        }
-        last_line_height = Tstate.size;
-        break;
-    }
-
-    case TagType::LineBreak:
-        curLX = 2;
-        curLY += w_font_info.fcs.y * last_line_height + 4;
-        break;
-
-    case TagType::PosChange: {
-        auto p = std::get<PosTag>(chunk.content);   // these are tiny, safe
-        curLX = p.x;
-        curLY = p.y;
-        break;
-    }
-
-    case TagType::ColorChange:
-        Tstate.color = std::get<ColorTag>(chunk.content).value;
-        break;
-
-    case TagType::SizeChange: {
-        int s = std::get<SizeTag>(chunk.content).value;
-        if (s >= 1 && s <= 16) Tstate.size = s;
-        break;
-    }
-
-    case TagType::HighlightChange: {
-        auto h = std::get<HighlighterTag>(chunk.content);
-        Tstate.highlight_bg = h.enabled ? h.color : 0;
-        break;
-    }
-
-    // all the toggle cases (unchanged)
-    case TagType::UnderlineToggle:    Tstate.underline = true;  break;
-    case TagType::UnderlineOff:       Tstate.underline = false; break;
-    case TagType::StrikethroughToggle:Tstate.strikethrough = true;  break;
-    case TagType::StrikethroughOff:   Tstate.strikethrough = false; break;
-    case TagType::BoldToggle:         Tstate.bold = true; break;
-    case TagType::BoldOff:            Tstate.bold = false; break;
-    case TagType::ItalicToggle:       Tstate.italic = true; break;
-    case TagType::ItalicOff:          Tstate.italic = false; break;
-
-     default:
-          break;
-        }
-    }
-
+    // === FINISH ===
     currentPhysX = physX;
     currentPhysY = physY;
+    OtherTick = !OtherTick;//flipflop
+    ESP_LOGI(TAG, "highlight=%d OtherTick=%d dirty=%d", 
+         window_highlighted, OtherTick, dirty);
     dirty = false;
     lastUpdateTime = esp_timer_get_time();
 }
@@ -869,44 +881,264 @@ cachedChunks
 render cached chunks every frame
 */
 
-WindowManager::WindowManager(){
-    //DON'T REALLY need to do anything outside of initialize the window manager freerots task
-}
-WindowManager::~WindowManager(){
-    //i have no idea what you would do here
+// WindowManager constructor - initialize members
+WindowManager::WindowManager() 
+    : m_toolbarConfig(g_defaultToolbarConfig)
+    , tb_dirty(true)
+    , last_toolbar_update(0)
+{
 }
 
-void WindowManager::UpdateAll(bool force) {
+WindowManager::~WindowManager() {
+}
 
+// Add after your existing WindowManager functions in MWenv.cpp
+
+bool WindowManager::registerWindow(std::shared_ptr<Window> window) {
+    if (!window) {
+        ESP_LOGE(TAG, "registerWindow: window is null!");
+        return false;
+    }
+    
+    windows.push_back(window);
+    ESP_LOGI(TAG, "Window registered, total: %d", (int)windows.size());
+    return true;
+}
+
+bool WindowManager::PruneDeadWindows() {
+    size_t before = windows.size();
+    windows.erase(std::remove_if(windows.begin(), windows.end(),
+        [](const auto& w) {
+            return !w || !w->IsWindowShown;
+        }), windows.end());
+    
+    size_t after = windows.size();
+    if (before != after) {
+        ESP_LOGI(TAG, "Pruned %d dead windows", (int)(before - after));
+    }
+    return before != after;
+}
+
+void WindowManager::ClampToArea(s_bounds_16u bounds, bool is_universal) {
+    // Implementation depends on what s_bounds_16u is
+    // For now, just log that it's called
+    ESP_LOGI(TAG, "ClampToArea called (bounds: x=%d, y=%d, w=%d, h=%d, universal=%d)",
+             bounds.x, bounds.y, bounds.w, bounds.h, is_universal);
+    
+    if (is_universal) {
+        // Apply to all windows
+        for (auto& win : windows) {
+            if (win) {
+                if (win->wi_sizing.Xpos < bounds.x) 
+                    win->wi_sizing.Xpos = bounds.x;
+                if (win->wi_sizing.Ypos < bounds.y) 
+                    win->wi_sizing.Ypos = bounds.y;
+                // etc...
+            }
+        }
+    }
+}
+
+void WindowManager::ClampToArea(s_bounds_16u bounds, std::shared_ptr<Window> target) {
+    if (!target) return;
+    
+    ESP_LOGI(TAG, "ClampToArea called for specific window");
+    if (target->wi_sizing.Xpos < bounds.x) 
+        target->wi_sizing.Xpos = bounds.x;
+    if (target->wi_sizing.Ypos < bounds.y) 
+        target->wi_sizing.Ypos = bounds.y;
+    // Add more clamping logic as needed
+}
+
+
+
+// Add these helper functions at the top (after includes)
+static void draw_toolbar_background(int x, int y, int width, int height, uint16_t color) {
+    fb_rect(true, 1, x, y, width, height, color, color);
+}
+
+static void draw_toolbar_text(int x, int y, const char* text, uint16_t text_color) {
+    if (!text || !text[0]) return;
+    fb_draw_text(x, y, 200, text, text_color, 1, 0, true, 0x0000, 40, ft_AVR_classic_6x8);
+}
+
+// NEW: Implementation in WindowManager class
+uint16_t WindowManager::GetAvailableWidth() {
+    if (!m_toolbarConfig.showToolbar) return v_env.clamped_screen_dim_w;
+    
+    // For left/right toolbars, subtract width
+    if (m_toolbarConfig.tb_rot == 1 || m_toolbarConfig.tb_rot == 3) {
+        return v_env.clamped_screen_dim_w - 32;  // toolbar takes 32px on sides
+    }
+    return v_env.clamped_screen_dim_w;
+}
+
+uint16_t WindowManager::GetAvailableHeight() {
+    if (!m_toolbarConfig.showToolbar) return v_env.clamped_screen_dim_h;
+    
+    // For top/bottom toolbars, subtract height
+    if (m_toolbarConfig.tb_rot == 0 || m_toolbarConfig.tb_rot == 2) {
+        return v_env.clamped_screen_dim_h - 24;  // toolbar takes 24px on top/bottom
+    }
+    return v_env.clamped_screen_dim_h;
+}
+
+uint16_t WindowManager::GetToolbarOffset() {
+    if (!m_toolbarConfig.showToolbar) return 0;
+    
+    switch(m_toolbarConfig.tb_rot) {
+        case 0: return 24;  // top: windows start 24px down
+        case 1: return 32;  // left: windows start 32px right
+        case 2: return 0;   // bottom: windows start at top
+        case 3: return 0;   // right: windows start at left
+        default: return 0;
+    }
+}
+
+void WindowManager::SetToolbarActive(bool on) {
+    m_toolbarConfig.showToolbar = on;
+    tb_dirty = true;
+    
+    // Force all windows to recalibrate their positions
+    for (auto& win : windows) {
+        if (win) {
+            win->dirty = true;
+        }
+    }
+}
+
+void WindowManager::setToolbarRot(uint8_t new_rot) {
+    if (new_rot > 3) new_rot = 0;
+    m_toolbarConfig.tb_rot = new_rot;
+    tb_dirty = true;
+}
+
+void WindowManager::addToolbarIco(s_bmp_t& icon) {
+    // Find first empty slot
+    for (int i = 0; i < 16; i++) {
+        if (!m_toolbarConfig.ref_iconptrs[i]) {
+            m_toolbarConfig.ref_iconptrs[i] = &icon;
+            m_toolbarConfig.icons_shown = (toolbar_items_t)(m_toolbarConfig.icons_shown | (1 << i));
+            tb_dirty = true;
+            break;
+        }
+    }
+}
+
+void WindowManager::SetToolbarText(const char* text) {
+    if (text) {
+        toolbar_text = text;
+    } else {
+        toolbar_text.clear();
+    }
+    tb_dirty = true;
+}
+
+void WindowManager::DrawToolBar() {
+    if (!m_toolbarConfig.showToolbar) return;
+    
+    int bar_width = v_env.clamped_screen_dim_w;
+    int bar_height = 24;  // default height for top/bottom
+    int bar_x = 0;
+    int bar_y = 0;
+    
+    // Calculate position based on rotation
+    switch(m_toolbarConfig.tb_rot) {
+        case 0:  // top
+            bar_x = 0;
+            bar_y = 0;
+            bar_width = v_env.clamped_screen_dim_w;
+            bar_height = 24;
+            break;
+        case 1:  // left
+            bar_x = 0;
+            bar_y = 0;
+            bar_width = 32;
+            bar_height = v_env.clamped_screen_dim_h;
+            break;
+        case 2:  // bottom
+            bar_x = 0;
+            bar_y = v_env.clamped_screen_dim_h - 24;
+            bar_width = v_env.clamped_screen_dim_w;
+            bar_height = 24;
+            break;
+        case 3:  // right
+            bar_x = v_env.clamped_screen_dim_w - 32;
+            bar_y = 0;
+            bar_width = 32;
+            bar_height = v_env.clamped_screen_dim_h;
+            break;
+    }
+    
+    // Draw background
+    draw_toolbar_background(bar_x, bar_y, bar_width, bar_height, m_toolbarConfig.color);
+    
+    // Draw time/date text (top/bottom only for now)
+    if ((m_toolbarConfig.tb_rot == 0 || m_toolbarConfig.tb_rot == 2) && !toolbar_text.empty()) {
+        // Center the text
+        int text_x = bar_x + (bar_width / 2) - (strlen(toolbar_text.c_str()) * 3);
+        int text_y = bar_y + 6;
+        draw_toolbar_text(text_x, text_y, toolbar_text.c_str(), 0xFFFF);
+    }
+    
+    // Draw icons (left/right or top/bottom corners)
+    int icon_x = bar_x + 4;
+    int icon_y = bar_y + 4;
+    
+    for (int i = 0; i < 16; i++) {
+        if (m_toolbarConfig.ref_iconptrs[i] && (m_toolbarConfig.icons_shown & (1 << i))) {
+            // Draw icon at current position
+            if (m_toolbarConfig.tb_rot == 0 || m_toolbarConfig.tb_rot == 2) {
+                // Top/bottom: horizontal layout
+                if (icon_x + 16 <= bar_x + bar_width - 4) {
+                    fb_draw_bitmap(icon_x, icon_y, 16, 16, m_toolbarConfig.ref_iconptrs[i]->data);
+                    icon_x += 20;
+                }
+            } else {
+                // Left/right: vertical layout
+                if (icon_y + 16 <= bar_y + bar_height - 4) {
+                    fb_draw_bitmap(icon_x, icon_y, 16, 16, m_toolbarConfig.ref_iconptrs[i]->data);
+                    icon_y += 20;
+                }
+            }
+        }
+    }
+    
+    tb_dirty = false;
+}
+
+void WindowManager::UpdateToolbar() {
+    if (!m_toolbarConfig.showToolbar) return;
+    
+    uint64_t now = esp_timer_get_time();
+    uint64_t update_interval_us = 1000000 / m_toolbarConfig.tb_update_hz;
+    
+    if (now - last_toolbar_update >= update_interval_us || tb_dirty) {
+        DrawToolBar();
+        last_toolbar_update = now;
+    }
+}
+
+// Update UpdateAll to handle toolbar
+void WindowManager::UpdateAll(bool force, bool ToolbarUpdate) {
+    // First update toolbar if needed
+    if (ToolbarUpdate && m_toolbarConfig.showToolbar) {
+        UpdateToolbar();
+    }
+    
     for (auto it = windows.begin(); it != windows.end(); ) {
         if (!*it || !(*it)->IsWindowShown) {
             ESP_LOGD(TAG, "WindowManager: Removing dead window");
             it = windows.erase(it);
             continue;
         }
-
+        
         if (force) {
             (*it)->enable_refresh_override = true;
         }
-
+        
         (*it)->WinDraw();
-
         ++it;
     }
 }
 
-bool WindowManager::PruneDeadWindows() {
-    /*
-    windows.erase(std::remove_if(windows.begin(), windows.end(),
-        [](const auto& w) {
-            return !w || !w->IsWindowShown;
-        }), windows.end());*/
-        return false; //get out my way for aminute
-}
-
-bool WindowManager::registerWindow(std::shared_ptr<Window> window) {
-    if (!window) return false;
-
-    windows.push_back(window);
-    return true;
-}

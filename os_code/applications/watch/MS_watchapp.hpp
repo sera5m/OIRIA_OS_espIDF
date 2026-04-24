@@ -31,6 +31,19 @@
 #include "os_code/core/rShell/s_hell.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
 
+
+
+typedef enum{WM_MAIN,
+     WM_STOPWATCH,
+     WM_ALARMS,
+     WM_TIMER,
+     WM_NTP_SYNCH,
+      WM_SET_TIME,
+     WM_SET_TIMEZONE,
+     WM_COUNT
+    }WatchMode;
+//back in 2025ish when i was originally working on this i had a mode thing for a menu,it was messy so i'll just add a menu app instead of this nonsense
+
 // Helper function to convert numbers to string with 2-digit formatting
 inline std::string tostr(int value) {
     char buffer[3];

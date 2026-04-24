@@ -25,7 +25,7 @@
 #include <string.h>
 #include <math.h>
 #include "hardware/drivers/abstraction_layers/al_scr.h"
-
+#include "code_stuff/types.h"
 #include "hardware/drivers/lcd/fonts/font_avr_classics.h"
 #include "hardware/drivers/lcd/st7789v2/lcDriver.h"
 #include "hardware/drivers/lcd/fonts/font_avr_classics.h"
@@ -262,7 +262,7 @@ struct WindowCfg {
     uint16_t WinTextColor          = 0xFFFF;
     BgFillType backgroundType=BgFillType::Solid;
     float    UpdateRate            = 0.5f;
-};
+    };
 /* ---------------- helpers ---------------- */
 
 struct WinComp_sizing {
@@ -292,10 +292,7 @@ uint16_t    safe_parse_color(const stdpsram::String& str, uint16_t default_val);
 
 /* ======================== CANVAS ======================== */
 
-enum class DrawType {
-    Text, Line, Pixel, FRect, Rect, RFRect, RRect,
-    Triangle, Circle, Bitmap, otherImage
-};
+
 
 struct CanvasCfg {
     int x = 0;
@@ -321,7 +318,7 @@ void clearScreenEveryXCalls(uint16_t x);
 
 class Window : public std::enable_shared_from_this<Window> {
     public:
-
+    bool window_highlighted=0; //default-init 0
 
 
         explicit Window(const WindowCfg& cfg, const std::string& initialContent = "");
@@ -388,7 +385,10 @@ BgFillType win_backgroundpattern;
         // Optional: if i want to hide implementation details later,
         // move tokenize() and TextState to private
         bool enable_refresh_override    ; //by default no need to enable, but ok if you want
+
     private:
+
+    bool OtherTick=0; //true every OTHER update
 
     BgFillType lastBackgroundPattern = BgFillType::Solid;
     uint16_t   lastPrimaryColor      = 0;
@@ -440,6 +440,36 @@ uint16_t currentPhysY = 0;
         }
     };
 
+    typedef enum {
+        TB_BLUETOOTH   = (1 << 0),
+        TB_WIFI        = (1 << 1),
+        TB_RF          = (1 << 2),
+        TB_OPTICAL     = (1 << 3),
+        TB_FLASHLIGHT  = (1 << 4),
+        TB_BATT        = (1 << 5),
+        TB_GYRO        = (1 << 6),
+        TB_TEMP        = (1 << 7),
+        TB_KEYS        = (1 << 8),
+        TB_SDCARD      = (1 << 9),
+        TB_SILENT      = (1<<10),
+    } toolbar_items_t;
+
+    
+
+    typedef struct {
+        bool tb_overlay; //if disabled,pushes other windows off to the bottom 
+        uint8_t tb_update_hz; //target update rate for the toolbar
+        uint8_t tb_rot; //0: top, 1 left, 2 bottom, 3 right
+        bool showToolbar; //fake up polybar idgaf, we'll throw it here to manage it
+        bool disableTouch; //touching it with the touchscreen doesn't do anything if this is enabled
+        bool expandsDownOnTap; //much like the android context menu thing, this will expand down
+        s_bmp_t* ref_iconptrs[16]; //god please tell me this is 16 pointers to my icons for that one enum
+        toolbar_items_t icons_shown; //the above reference to the bitmaps for icon pointers
+        uint16_t color; //glerp
+    }toolbarconfig; //i'm doing a little c style pseudo oop here instead of attatching a new object
+
+    
+
     class WindowManager {
         public:
             static WindowManager& getInstance() {
@@ -447,19 +477,46 @@ uint16_t currentPhysY = 0;
                 return instance;
             }
         
-            void UpdateAll(bool force);
+            void UpdateAll(bool force, bool ToolbarUpdate);
             bool PruneDeadWindows();   
             bool registerWindow(std::shared_ptr<Window> window);
-        
+            void ClampToArea(s_bounds_16u bounds, bool is_universal); 
+            //change clamping behavior for registering and drawing windows
+            void ClampToArea(s_bounds_16u bounds, std::shared_ptr<Window> target); //clamp this window to this target
+                
             // prevent copying
             WindowManager(const WindowManager&) = delete;
             WindowManager& operator=(const WindowManager&) = delete;
+
+
+            //toolbar segment------------------
+            void SetToolbarActive(bool on);
+            void UpdateToolbar();
+            void setToolbarRot(uint8_t new_rot);
+            void addToolbarIco(s_bmp_t& icon); //reference of new icon by direct ref, no copy because icons are static single assets
+           
+            void SetToolbarText(const char* text);  // NEW: set time/date text
+            void DrawToolBar();
+
+              //--------------------------------
+
+                //Get the space available for windows (screen minus toolbar)
+              uint16_t GetAvailableWidth();
+              uint16_t GetAvailableHeight();
+              uint16_t GetToolbarOffset();  // offset from top/left where windows should start  
         
-        private:
-            WindowManager(); 
-            ~WindowManager();
-        
-            std::vector<std::shared_ptr<Window>> windows;
+              private:
+              WindowManager(); 
+              ~WindowManager();
+              
+              std::vector<std::shared_ptr<Window>> windows;
+          
+              // Toolbar member variables
+              toolbarconfig m_toolbarConfig;
+              std::string toolbar_text;
+              bool tb_dirty;
+              uint64_t last_toolbar_update;
+
         };
 
 #endif

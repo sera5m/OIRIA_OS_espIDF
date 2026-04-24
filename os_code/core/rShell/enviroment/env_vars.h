@@ -10,6 +10,7 @@
 #include "hardware/drivers/lcd/fonts/font_basic_types.h"
 #include <time.h>
 #include "esp_timer.h"
+#include "code_stuff/types.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -53,6 +54,9 @@ typedef struct {
     bool displayEnabled;
     uint16_t  screen_dim_w;
     uint16_t screen_dim_h; 
+
+    uint16_t  clamped_screen_dim_w; //i swear to god
+    uint16_t clamped_screen_dim_h;
     // =========================
     // STORAGE
     // =========================

@@ -427,6 +427,97 @@ void lcd_refresh_screen(void) {
     }
 }
 
+
+
+
+
+void fb_rect_border(
+    bool isfilled,
+    uint16_t borderThickness,
+    int x, int y, int w, int h,
+    uint16_t colorA,
+    uint16_t colorB,
+    uint8_t segment_len
+){
+    if (segment_len < 1) segment_len = 1;
+
+    // Clamp
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > SCREEN_W) w = SCREEN_W - x;
+    if (y + h > SCREEN_H) h = SCREEN_H - y;
+    if (w <= 0 || h <= 0) return;
+
+    // Clamp border thickness
+    if (borderThickness * 2 > w) borderThickness = w / 2;
+    if (borderThickness * 2 > h) borderThickness = h / 2;
+
+    int period = segment_len * 2;
+
+    // ---------- TOP ----------
+    for (int py = y; py < y + borderThickness; py++) {
+        uint16_t *dst = &framebuffer[py * SCREEN_W + x];
+
+        for (int px = 0; px < w; px++) {
+            bool toggle = ((px % period) >= segment_len);
+            dst[px] = toggle ? colorB : colorA;
+        }
+
+        mark_rows_range_dirty(true, py);
+    }
+
+    // ---------- BOTTOM ----------
+    for (int py = y + h - borderThickness; py < y + h; py++) {
+        uint16_t *dst = &framebuffer[py * SCREEN_W + x];
+
+        for (int px = 0; px < w; px++) {
+            bool toggle = ((px % period) >= segment_len);
+            dst[px] = toggle ? colorB : colorA;
+        }
+
+        mark_rows_range_dirty(true, py);
+    }
+
+    // ---------- LEFT + RIGHT ----------
+    for (int py = y + borderThickness; py < y + h - borderThickness; py++) {
+
+        bool toggle = (((py - y) % period) >= segment_len);
+
+        // LEFT
+        uint16_t *dstL = &framebuffer[py * SCREEN_W + x];
+        for (int i = 0; i < borderThickness; i++)
+            dstL[i] = toggle ? colorB : colorA;
+
+        // RIGHT
+        uint16_t *dstR = &framebuffer[py * SCREEN_W + (x + w - borderThickness)];
+        for (int i = 0; i < borderThickness; i++)
+            dstR[i] = toggle ? colorB : colorA;
+
+        mark_rows_range_dirty(true, py);
+    }
+
+    // ---------- FILL ----------
+    if (isfilled) {
+        int fx = x + borderThickness;
+        int fy = y + borderThickness;
+        int fw = w - borderThickness * 2;
+        int fh = h - borderThickness * 2;
+
+        if (fw > 0 && fh > 0) {
+            for (int py = fy; py < fy + fh; py++) {
+                uint16_t *dst = &framebuffer[py * SCREEN_W + fx];
+
+                for (int i = 0; i < fw; i++)
+                    dst[i] = colorA;  // fill uses primary color
+
+                mark_rows_range_dirty(true, py);
+            }
+        }
+    }
+}
+
+
+
   void fb_line(
     int x0, int y0,
     int x1, int y1,
@@ -674,7 +765,40 @@ static  void fb_rect_gradient(int x, int y, int w, int h,
 }
 //0: no angle 1: 22.5 deg 2: 45 deg 3: 67.5 4: 90 deg and so on up to 360
 
-
+void fb_draw_bitmap(int dst_x, int dst_y, int w, int h, const uint16_t* bitmap) {
+    if (!framebuffer || !bitmap) return;
+    
+    // Clamp to screen boundaries
+    int start_x = dst_x;
+    int start_y = dst_y;
+    int end_x = dst_x + w;
+    int end_y = dst_y + h;
+    
+    if (start_x < 0) start_x = 0;
+    if (start_y < 0) start_y = 0;
+    if (end_x > SCREEN_W) end_x = SCREEN_W;
+    if (end_y > SCREEN_H) end_y = SCREEN_H;
+    
+    if (start_x >= end_x || start_y >= end_y) return;
+    
+    int src_offset_x = start_x - dst_x;
+    int src_offset_y = start_y - dst_y;
+    
+    for (int y = start_y; y < end_y; y++) {
+        int src_y = (y - dst_y);
+        if (src_y < 0 || src_y >= h) continue;
+        
+        uint16_t* dst = &framebuffer[y * SCREEN_W + start_x];
+        const uint16_t* src = &bitmap[src_y * w + src_offset_x];
+        int width_to_copy = end_x - start_x;
+        
+        for (int x = 0; x < width_to_copy; x++) {
+            dst[x] = src[x];
+        }
+        
+        mark_rows_range_dirty(y, y);
+    }
+}
 
 
   void fb_draw_text(
