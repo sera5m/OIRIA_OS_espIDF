@@ -7,7 +7,7 @@
 #include "freertos/task.h"
 #include <string.h>
 #include <math.h>               // ← added for sqrtf, cosf, sinf
-
+#include "esp_timer.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -894,66 +894,97 @@ mark_rows_range_dirty(
 
 #define lcd_c_adr_set 0x2A
 
+
 // --------------------- GLOBALS ---------------------
-uint32_t frame = 0;
+// --------------------- GLOBALS ---------------------
+uint64_t frame = 0;
 
-// --------------------- REFRESH ---------------------
 
- void lcd_refreshScreen(void) {
-    const uint32_t FRAME_MS = 1000 / fpsLimiterTarget; // 45 FPS
-    uint32_t frame_start = esp_log_timestamp();
-    static uint32_t stats_frame = 0;
+void lcd_refreshScreen(void) {
+    const uint32_t FRAME_US = 1000000 / fpsLimiterTarget;
+
+    static int64_t last_frame_time = 0;
+    int64_t now = esp_timer_get_time();
+
+    if (last_frame_time == 0) last_frame_time = now;
+
+    uint32_t frame_time = now - last_frame_time;
     
-    // More detailed SPI timing
-    static uint32_t spi_total_time = 0;
+    if (frame_time == 0) frame_time = 1;
+    
+    last_frame_time = now;
+
+    static uint32_t stats_frame = 0;
+
+    static uint64_t spi_total_time = 0;
     static uint32_t spi_transaction_count = 0;
     static uint32_t max_spi_time = 0;
+
+    // --- SPI timing ---
+    int64_t spi_start = esp_timer_get_time();
+
+    lcd_fb_display_framebuffer(1, 0);
+
+    uint32_t spi_time = esp_timer_get_time() - spi_start;
     
-    // Swap buffers would go here if we were doing double buffers, but we do not
-    
-    
-    // Time the actual SPI transfers
-    uint32_t spi_start = esp_log_timestamp();
-    lcd_fb_display_framebuffer(1, 0); //note howit says LCD refresh screen, we will use lcd driver
-    uint32_t spi_time = esp_log_timestamp() - spi_start;
-    
-    // Update SPI stats
+    if (spi_time == 0) spi_time = 1;
+
     spi_total_time += spi_time;
     spi_transaction_count++;
     if (spi_time > max_spi_time) max_spi_time = spi_time;
-    
+
     taskYIELD();
-    
-    uint32_t frame_time = esp_log_timestamp() - frame_start;
-    
-    // Print comprehensive stats
-    if (stats_frame % 60 == 0) {  // Every ~1.3 seconds at 45 FPS
+
+    if ((stats_frame) % 60 == 0) {
         if (spi_transaction_count > 0) {
             uint32_t avg_spi_time = spi_total_time / spi_transaction_count;
-            
+
             ESP_LOGI(TAG, "=== Performance Report ===");
-            ESP_LOGI(TAG, "Frame: %lu | Frame time: %lu ms", frame, frame_time);
-            ESP_LOGI(TAG, "SPI: Avg %lu ms | Max %lu ms | Count %lu", 
-                    avg_spi_time, max_spi_time, spi_transaction_count);
-            ESP_LOGI(TAG, "FPS: Current %.1f | Target 45.0", 1000.0f / frame_time);
             
-            // Calculate data rate
-            uint32_t pixels_per_frame = SCREEN_W * SCREEN_H;
-            uint32_t bytes_per_frame = pixels_per_frame * 2;
-            float data_rate_mbps = (bytes_per_frame * 8.0f) / (spi_time * 1000.0f);
-            ESP_LOGI(TAG, "SPI Data rate: %.2f Mbps", data_rate_mbps);
+            ESP_LOGI(TAG, "Frame: %llu | Frame time: %lu.%03lu ms", 
+                     frame, 
+                     frame_time / 1000, 
+                     frame_time % 1000);
+
+            ESP_LOGI(TAG, "SPI: Avg %lu.%03lu ms | Max %lu.%03lu ms | Count %lu",
+                     avg_spi_time / 1000, avg_spi_time % 1000,
+                     max_spi_time / 1000, max_spi_time % 1000,
+                     spi_transaction_count);
+
+            // FPS calculation - safe
+            uint32_t fps = 1000000 / frame_time;
+            ESP_LOGI(TAG, "FPS: Current %lu | Target %lu", fps, fpsLimiterTarget);
+
+            uint32_t pixels = SCREEN_W * SCREEN_H;
+            uint32_t bytes = pixels * 2;
+
+            // CRITICAL FIX: Calculate data rate without dividing by small numbers
+            uint32_t data_rate_mbps = 0;
             
-            // Reset stats
+            // Calculate bits per microsecond first, then scale to Mbps
+            // This avoids dividing by numbers less than 1
+            uint32_t bits = bytes * 8;
+            uint32_t bits_per_us = bits / spi_time;  // bits per microsecond
+            
+            // Convert to Mbps: bits_per_us * (1,000,000 us/sec) / (1,000,000 bits/Mb)
+            // Simplified: bits_per_us = Mbps
+            data_rate_mbps = bits_per_us;
+            
+            
+
             spi_total_time = 0;
             spi_transaction_count = 0;
             max_spi_time = 0;
         }
     }
+
     stats_frame++;
-    
-    // Frame pacing
-    if (frame_time < FRAME_MS) {
-        vTaskDelay(pdMS_TO_TICKS(FRAME_MS - frame_time));
+
+    if (frame_time < FRAME_US && FRAME_US > 0) {
+        uint32_t sleep_us = FRAME_US - frame_time;
+        if (sleep_us > 0 && sleep_us < 1000000) {
+            vTaskDelay(pdMS_TO_TICKS(sleep_us / 1000));
+        }
     }
 
     frame++;

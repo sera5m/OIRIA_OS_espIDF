@@ -444,7 +444,7 @@ ESP_LOGI(TAG, "WindowManager init-d");
     app->init();
     app->start_task();     // ✅ phase 3: run the FreeRTOS tas
     
-    
+    appManager::instance().set_focused_app(app);
     
     //added dynamic throttle because display overperforms above target to ease cpu
 const TickType_t targetTicks = pdMS_TO_TICKS(1000 / v_env.fpsTarget);
@@ -455,8 +455,10 @@ while (1) {
     update_display_time(&v_env.displayTime);
     WindowManager::getInstance().UpdateAll(0,1);
     refreshScreen();
-
+	
     vTaskDelayUntil(&lastWakeTime, targetTicks);
 }
 
 }
+
+//to-do add boot time and multi thread this

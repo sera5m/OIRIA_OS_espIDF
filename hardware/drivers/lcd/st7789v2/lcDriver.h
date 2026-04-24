@@ -75,6 +75,9 @@ typedef enum {
     highlighted
 } text_modifier;
 
+//debug options
+
+
 // --------------------- STRUCTS ---------------------
 
 

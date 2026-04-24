@@ -380,11 +380,11 @@ BgFillType win_backgroundpattern;
         uint16_t   bgPrimaryColor = win_internal_color_background;   // your window BgColor by default
         uint16_t   bgSecondaryColor = Currentcfg.Bg_secondaryColor;
         
-        bool use_edge_shimmer; //edges of window will either be dotted or even animated when filling. 
+        
         void setupBackgroundTile();
         // Optional: if i want to hide implementation details later,
         // move tokenize() and TextState to private
-        bool enable_refresh_override    ; //by default no need to enable, but ok if you want
+        bool enable_refresh_override=0; //by default no need to enable, but ok if you want
 
     private:
 

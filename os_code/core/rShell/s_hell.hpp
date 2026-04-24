@@ -8,7 +8,7 @@
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/middle_layer/input/input_devs_agg.hpp"
 #include "os_code/middle_layer/input/input_handler.hpp"
-
+#include "os_code/core/window_env/MWenv.hpp" //for added linkage to window manager singleton
 #include <vector>
 #include <memory>
 // -------------------------------------------------------------------
@@ -127,6 +127,8 @@ class appManager {
     
         appManager(const appManager&) = delete;
         appManager& operator=(const appManager&) = delete;
+        WindowManager& ref_wm; //blank reference, we attempt to fill on create of this object
+        //create order MUST be windowmanager then appmanager on boot or you're fucked
     
     private:
         std::vector<std::shared_ptr<AppBase>> apps;

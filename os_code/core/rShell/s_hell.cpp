@@ -122,7 +122,9 @@ void AppBase::run() {
 
 
 ///================================segment class appmanager-=======================
-appManager::appManager() {
+appManager::appManager()
+    : ref_wm(WindowManager::getInstance()) //now with perminant binding for the silly
+{
     ESP_LOGW(TAG, "started application manager task");
 }
 
@@ -158,9 +160,29 @@ void appManager::DestroyAllApps() {
 
     apps.clear();
 }
+
 void appManager::set_focused_app(std::shared_ptr<AppBase> app) {
+
+    auto old = focused_app;   // SAVE OLD FIRST
+    
     focused_app = app;
-    ESP_LOGI(TAG, "Focus set to app: %s", app ? app->get_app_name() : "none");
+
+    ESP_LOGI(TAG, "Focus set to app: %s",
+             app ? app->get_app_name() : "none");
+
+    // disable highlight on old app
+    if (old) {
+        if (auto win = old->get_window()) {
+            win->window_highlighted = false;
+        }
+    }
+
+    // enable highlight on new app
+    if (focused_app) {
+        if (auto win = focused_app->get_window()) {
+            win->window_highlighted = true;
+        }
+    }
 }
 
 std::shared_ptr<AppBase> appManager::get_focused_app() const {
