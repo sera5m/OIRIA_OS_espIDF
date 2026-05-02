@@ -56,7 +56,7 @@
 #include "os_code/core/rShell/s_hell.hpp"
 #include "os_code/applications/watch/MS_watchapp.hpp"
 
-
+#include "esp_task_wdt.h"
 // Known devices (fill in your full list)
 typedef struct {
     uint8_t addr;
@@ -450,11 +450,16 @@ watchapp->init();
 const TickType_t targetTicks = pdMS_TO_TICKS(1000 / v_env.fpsTarget);
 
 TickType_t lastWakeTime = xTaskGetTickCount();
-
+esp_task_wdt_add(NULL); //null means this task. as this task is the heavy refresh one, we need to add it so we can manually feed watchdog
+//esp_task_wdt_set_timeout(6); //default five, i think? 
 while (1) {
+	
     update_display_time(&v_env.displayTime);
     WindowManager::getInstance().UpdateAll(0,1,1,1);
     //fb_clear(0xB1C8);
+    esp_task_wdt_reset();//reset between creating the data and pushing to the screen, because each step is a heavy blocking task for this core
+    //this may need to have substantial changes in the future for stability
+    
     refreshScreen();
     
 	
