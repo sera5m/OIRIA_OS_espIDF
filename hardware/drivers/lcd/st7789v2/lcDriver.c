@@ -68,7 +68,7 @@ void framebuffer_alloc(void) {
 
     size_t sz = SCREEN_W * SCREEN_H * sizeof(uint16_t);
 
-    ESP_LOGI(TAG, "Allocating framebuffer: %u bytes (%.1f KiB)", sz, sz / 1024.0f);
+    // ESP_LOGI(TAG, "Allocating framebuffer: %u bytes (%.1f KiB)", sz, sz / 1024.0f);
 
     // ────────────────────────────────────────────────────────
     // This is the only line that actually needed fixing
@@ -76,17 +76,17 @@ void framebuffer_alloc(void) {
     // ────────────────────────────────────────────────────────
 
     if (!framebuffer) {
-        ESP_LOGE(TAG, "Framebuffer allocation failed! (PSRAM requested)");
+        // ESP_LOGE(TAG, "Framebuffer allocation failed! (PSRAM requested)");
         allocated = false;
         return;
     }
 
-    ESP_LOGI(TAG, "Framebuffer allocated at %p", framebuffer);
-    ESP_LOGI(TAG, "Is in PSRAM? %s",
-             esp_ptr_external_ram(framebuffer) ? "YES" : "NO");
+    // ESP_LOGI(TAG, "Framebuffer allocated at %p", framebuffer);
+    // ESP_LOGI(TAG, "Is in PSRAM? %s",
+        //     esp_ptr_external_ram(framebuffer) ? "YES" : "NO");
 
     if (!esp_ptr_external_ram(framebuffer)) {
-        ESP_LOGE(TAG, "!!! WARNING: Framebuffer ended up in internal SRAM !!!");
+        // ESP_LOGE(TAG, "!!! WARNING: Framebuffer ended up in internal SRAM !!!");
         // Optional: free it here if you want to fail loudly
         // heap_caps_free(framebuffer);
         // framebuffer = NULL;
@@ -123,7 +123,7 @@ static esp_err_t lcd_cmd(uint8_t cmd) {
     };
     gpio_set_level(LCD_DC, 0);
     esp_err_t ret = spi_device_polling_transmit(spi_lcd, &t);
-    if (ret != ESP_OK) ESP_LOGE(TAG, "lcd_cmd(0x%02x) failed: %s", cmd, esp_err_to_name(ret));
+    if (ret != ESP_OK)  ESP_LOGE(TAG, "lcd_cmd(0x%02x) failed: %s", cmd, esp_err_to_name(ret));
     return ret;
 }
 
@@ -135,7 +135,7 @@ static esp_err_t lcd_data(uint8_t data) {
     };
     gpio_set_level(LCD_DC, 1);
     esp_err_t ret = spi_device_polling_transmit(spi_lcd, &t);
-    if (ret != ESP_OK) ESP_LOGE(TAG, "lcd_data(0x%02x) failed: %s", data, esp_err_to_name(ret));
+    if (ret != ESP_OK)  ESP_LOGE(TAG, "lcd_data(0x%02x) failed: %s", data, esp_err_to_name(ret));
     return ret;
 }
 
@@ -147,7 +147,7 @@ static esp_err_t lcd_data_bulk(const void *data, size_t len) {
     };
     gpio_set_level(LCD_DC, 1);
     esp_err_t ret = spi_device_polling_transmit(spi_lcd, &t);
-    if (ret != ESP_OK) ESP_LOGE(TAG, "lcd_data_bulk(%u bytes) failed: %s", (unsigned)len, esp_err_to_name(ret));
+    if (ret != ESP_OK)  ESP_LOGE(TAG, "lcd_data_bulk(%u bytes) failed: %s", (unsigned)len, esp_err_to_name(ret));
     return ret;
 }
 
@@ -175,15 +175,15 @@ static void lcd_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
 
 void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
     if(!framebuffer){
-        ESP_LOGE(TAG, "FRAMEBUFFER ISN'T ALLOCATED YET DUMBFUCK");
+        // ESP_LOGE(TAG, "FRAMEBUFFER ISN'T ALLOCATED YET DUMBFUCK");
     }else{
-    ESP_LOGI(TAG, "Display FB: delta=%d cope=%d", only_delta, cope_mode);
+    // ESP_LOGI(TAG, "Display FB: delta=%d cope=%d", only_delta, cope_mode);
 
     const uint32_t row_bytes = SCREEN_W * 2;
     const uint32_t rows_per_chunk = SAFE_ROWS_PER_CHUNK;
 
     if (only_delta) {
-        ESP_LOGI(TAG, "Delta update");
+        // ESP_LOGI(TAG, "Delta update");
         int y = 0;
         while (y < SCREEN_H) {
             if (!is_row_dirty(y)) { y++; continue; }
@@ -202,8 +202,9 @@ void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
             lcd_set_window(0, y_start, SCREEN_W - 1, y_end);
 
             esp_err_t ret = lcd_data_bulk((uint8_t *)&framebuffer[y_start * SCREEN_W], bytes);
+            taskYIELD(); //calm down, watchdog
             if (ret != ESP_OK) {
-                ESP_LOGE(TAG, "Delta chunk y=%d–%d failed: %s", y_start, y_end, esp_err_to_name(ret));
+                // ESP_LOGE(TAG, "Delta chunk y=%d–%d failed: %s", y_start, y_end, esp_err_to_name(ret));
             }
 
             for (int ry = y_start; ry <= y_end; ry++) {
@@ -213,7 +214,7 @@ void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
             y = y_end + 1;
         }
     } else {
-        ESP_LOGI(TAG, "Full update");
+        // ESP_LOGI(TAG, "Full update");
         for (int y = 0; y < SCREEN_H; y += rows_per_chunk) {
             int rows = rows_per_chunk;
             if (y + rows > SCREEN_H) rows = SCREEN_H - y;
@@ -223,14 +224,15 @@ void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
             lcd_set_window(0, y, SCREEN_W - 1, y + rows - 1);
 
             esp_err_t ret = lcd_data_bulk((uint8_t *)&framebuffer[y * SCREEN_W], bytes);
+            taskYIELD(); //the device gets angry and makes the watchdog cry,prevent this
             if (ret != ESP_OK) {
-                ESP_LOGE(TAG, "Full chunk y=%d failed: %s", y, esp_err_to_name(ret));
+                // ESP_LOGE(TAG, "Full chunk y=%d failed: %s", y, esp_err_to_name(ret));
             }
         }
         mark_all_dirty(false);
     }
 
-    ESP_LOGI(TAG, "Display push complete");
+    // ESP_LOGI(TAG, "Display push complete");
 }
 }
 // ──────────────────────────────────────────────
@@ -240,7 +242,7 @@ void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
 
  void lcd_init_simple(void)
 {
-    ESP_LOGI(TAG, "readying lcd init and setting gipo");
+    // ESP_LOGI(TAG, "readying lcd init and setting gipo");
     gpio_set_level(LCD_RST, 0);
     vTaskDelay(pdMS_TO_TICKS(20));
     gpio_set_level(LCD_RST, 1);
@@ -253,7 +255,7 @@ void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
     // Sleep out
     lcd_cmd(0x11);
     vTaskDelay(pdMS_TO_TICKS(120));
-    ESP_LOGI(TAG, "setting up color modes");
+    // ESP_LOGI(TAG, "setting up color modes");
 
     // Color mode: 16-bit/pixel (RGB565)
     lcd_cmd(0x3A);
@@ -267,7 +269,7 @@ void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
     // 0xC0 = X-Y-Mirror
     lcd_cmd(0x36);
     lcd_data(0x00);  // Try different values if display is rotated
-    ESP_LOGI(TAG, "column and row addr set and porch");
+    // ESP_LOGI(TAG, "column and row addr set and porch");
     // ---------- CRITICAL FOR 240x320 ----------
     // Set display resolution to 240x320
     lcd_cmd(lcd_c_adr_set);  // Column address set 
@@ -342,7 +344,7 @@ void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
   // framebuffer_alloc();
     
       //  lcd_fb_display_framebuffer(0, 0); //yes, we're using this specific fb push here, ebcause its the lcd  not the general other whatever the fucklery 
-      ESP_LOGI(TAG, "done");
+      // ESP_LOGI(TAG, "done");
 }
 // ──────────────────────────────────────────────
 // Refresh wrapper
@@ -939,21 +941,19 @@ void lcd_refreshScreen(void) {
         if (spi_transaction_count > 0) {
             uint32_t avg_spi_time = spi_total_time / spi_transaction_count;
 
-            ESP_LOGI(TAG, "=== Performance Report ===");
+            /*
+            // ESP_LOGI(TAG, "=== Performance Report ===");
             
-            ESP_LOGI(TAG, "Frame: %llu | Frame time: %lu.%03lu ms", 
+            // ESP_LOGI(TAG, "Frame: %llu | Frame time: %lu.%03lu ms", 
                      frame, 
                      frame_time / 1000, 
                      frame_time % 1000);
 
-            ESP_LOGI(TAG, "SPI: Avg %lu.%03lu ms | Max %lu.%03lu ms | Count %lu",
-                     avg_spi_time / 1000, avg_spi_time % 1000,
-                     max_spi_time / 1000, max_spi_time % 1000,
-                     spi_transaction_count);
+            // ESP_LOGI(TAG, "SPI: Avg %lu.%03lu ms | Max %lu.%03lu ms | Count %lu", avg_spi_time / 1000, avg_spi_time % 1000, max_spi_time / 1000, max_spi_time % 1000,spi_transaction_count);
 
             // FPS calculation - safe
             uint32_t fps = 1000000 / frame_time;
-            ESP_LOGI(TAG, "FPS: Current %lu | Target %lu", fps, fpsLimiterTarget);
+            // ESP_LOGI(TAG, "FPS: Current %lu | Target %lu", fps, fpsLimiterTarget);
 
             uint32_t pixels = SCREEN_W * SCREEN_H;
             uint32_t bytes = pixels * 2;
@@ -974,7 +974,7 @@ void lcd_refreshScreen(void) {
 
             spi_total_time = 0;
             spi_transaction_count = 0;
-            max_spi_time = 0;
+            max_spi_time = 0;*/
         }
     }
 
@@ -988,5 +988,7 @@ void lcd_refreshScreen(void) {
     }
 
     frame++;
-    if(frame>2147483600){frame=0}; //reset it to not overflow. doubt this will ever come up but you never know
+    if(frame>2147483600){
+		frame=0;
+		} //reset it to not overflow. doubt this will ever come up but you never know
 }

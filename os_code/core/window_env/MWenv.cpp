@@ -36,7 +36,10 @@
 // Custom allocator for std::string that prefers PSRAM
 #include "esp_log.h"
 #include "os_code/core/rShell/enviroment/env_vars.h"
-
+#include "hardware/drivers/lcd/st7789v2/t_shapes.h"
+#include "esp_task_wdt.h" 
+//unrelated but i hate how every time ihave to type idf.py build flash monitor to check if the code works every time i make my 253st change of the day
+//and idf also stands for isralie defense force, who are genocidal rapists and whatnot, it's a fun reminder 
 static const char *TAG = "MWenv"; 
 
 toolbarconfig g_defaultToolbarConfig = {
@@ -186,30 +189,6 @@ void PsramBackgroundTile::generate_pattern(BgFillType type, uint16_t primary, ui
     }
 }
 
-
-void Window::setupBackgroundTile() {
-    if (!bgTile) {
-        bgTile = std::make_shared<PsramBackgroundTile>(32, 32);
-    }
-
-    // Only regenerate if something actually changed
-    if (bgTile->pbt_cfg.fill_type != win_backgroundpattern ||
-        bgTile->primaryColor != bgPrimaryColor ||
-        bgTile->secondaryColor != bgSecondaryColor) {
-
-        bgTile->pbt_cfg.fill_type = win_backgroundpattern;
-        bgTile->generate_pattern(win_backgroundpattern, bgPrimaryColor, bgSecondaryColor);
-
-        // Update last-known values
-        lastBackgroundPattern = win_backgroundpattern;
-        lastPrimaryColor      = bgPrimaryColor;
-        lastSecondaryColor    = bgSecondaryColor;
-
-        ESP_LOGI(TAG, "Background tile regenerated: pattern %d, primary=0x%04X, secondary=0x%04X",
-                 (int)win_backgroundpattern, bgPrimaryColor, bgSecondaryColor);
-    }
-}
-
 // Helper – copies one tile into the framebuffer with rotation
 static void blit_tile(                 // renamed for clarity
     uint16_t targetX, uint16_t targetY,
@@ -268,6 +247,296 @@ static void blit_tile_clipped(
         }
     }
 }
+
+/////===============END PSRAM BACKGROUND TILE DATA
+
+///////==canvas object
+
+// ===================== CANVAS IMPLEMENTATION =====================
+Canvas::Canvas(const CanvasCfg& cfg) 
+    : m_cfg(cfg)
+    , m_parentWindow(cfg.parentWindow)
+    , m_shapeBuffer(nullptr)
+    , m_maxShapes(FB_MAX_SHAPES)
+    , m_dirty(true)
+{
+    // Allocate shape buffer on PSRAM
+    m_shapeBuffer = (fb_shape_buffer_t*)heap_caps_malloc(
+        sizeof(fb_shape_buffer_t), 
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+    );
+    
+    if (!m_shapeBuffer) {
+        ESP_LOGE(TAG, "Failed to allocate shape buffer!");
+        return;
+    }
+    
+    // Initialize the buffer
+    if (!fb_shapes_init(m_shapeBuffer, m_maxShapes)) {
+        ESP_LOGE(TAG, "Failed to initialize shapes!");
+        heap_caps_free(m_shapeBuffer);
+        m_shapeBuffer = nullptr;
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Canvas created with parent window at %p", m_parentWindow);
+}
+
+Canvas::~Canvas() {
+    if (m_shapeBuffer) {
+        fb_shapes_free(m_shapeBuffer);
+        heap_caps_free(m_shapeBuffer);
+        m_shapeBuffer = nullptr;
+    }
+}
+
+void Canvas::Update(float deltaTime) {
+    // Update any animated shapes or handle transformations
+    // For now, just mark dirty if shapes changed
+    if (m_dirty) {
+        SortShapes();
+        if (m_parentWindow) {
+            m_parentWindow->dirty = true;
+        }
+        m_dirty = false;
+    }
+}
+
+void Canvas::Draw() {
+    if (!m_shapeBuffer || !m_parentWindow || !m_parentWindow->IsWindowShown) {
+        return;
+    }
+    
+    // Convert all shapes from canvas-local coordinates to screen coordinates
+    for (uint16_t i = 0; i < m_shapeBuffer->count; i++) {
+        fb_shape_t* shape = &m_shapeBuffer->shapes[i];
+        if (!shape->shown) continue;
+        
+        // Convert bounds from canvas-local to screen coordinates
+        s_bounds_16u screenBounds;
+        int sx1, sy1, sx2, sy2;
+        
+        m_parentWindow->LocalToScreen(shape->bounds.x, shape->bounds.y, sx1, sy1);
+        m_parentWindow->LocalToScreen(
+            shape->bounds.x + shape->bounds.w, 
+            shape->bounds.y + shape->bounds.h, 
+            sx2, sy2
+        );
+        
+        screenBounds.x = sx1;
+        screenBounds.y = sy1;
+        screenBounds.w = sx2 - sx1;
+        screenBounds.h = sy2 - sy1;
+        
+        // Apply bounds checking (clamp to parent window)
+        s_bounds_16u windowBounds = {
+            .x = m_parentWindow->currentPhysX,
+            .y = m_parentWindow->currentPhysY,
+            .w = m_parentWindow->logicalW,
+            .h = m_parentWindow->logicalH
+        };
+        
+        screenBounds = ClampBoundsToParent(screenBounds, windowBounds);
+        if (screenBounds.w <= 0 || screenBounds.h <= 0) continue;
+        
+        // Draw based on shape type
+        switch ((fb_shape_type)shape->type) {
+            case SHAPE_RECT:
+                fb_rect(true, 1, 
+                       screenBounds.x, screenBounds.y,
+                       screenBounds.w, screenBounds.h,
+                       shape->color, shape->color);
+                break;
+                
+            case SHAPE_LINE:
+                // For lines, bounds contains the two endpoints
+                // bounds.x,y = start point, bounds.w,h = end point offset
+                fb_line(screenBounds.x, screenBounds.y,
+                       screenBounds.x + screenBounds.w,
+                       screenBounds.y + screenBounds.h,
+                       shape->color);
+                break;
+                
+            case SHAPE_CIRCLE: {
+                // For circles, bounds.x,y = center, bounds.w = radius
+                int radius = screenBounds.w / 2;
+                fb_circle(screenBounds.x + radius,
+                         screenBounds.y + radius,
+                         radius, plain, shape->color, shape->color);
+                break;
+            }
+            
+            case SHAPE_BITMAP:
+                if (shape->data) {
+                    fb_draw_bitmap(screenBounds.x, screenBounds.y,
+                                  screenBounds.w, screenBounds.h,
+                                  (const uint16_t*)shape->data);
+                }
+                break;
+                
+            case SHAPE_TEXT:
+                if (shape->data) {
+                    fb_draw_text(0, screenBounds.x, screenBounds.y,
+                                (const char*)shape->data,
+                                shape->color, 1, 0, true, 0x0000,
+                                screenBounds.w, ft_AVR_classic_6x8);
+                }
+                break;
+                
+            default:
+                break;
+        }
+    }
+}
+
+fb_shape_t* Canvas::AddShape(fb_shape_type type, s_bounds_16u bounds, 
+                              uint16_t color, uint8_t layer) {
+    if (!m_shapeBuffer) return nullptr;
+    
+    // Bounds check - ensure shape is within canvas
+    s_bounds_16u clampedBounds = bounds;
+    if (clampedBounds.x < 0) {
+        clampedBounds.w += clampedBounds.x;
+        clampedBounds.x = 0;
+    }
+    if (clampedBounds.y < 0) {
+        clampedBounds.h += clampedBounds.y;
+        clampedBounds.y = 0;
+    }
+    if (clampedBounds.x + clampedBounds.w > m_cfg.width) {
+        clampedBounds.w = m_cfg.width - clampedBounds.x;
+    }
+    if (clampedBounds.y + clampedBounds.h > m_cfg.height) {
+        clampedBounds.h = m_cfg.height - clampedBounds.y;
+    }
+    
+    if (clampedBounds.w <= 0 || clampedBounds.h <= 0) {
+        ESP_LOGW(TAG, "Shape bounds invalid after clamping");
+        return nullptr;
+    }
+    
+    fb_shape_t* shape = fb_shape_add(m_shapeBuffer, type, clampedBounds, color, layer);
+    if (shape) {
+        m_dirty = true;
+        ESP_LOGI(TAG, "Added shape type=%d at (%d,%d) size=%dx%d", 
+                 type, bounds.x, bounds.y, bounds.w, bounds.h);
+    }
+    
+    return shape;
+}
+
+void Canvas::RemoveShape(uint16_t index) {
+    if (!m_shapeBuffer || index >= m_shapeBuffer->count) return;
+    
+    // Shift all shapes after index left by one
+    for (uint16_t i = index; i < m_shapeBuffer->count - 1; i++) {
+        m_shapeBuffer->shapes[i] = m_shapeBuffer->shapes[i + 1];
+    }
+    
+    m_shapeBuffer->count--;
+    m_dirty = true;
+}
+
+void Canvas::ClearShapes() {
+    if (!m_shapeBuffer) return;
+    m_shapeBuffer->count = 0;
+    for (int i = 0; i < FB_MAX_LAYERS; i++) {
+        m_shapeBuffer->layer_counts[i] = 0;
+        m_shapeBuffer->layer_offsets[i] = 0;
+    }
+    m_dirty = true;
+}
+
+void Canvas::SortShapes() {
+    if (!m_shapeBuffer) return;
+    fb_shapes_Fsort_by_layer(m_shapeBuffer);  // Use the fixed version
+}
+
+void Canvas::SetShapeVisible(uint16_t index, bool visible) {
+    if (!m_shapeBuffer || index >= m_shapeBuffer->count) return;
+    m_shapeBuffer->shapes[index].shown = visible;
+    m_dirty = true;
+}
+
+s_bounds_16u Canvas::ClampBoundsToParent(s_bounds_16u bounds, s_bounds_16u parentBounds) {
+    s_bounds_16u result = bounds;
+    
+    // Clamp to parent window boundaries
+    if (result.x < parentBounds.x) {
+        result.w -= (parentBounds.x - result.x);
+        result.x = parentBounds.x;
+    }
+    if (result.y < parentBounds.y) {
+        result.h -= (parentBounds.y - result.y);
+        result.y = parentBounds.y;
+    }
+    if (result.x + result.w > parentBounds.x + parentBounds.w) {
+        result.w = (parentBounds.x + parentBounds.w) - result.x;
+    }
+    if (result.y + result.h > parentBounds.y + parentBounds.h) {
+        result.h = (parentBounds.y + parentBounds.h) - result.y;
+    }
+    
+    return result;
+}
+
+////////////
+std::shared_ptr<Canvas> Window::AddCanvas(const CanvasCfg& cfg) {
+    // Create canvas with this window as parent
+    CanvasCfg canvasCfg = cfg;
+    canvasCfg.parentWindow = this;
+    
+    m_canvas = Canvas::Create(canvasCfg);
+    if (m_canvas) {
+        dirty = true;
+        ESP_LOGI(TAG, "Canvas added to window");
+    }
+    return m_canvas;
+}
+
+void Window::RemoveCanvas() {
+    m_canvas.reset();
+    dirty = true;
+}
+
+void Window::DrawCanvas() {
+    if (m_canvas) {
+        m_canvas->Draw();
+    }
+}
+////=================================
+
+
+
+
+void Window::setupBackgroundTile() {
+    if (!bgTile) {
+        bgTile = std::make_shared<PsramBackgroundTile>(32, 32);
+    }
+
+    // Only regenerate if something actually changed
+    if (bgTile->pbt_cfg.fill_type != win_backgroundpattern ||
+        bgTile->primaryColor != bgPrimaryColor ||
+        bgTile->secondaryColor != bgSecondaryColor) {
+
+        bgTile->pbt_cfg.fill_type = win_backgroundpattern;
+        bgTile->generate_pattern(win_backgroundpattern, bgPrimaryColor, bgSecondaryColor);
+
+        // Update last-known values
+        lastBackgroundPattern = win_backgroundpattern;
+        lastPrimaryColor      = bgPrimaryColor;
+        lastSecondaryColor    = bgSecondaryColor;
+
+        ESP_LOGI(TAG, "Background tile regenerated: pattern %d, primary=0x%04X, secondary=0x%04X",
+                 (int)win_backgroundpattern, bgPrimaryColor, bgSecondaryColor);
+    }
+}
+
+
+
+
+
+
 void Window::calculateLogicalDimensions()
 {
     const int rot   = wi_sizing.rotation & 3;
@@ -278,6 +547,8 @@ void Window::calculateLogicalDimensions()
     logicalW = (rot % 2 == 0) ? rawW : rawH;
     logicalH = (rot % 2 == 0) ? rawH : rawW;
 }
+
+
 
 Window::Window(const WindowCfg& cfg, const std::string& initialContent)
     : content(stdpsram::String(initialContent.begin(), initialContent.end())),
@@ -317,6 +588,47 @@ Window::Window(const WindowCfg& cfg, const std::string& initialContent)
     // ✅ FIXED: Calculate logicalW and logicalH using the same formula as WinDraw()
     calculateLogicalDimensions();
 }
+
+
+
+void Window::set_position(uint16_t x, uint16_t y, bool interpolate) {
+    if (wi_sizing.Xpos == x && wi_sizing.Ypos == y) return;
+    
+    wi_sizing.Xpos = x;
+    wi_sizing.Ypos = y;
+    
+    // TODO: Add interpolation here if interpolate == true
+    // (animate movement over several frames)
+    
+    dirty = true;
+    ESP_LOGI(TAG, "Window moved to (%d, %d)", x, y);
+    //gotta clear the screen now, it's ass and leaves shit left on the screen all fucking over
+    fb_clear(0x0000);
+}
+
+void Window::set_layer(uint8_t layer) {
+    Initialcfg.Layer = layer;
+    // Also update Currentcfg if you track it
+    dirty = true;
+    ESP_LOGI(TAG, "Window layer changed to %d", layer);
+}
+
+void Window::set_size(uint16_t width, uint16_t height) {
+    if (wi_sizing.Width == width && wi_sizing.Height == height) return;
+    
+    wi_sizing.Width = width;
+    wi_sizing.Height = height;
+    
+    calculateLogicalDimensions();
+    dirty = true;
+    ESP_LOGI(TAG, "Window resized to %dx%d", width, height);
+}
+
+
+
+
+
+
 
 static inline void rotPointLocal(
     int x, int y,
@@ -576,7 +888,25 @@ stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& input) {
 }
 
 
-
+void Window::get_physical_bounds(int& out_x, int& out_y, int& out_w, int& out_h) {
+    const int rot = wi_sizing.rotation & 3;
+    const int rawW = wi_sizing.Width;
+    const int rawH = wi_sizing.Height;
+    
+    // Rotated dimensions
+    out_w = (rot % 2 == 0) ? rawW : rawH;
+    out_h = (rot % 2 == 0) ? rawH : rawW;
+    
+    // Rotated position offset
+    int offsetX, offsetY;
+    rotPointLocal(0, 0, rawW, rawH, rot, offsetX, offsetY);
+    out_x = wi_sizing.Xpos - offsetX;
+    out_y = wi_sizing.Ypos - offsetY;
+    
+    // Clamp to screen (same as WinDraw)
+    out_x = std::max(0, std::min(out_x, v_env.clamped_screen_dim_w - out_w));
+    out_y = std::max(0, std::min(out_y, v_env.clamped_screen_dim_h - out_h));
+}
 
 // ──────────────────────────────────────────────
 // WinDraw() – logical origin fixed at (Posx, Posy) for ALL rotations
@@ -608,7 +938,17 @@ void Window::WinDraw() {
     
     if (!IsWindowShown) return;
     
-    
+    //  ensure any position changes actually fuckin propogate
+static uint16_t last_x = 0xFFFF;
+static uint16_t last_y = 0xFFFF;
+if (last_x != wi_sizing.Xpos || last_y != wi_sizing.Ypos) {
+    ESP_LOGI(TAG, "Window '%s' position changed from (%d,%d) to (%d,%d)", 
+             Currentcfg.name, last_x, last_y, wi_sizing.Xpos, wi_sizing.Ypos);
+    last_x = wi_sizing.Xpos;
+    last_y = wi_sizing.Ypos;
+    //fb_clear(0x0000); //refresh after pos change
+}
+
        
     
     
@@ -900,8 +1240,62 @@ bool WindowManager::registerWindow(std::shared_ptr<Window> window) {
         return false;
     }
     
+    // Bounds check - adjust window position if it overlaps toolbar
+    if (m_toolbarConfig.showToolbar) {
+        uint16_t offset = GetToolbarOffset();
+        
+        switch(m_toolbarConfig.tb_rot) {
+            case 0: // Top
+                if (window->wi_sizing.Ypos < offset) {
+                    ESP_LOGW(TAG, "Window overlapped top toolbar, moving from Y=%d to %d", 
+                             window->wi_sizing.Ypos, offset);
+                    window->wi_sizing.Ypos = offset;
+                    window->dirty = true;
+                }
+                // Also clamp height
+                if (window->wi_sizing.Ypos + window->wi_sizing.Height > v_env.clamped_screen_dim_h) {
+                    window->wi_sizing.Height = v_env.clamped_screen_dim_h - window->wi_sizing.Ypos;
+                }
+                break;
+                
+            case 1: // Left
+                if (window->wi_sizing.Xpos < offset) {
+                    ESP_LOGW(TAG, "Window overlapped left toolbar, moving from X=%d to %d", 
+                             window->wi_sizing.Xpos, offset);
+                    window->wi_sizing.Xpos = offset;
+                    window->dirty = true;
+                }
+                break;
+                
+            case 2: // Bottom
+                if (window->wi_sizing.Ypos + window->wi_sizing.Height > v_env.clamped_screen_dim_h - offset) {
+                    int new_y = v_env.clamped_screen_dim_h - offset - window->wi_sizing.Height;
+                    if (new_y < 0) new_y = 0;
+                    ESP_LOGW(TAG, "Window overlapped bottom toolbar, moving from Y=%d to %d", 
+                             window->wi_sizing.Ypos, new_y);
+                    window->wi_sizing.Ypos = new_y;
+                    window->dirty = true;
+                }
+                break;
+                
+            case 3: // Right
+                if (window->wi_sizing.Xpos + window->wi_sizing.Width > v_env.clamped_screen_dim_w - offset) {
+                    int new_x = v_env.clamped_screen_dim_w - offset - window->wi_sizing.Width;
+                    if (new_x < 0) new_x = 0;
+                    ESP_LOGW(TAG, "Window overlapped right toolbar, moving from X=%d to %d", 
+                             window->wi_sizing.Xpos, new_x);
+                    window->wi_sizing.Xpos = new_x;
+                    window->dirty = true;
+                }
+                break;
+        }
+    }
+    
     windows.push_back(window);
-    ESP_LOGI(TAG, "Window registered, total: %d", (int)windows.size());
+    ESP_LOGI(TAG, "Window registered at pos(%d,%d) size(%dx%d), total: %d", 
+             window->wi_sizing.Xpos, window->wi_sizing.Ypos,
+             window->wi_sizing.Width, window->wi_sizing.Height,
+             (int)windows.size());
     return true;
 }
 
@@ -994,7 +1388,7 @@ uint16_t WindowManager::GetToolbarOffset() {
         default: return 0;
     }
 }
-
+/*
 void WindowManager::SetToolbarActive(bool on) {
     m_toolbarConfig.showToolbar = on;
     tb_dirty = true;
@@ -1006,11 +1400,23 @@ void WindowManager::SetToolbarActive(bool on) {
         }
     }
 }
+*/
+//disabled that because we changed how this fucker operates
+
+void WindowManager::SetToolbarActive(bool on) {
+    m_toolbarConfig.showToolbar = on;
+    tb_dirty = true;
+    windows_repositioned = false;  // Need to reposition windows again
+    for (auto& win : windows) {
+        if (win) win->dirty = true;
+    }
+}
 
 void WindowManager::setToolbarRot(uint8_t new_rot) {
     if (new_rot > 3) new_rot = 0;
     m_toolbarConfig.tb_rot = new_rot;
     tb_dirty = true;
+    windows_repositioned = false;  // Need to reposition windows again
 }
 
 void WindowManager::addToolbarIco(s_bmp_t& icon) {
@@ -1034,68 +1440,103 @@ void WindowManager::SetToolbarText(const char* text) {
     tb_dirty = true;
 }
 
+
+
 void WindowManager::DrawToolBar() {
     if (!m_toolbarConfig.showToolbar) return;
     
+    static uint16_t last_color = 0xFFFF;
+    static bool last_visibility = false;
+    static uint8_t last_rotation = 0xFF;
+    
+    // Only redraw if something changed
+    if (!tb_dirty && 
+        last_color == m_toolbarConfig.color && 
+        last_visibility == m_toolbarConfig.showToolbar &&
+        last_rotation == m_toolbarConfig.tb_rot) {
+        return;  // Skip redraw if nothing changed
+    }
+    
+    last_color = m_toolbarConfig.color;
+    last_visibility = m_toolbarConfig.showToolbar;
+    last_rotation = m_toolbarConfig.tb_rot;
+    
     int bar_width = v_env.clamped_screen_dim_w;
-    int bar_height = 24;  // default height for top/bottom
+    int bar_height = v_env.clamped_screen_dim_h;
     int bar_x = 0;
     int bar_y = 0;
+    int bar_thickness = 28;
     
-    // Calculate position based on rotation
     switch(m_toolbarConfig.tb_rot) {
         case 0:  // top
             bar_x = 0;
             bar_y = 0;
             bar_width = v_env.clamped_screen_dim_w;
-            bar_height = 24;
+            bar_height = bar_thickness;
             break;
         case 1:  // left
             bar_x = 0;
             bar_y = 0;
-            bar_width = 32;
+            bar_width = bar_thickness;
             bar_height = v_env.clamped_screen_dim_h;
             break;
         case 2:  // bottom
             bar_x = 0;
-            bar_y = v_env.clamped_screen_dim_h - 24;
+            bar_y = v_env.clamped_screen_dim_h - bar_thickness;
             bar_width = v_env.clamped_screen_dim_w;
-            bar_height = 24;
+            bar_height = bar_thickness;
             break;
         case 3:  // right
-            bar_x = v_env.clamped_screen_dim_w - 32;
+            bar_x = v_env.clamped_screen_dim_w - bar_thickness;
             bar_y = 0;
-            bar_width = 32;
+            bar_width = bar_thickness;
             bar_height = v_env.clamped_screen_dim_h;
             break;
+        default:
+            return;
     }
     
-    // Draw background
-    draw_toolbar_background(bar_x, bar_y, bar_width, bar_height, m_toolbarConfig.color);
+    // Bounds check
+    if (bar_x < 0) bar_x = 0;
+    if (bar_y < 0) bar_y = 0;
+    if (bar_x + bar_width > v_env.clamped_screen_dim_w) 
+        bar_width = v_env.clamped_screen_dim_w - bar_x;
+    if (bar_y + bar_height > v_env.clamped_screen_dim_h) 
+        bar_height = v_env.clamped_screen_dim_h - bar_y;
     
-    // Draw time/date text (top/bottom only for now)
+   
+    fb_rect(1,2,bar_x, bar_y, bar_width, bar_height, m_toolbarConfig.color,0xFFFF);
+    
+    // Draw time/date text (top/bottom only)
     if ((m_toolbarConfig.tb_rot == 0 || m_toolbarConfig.tb_rot == 2) && !toolbar_text.empty()) {
-        // Center the text
         int text_x = bar_x + (bar_width / 2) - (strlen(toolbar_text.c_str()) * 3);
         int text_y = bar_y + 6;
-        draw_toolbar_text(text_x, text_y, toolbar_text.c_str(), 0xFFFF);
+        
+        // ✅ OPTIMIZATION 2: Clip text if too long
+        if (text_x < bar_x) text_x = bar_x + 2;
+        if (text_x + strlen(toolbar_text.c_str()) * 6 > bar_x + bar_width) {
+            // Text too long, truncate or skip
+            static char truncated[32];
+            strncpy(truncated, toolbar_text.c_str(), sizeof(truncated) - 4);
+            strcat(truncated, "...");
+            fb_draw_text(text_x, text_y, bar_width - 4, truncated, 0xFFFF, 1, 0, true, 0x0000, 40, ft_AVR_classic_6x8);
+        } else {
+            fb_draw_text(text_x, text_y, bar_width - 4, toolbar_text.c_str(), 0xFFFF, 1, 0, true, 0x0000, 40, ft_AVR_classic_6x8);
+        }
     }
     
-    // Draw icons (left/right or top/bottom corners)
+    // Draw icons
     int icon_x = bar_x + 4;
     int icon_y = bar_y + 4;
     
     for (int i = 0; i < 16; i++) {
         if (m_toolbarConfig.ref_iconptrs[i] && (m_toolbarConfig.icons_shown & (1 << i))) {
-            // Draw icon at current position
             if (m_toolbarConfig.tb_rot == 0 || m_toolbarConfig.tb_rot == 2) {
-                // Top/bottom: horizontal layout
                 if (icon_x + 16 <= bar_x + bar_width - 4) {
                     fb_draw_bitmap(icon_x, icon_y, 16, 16, m_toolbarConfig.ref_iconptrs[i]->data);
                     icon_x += 20;
                 }
             } else {
-                // Left/right: vertical layout
                 if (icon_y + 16 <= bar_y + bar_height - 4) {
                     fb_draw_bitmap(icon_x, icon_y, 16, 16, m_toolbarConfig.ref_iconptrs[i]->data);
                     icon_y += 20;
@@ -1107,11 +1548,97 @@ void WindowManager::DrawToolBar() {
     tb_dirty = false;
 }
 
+
+
+void WindowManager::RepositionAllWindows() {
+   // fb_clear(0x0000);  // ✅ Clear screen after repositioning
+    if (!m_toolbarConfig.showToolbar) return;
+    if (windows_repositioned) return;  // Only reposition once
+    
+    uint16_t offset = GetToolbarOffset();
+    bool moved = false;
+    
+    for (auto& win : windows) {
+        if (!win) continue;
+        
+        int physX, physY, physW, physH;
+        win->get_physical_bounds(physX, physY, physW, physH);
+        
+        switch (m_toolbarConfig.tb_rot) {
+            case 0:  // top toolbar
+                if (physY < offset) {
+                    // Move window DOWN so its top is below toolbar
+                    // Need to convert physical movement back to logical movement
+                    int delta = offset - physY;
+                    win->wi_sizing.Ypos += delta;
+                    win->dirty = true;
+                    ESP_LOGI(TAG, "Window '%s' moved down by %d (physical Y %d → %d)", 
+                             win->Currentcfg.name, delta, physY, physY + delta);
+                }
+                break;
+                
+            case 1:  // left toolbar
+                if (physX < offset) {
+                    int delta = offset - physX;
+                    win->wi_sizing.Xpos += delta;
+                    win->dirty = true;
+                    ESP_LOGI(TAG, "Window '%s' moved right by %d (physical X %d → %d)", 
+                             win->Currentcfg.name, delta, physX, physX + delta);
+                }
+                break;
+                
+            case 2:  // bottom toolbar
+                {
+                    int max_phys_y = v_env.clamped_screen_dim_h - offset - physH;
+                    if (physY > max_phys_y) {
+                        int delta = physY - max_phys_y;
+                        win->wi_sizing.Ypos -= delta;
+                        win->dirty = true;
+                        ESP_LOGI(TAG, "Window '%s' moved up by %d", 
+                                 win->Currentcfg.name, delta);
+                    }
+                }
+                break;
+                
+            case 3:  // right toolbar
+                {
+                    int max_phys_x = v_env.clamped_screen_dim_w - offset - physW;
+                    if (physX > max_phys_x) {
+                        int delta = physX - max_phys_x;
+                        win->wi_sizing.Xpos -= delta;
+                        win->dirty = true;
+                        ESP_LOGI(TAG, "Window '%s' moved left by %d", 
+                                 win->Currentcfg.name, delta);
+                    }
+                }
+                break;
+        }
+        if (moved) {
+            windows_repositioned = true;
+            tb_dirty = true;
+            ESP_LOGI(TAG, "Toolbar repositioning completed");
+           // fb_clear(0x0000); //change to background color fixit
+        }
+    }
+}
+
+// In cpp
+void WindowManager::SortWindowsByZOrder() {
+    std::sort(windows.begin(), windows.end(),
+        [](const std::shared_ptr<Window>& a, const std::shared_ptr<Window>& b) {
+            if (!a || !b) return a != nullptr;  // nulls go to end
+            return a->wi_sizing.Zorder < b->wi_sizing.Zorder;  // lower Z = higher priority (draw later)
+        });
+}
+
+
+
+
 void WindowManager::UpdateToolbar() {
     if (!m_toolbarConfig.showToolbar) return;
     
     uint64_t now = esp_timer_get_time();
-    uint64_t update_interval_us = 1000000 / m_toolbarConfig.tb_update_hz;
+    uint64_t update_interval_us = 500000 / m_toolbarConfig.tb_update_hz;
     
     if (now - last_toolbar_update >= update_interval_us || tb_dirty) {
         DrawToolBar();
@@ -1119,26 +1646,60 @@ void WindowManager::UpdateToolbar() {
     }
 }
 
+
+void WindowManager::SortWindowsByLayer() {
+    std::sort(windows.begin(), windows.end(),
+        [](const std::shared_ptr<Window>& a, const std::shared_ptr<Window>& b) {
+            if (!a) return false;
+            if (!b) return true;
+            return a->Initialcfg.Layer < b->Initialcfg.Layer;
+        });
+}
+
+
+
+
 // Update UpdateAll to handle toolbar
-void WindowManager::UpdateAll(bool force, bool ToolbarUpdate) {
-    // First update toolbar if needed
-    if (ToolbarUpdate && m_toolbarConfig.showToolbar) {
-        UpdateToolbar();
-    }
+void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWindows, bool draw_toolbar_ontop) {
+    // Only reposition on first run after toolbar change
+    if (repositionWindows && !windows_repositioned) {
+        RepositionAllWindows();
+       // fb_clear(0x0000);           // ✅ Clear screen once
+        tb_dirty = true;  
+           }
     
+    // Remove dead windows
     for (auto it = windows.begin(); it != windows.end(); ) {
         if (!*it || !(*it)->IsWindowShown) {
-            ESP_LOGD(TAG, "WindowManager: Removing dead window");
             it = windows.erase(it);
             continue;
         }
-        
-        if (force) {
-            (*it)->enable_refresh_override = true;
-        }
-        
-        (*it)->WinDraw();
         ++it;
     }
+    
+    // Sort by layer
+    std::sort(windows.begin(), windows.end(),
+        [](const std::shared_ptr<Window>& a, const std::shared_ptr<Window>& b) {
+            if (!a) return false;
+            if (!b) return true;
+            return a->Initialcfg.Layer < b->Initialcfg.Layer;
+        });
+    
+    // Draw toolbar BEHIND windows (if requested)
+    if (!draw_toolbar_ontop && ToolbarUpdate && m_toolbarConfig.showToolbar) {
+        DrawToolBar();
+    }
+    
+    // Draw all windows
+    for (auto& win : windows) {
+        if (!win) continue;
+        if (force) win->enable_refresh_override = true;
+        win->WinDraw();
+        esp_task_wdt_reset(); //calm the angry watchdog down
+    }
+    
+    // Draw toolbar ON TOP (if requested)
+    if (draw_toolbar_ontop && ToolbarUpdate && m_toolbarConfig.showToolbar) {
+        DrawToolBar();
+    }
 }
-

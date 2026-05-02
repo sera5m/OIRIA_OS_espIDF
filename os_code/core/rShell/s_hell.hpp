@@ -71,6 +71,12 @@ const char* get_app_name() const { return cfg_.name; } //getter because we love 
     virtual void on_pause() {}
     virtual void on_resume(){}
     virtual void on_draw(){}
+
+
+    //methods for focusing and input condition swap
+    virtual void on_focus_gained() {}
+    virtual void on_focus_lost() {}
+
     // Window access
     std::shared_ptr<Window> get_window() const { return window_; }
     int appTickRateHZ; //tick rate of the app in hz

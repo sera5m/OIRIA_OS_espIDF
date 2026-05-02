@@ -138,7 +138,7 @@ extern "C" void app_main(void) {
     }
 
     // Start consumer task AFTER devices exist
-    startInputHandlerTask();
+    startInputTask();
 
     // Continue with rest of boot
    // stage_2_i2c_scan();
@@ -440,11 +440,11 @@ ESP_LOGI(TAG, "WindowManager init-d");
     cfg.priority = 5;
     cfg.name = "WatchApp";
 
-    auto app = std::make_shared<MyWatchApp>(cfg);
-    app->init();
-    app->start_task();     // ✅ phase 3: run the FreeRTOS tas
+    auto watchapp = std::make_shared<MyWatchApp>(cfg);
+watchapp->init();
+    watchapp->start_task();     // ✅ phase 3: run the FreeRTOS tas
     
-    appManager::instance().set_focused_app(app);
+    appManager::instance().set_focused_app(watchapp);
     
     //added dynamic throttle because display overperforms above target to ease cpu
 const TickType_t targetTicks = pdMS_TO_TICKS(1000 / v_env.fpsTarget);
@@ -453,8 +453,10 @@ TickType_t lastWakeTime = xTaskGetTickCount();
 
 while (1) {
     update_display_time(&v_env.displayTime);
-    WindowManager::getInstance().UpdateAll(0,1);
+    WindowManager::getInstance().UpdateAll(0,1,1,1);
+    //fb_clear(0xB1C8);
     refreshScreen();
+    
 	
     vTaskDelayUntil(&lastWakeTime, targetTicks);
 }

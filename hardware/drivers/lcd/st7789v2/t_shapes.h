@@ -146,6 +146,7 @@ static inline void fb_shapes_sort_by_layer(fb_shape_buffer_t* fb)
     if (!fb || fb->count == 0) return;
 
     // simple insertion sort (small N, low overhead, PSRAM-friendly)
+    //no,drunk me, this is on^2. this is in no fucking way low overhead,small, orpsram freindly. what the fuck
     for (uint16_t i = 1; i < fb->count; i++) {
         fb_shape_t key = fb->shapes[i];
         int j = i - 1;
@@ -157,6 +158,57 @@ static inline void fb_shapes_sort_by_layer(fb_shape_buffer_t* fb)
         fb->shapes[j + 1] = key;
     }
 }
+//if this breaks, blame deepseek code
+static inline void fb_shapes_Fsort_by_layer(fb_shape_buffer_t* fb)
+{
+    if (!fb || fb->count <= 1) return;
+    
+    // For N ≤ 16, insertion sort is actually fine BUT the key copying is the problem
+    // Fixed: use indices instead of copying the whole struct
+    
+    uint16_t indices[FB_MAX_SHAPES];
+    for (uint16_t i = 0; i < fb->count; i++) indices[i] = i;
+    
+    // Sort indices by layer (simple selection sort, no struct copies)
+    for (uint16_t i = 0; i < fb->count - 1; i++) {
+        uint16_t min_idx = i;
+        for (uint16_t j = i + 1; j < fb->count; j++) {
+            if (fb->shapes[indices[j]].layer < fb->shapes[indices[min_idx]].layer) {
+                min_idx = j;
+            }
+        }
+        if (min_idx != i) {
+            uint16_t temp = indices[i];
+            indices[i] = indices[min_idx];
+            indices[min_idx] = temp;
+        }
+    }
+    
+    // Reorder shapes array once
+    fb_shape_t temp[FB_MAX_SHAPES];
+    for (uint16_t i = 0; i < fb->count; i++) {
+        temp[i] = fb->shapes[indices[i]];
+    }
+    for (uint16_t i = 0; i < fb->count; i++) {
+        fb->shapes[i] = temp[i];
+    }
+    
+    // Rebuild layer offsets
+    for (int i = 0; i < FB_MAX_LAYERS; i++) {
+        fb->layer_offsets[i] = 0;
+        fb->layer_counts[i] = 0;
+    }
+    
+    uint8_t current_layer = 255;
+    for (uint16_t i = 0; i < fb->count; i++) {
+        fb->layer_counts[fb->shapes[i].layer]++;
+        if (fb->shapes[i].layer != current_layer) {
+            current_layer = fb->shapes[i].layer;
+            fb->layer_offsets[current_layer] = i;
+        }
+    }
+}
+
 
 #ifdef __cplusplus
 }

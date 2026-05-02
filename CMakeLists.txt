@@ -58,6 +58,7 @@ idf_component_register(
     "os_code/core/window_env/MWenv.hpp"
     "os_code/core/rShell/s_hell.hpp"
     "os_code/core/rShell/s_hell.cpp"
+    "hardware/drivers/lcd/st7789v2/t_shapes.h"
     
     #------APPLICATIONS
     "os_code/applications/watch/MS_watchapp.hpp"

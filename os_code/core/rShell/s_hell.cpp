@@ -97,6 +97,9 @@ void AppBase::stop_task() {
     }
 }
 
+
+
+
 void AppBase::task_func(void* arg) {
     AppBase* self = static_cast<AppBase*>(arg);
     self->run();

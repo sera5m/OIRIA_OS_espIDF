@@ -38,6 +38,7 @@
 #include "os_code/core/rShell/enviroment/env_vars.h"
 //get this from psram string and whatnot
 // forward declarations
+#include "hardware/drivers/lcd/st7789v2/t_shapes.h"
 class Window;
 class Canvas;
 struct CanvasCfg;
@@ -61,7 +62,7 @@ struct HighlighterTag {uint16_t color; bool enabled;};
 
 
 
-
+//uint16_t background_color=0x1212;
 
 
 // Forward declare so variant can use it
@@ -294,21 +295,76 @@ uint16_t    safe_parse_color(const stdpsram::String& str, uint16_t default_val);
 
 
 
+  //  s_bounds_16u c_bounds; //xywh bounds
+
+class Window;//forward declare
+
 struct CanvasCfg {
     int x = 0;
     int y = 0;
-    int width  = 32;
+    int width = 32;
     int height = 32;
-
+    
     bool borderless = true;
-    bool DrawBG     = true;
-
-    uint16_t bgColor     = 0x0000;
+    bool DrawBG = true;
+    
+    uint16_t bgColor = 0x0000;
     uint16_t BorderColor = 0xFFFF;
-
+    
     Window* parentWindow = nullptr;
     float UpdateTickRateS = 0.1f;
 };
+
+class Canvas : public std::enable_shared_from_this<Canvas> {
+public:
+    static std::shared_ptr<Canvas> Create(const CanvasCfg& cfg) {
+        return std::shared_ptr<Canvas>(new Canvas(cfg));
+    }
+    
+    ~Canvas();
+    
+    void Update(float deltaTime);
+    void Draw();
+    
+    // Shape management helpers
+    fb_shape_t* AddShape(fb_shape_type type, s_bounds_16u bounds, 
+                         uint16_t color, uint8_t layer);
+    
+    void RemoveShape(uint16_t index);
+    void ClearShapes();
+    void SortShapes();
+    void SetShapeVisible(uint16_t index, bool visible);
+    
+    fb_shape_buffer_t* GetShapeBuffer() { return m_shapeBuffer; }
+    
+    // Getters
+    int GetX() const { return m_cfg.x; }
+    int GetY() const { return m_cfg.y; }
+    int GetWidth() const { return m_cfg.width; }
+    int GetHeight() const { return m_cfg.height; }
+    Window* GetParentWindow() const { return m_parentWindow; }
+    
+    // Setters with bounds checking
+    void SetPosition(int x, int y);
+    void SetSize(int width, int height);
+    void SetParentWindow(Window* window) { m_parentWindow = window; }
+    
+private:
+    explicit Canvas(const CanvasCfg& cfg);
+    
+    s_bounds_16u ClampBoundsToParent(s_bounds_16u bounds, s_bounds_16u parentBounds);
+    
+    CanvasCfg m_cfg;
+    Window* m_parentWindow;
+    fb_shape_buffer_t* m_shapeBuffer;
+    uint16_t m_maxShapes;
+    bool m_dirty;
+};
+
+
+
+
+
 
 /* ======================== WINDOW MANAGER ======================== */
 
@@ -318,9 +374,16 @@ void clearScreenEveryXCalls(uint16_t x);
 
 class Window : public std::enable_shared_from_this<Window> {
     public:
+
+    //why the fuck did i not have this
+void set_position(uint16_t x, uint16_t y, bool interpolate = false);
+void set_layer(uint8_t layer);
+void set_size(uint16_t width, uint16_t height);
+
+
     bool window_highlighted=0; //default-init 0
 
-
+    void get_physical_bounds(int& out_x, int& out_y, int& out_w, int& out_h);
         explicit Window(const WindowCfg& cfg, const std::string& initialContent = "");
     
         void WinDraw();
@@ -355,6 +418,13 @@ std::shared_ptr<PsramBackgroundTile> bgTile;
 // Background configuration
 BgFillType win_backgroundpattern;
 
+//canvas thing we add on to the window here....
+std::shared_ptr<Canvas> AddCanvas(const CanvasCfg& cfg);
+void RemoveCanvas();
+std::shared_ptr<Canvas> GetCanvas() const { return m_canvas; }
+void DrawCanvas();  // Call this in WinDraw()
+////// now the rest of the bullshit
+
 // Call this once after changing pattern/colors
 
 
@@ -387,7 +457,7 @@ BgFillType win_backgroundpattern;
         bool enable_refresh_override=0; //by default no need to enable, but ok if you want
 
     private:
-
+    std::shared_ptr<Canvas> m_canvas;
     bool OtherTick=0; //true every OTHER update
 
     BgFillType lastBackgroundPattern = BgFillType::Solid;
@@ -415,7 +485,7 @@ TextState Tstate ; //new var should default to defaults
     uint16_t currentPhysX = 0;
 uint16_t currentPhysY = 0;
 
-    
+
     // One tokenize – takes the native type
     stdpsram::Vector<TextChunk> tokenize(const stdpsram::String& s);
     // Optionally keep a std::string wrapper if needed
@@ -477,7 +547,7 @@ uint16_t currentPhysY = 0;
                 return instance;
             }
         
-            void UpdateAll(bool force, bool ToolbarUpdate);
+            void UpdateAll(bool force = false, bool ToolbarUpdate = true, bool repositionWindows = true, bool draw_toolbar_ontop = true);
             bool PruneDeadWindows();   
             bool registerWindow(std::shared_ptr<Window> window);
             void ClampToArea(s_bounds_16u bounds, bool is_universal); 
@@ -494,10 +564,12 @@ uint16_t currentPhysY = 0;
             void UpdateToolbar();
             void setToolbarRot(uint8_t new_rot);
             void addToolbarIco(s_bmp_t& icon); //reference of new icon by direct ref, no copy because icons are static single assets
-           
+            void RepositionAllWindows();
+            void SortWindowsByZOrder();
+            void SortWindowsByLayer();
             void SetToolbarText(const char* text);  // NEW: set time/date text
             void DrawToolBar();
-
+            void ResetRepositioning() { windows_repositioned = false; }
               //--------------------------------
 
                 //Get the space available for windows (screen minus toolbar)
@@ -506,6 +578,7 @@ uint16_t currentPhysY = 0;
               uint16_t GetToolbarOffset();  // offset from top/left where windows should start  
         
               private:
+              bool windows_repositioned = false;
               WindowManager(); 
               ~WindowManager();
               

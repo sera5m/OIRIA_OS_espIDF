@@ -50,7 +50,8 @@ enum class HIDTarget: uint8_t{
     toTask,//direct the input to whatever task we have going here
     toTask_and_usbHid,
     debug_log, //prints it over the serial
-    everything //do not do this
+    everything, //do not do this
+    toTaskAndDebug
 };
 extern HIDTarget CurrentHIDTarget; 
 // ===================================================================
