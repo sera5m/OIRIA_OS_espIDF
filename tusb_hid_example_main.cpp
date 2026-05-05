@@ -111,7 +111,7 @@ static esp_err_t boot_stage2andaHalf(void);
 static esp_err_t stage_3_spi_init(void);
 static esp_err_t stage_3_sd_mount(void);
 static void       task_app_manager(bool sd_mounted);
-static void main_app_handles(void);
+static void bootloader_final_app(void);
 // ────────────────────────────────────────────────
 
 
@@ -145,7 +145,7 @@ extern "C" void app_main(void) {
     boot_stage2andaHalf();
     stage_3_spi_init();
     stage_3_sd_mount();
-    main_app_handles();   // sd_ok was false anyway
+    bootloader_final_app();   // sd_ok was false anyway
 }
 
 // ────────────────────────────────────────────────
@@ -397,8 +397,56 @@ static esp_err_t stage_3_sd_mount(void) {
 }
 
 
+
+//we are following a create-consume architecture for this (my idea, not the llm)
+TaskHandle_t core1TaskHandle = NULL;
+TaskHandle_t core2TaskHandle = NULL;
+
+void core1_createData(void* pv) {
+    esp_task_wdt_add(NULL);
+    
+    while (1) {
+        uint32_t frame_start = esp_log_timestamp();
+        
+        update_display_time(&v_env.displayTime);
+        WindowManager::getInstance().UpdateAll(0,1,1,1);
+        
+        // Feed watchdog AFTER heavy work
+        esp_task_wdt_reset();
+        
+        xTaskNotifyGive(core2TaskHandle);
+        
+        // Frame rate limiting + yield
+        uint32_t frame_time = esp_log_timestamp() - frame_start;
+        uint32_t target_ms = 1000 / v_env.fpsTarget;
+        if (frame_time < target_ms) {
+            vTaskDelay(pdMS_TO_TICKS(target_ms - frame_time));
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(1));  // At least yield
+        }
+    }
+}
+
+void core2_push(void* pv) {
+    esp_task_wdt_add(NULL);
+    
+    while (1) {
+        // Block until core1 says "go" - NO TIMEOUT
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        
+        refreshScreen();
+        esp_task_wdt_reset();
+        
+        // Yield to let idle task run
+        taskYIELD();
+    }
+}
+
+
+
+
 //handles some boot stuff and will also update sensors (not input, it's got it's own task)
-static void main_app_handles() {
+static void bootloader_final_app() {
 	//added delays to stop weird timing from causing crashes
 	vTaskDelay(50);
     screen_set_driver(&onboard_screen_driver);
@@ -450,22 +498,64 @@ watchapp->init();
 const TickType_t targetTicks = pdMS_TO_TICKS(1000 / v_env.fpsTarget);
 
 TickType_t lastWakeTime = xTaskGetTickCount();
-esp_task_wdt_add(NULL); //null means this task. as this task is the heavy refresh one, we need to add it so we can manually feed watchdog
+//esp_task_wdt_add(NULL); //null means this task. as this task is the heavy refresh one, we need to add it so we can manually feed watchdog
 //esp_task_wdt_set_timeout(6); //default five, i think? 
-while (1) {
+
+//Increase watchdog timeout
+// In app_main() or bootloader_final_app() before creating tasks:
+esp_task_wdt_config_t wdt_config = {
+    .timeout_ms = 10000,  // 10 seconds instead of 5
+    .idle_core_mask = (1 << 0) | (1 << 1),  // monitor both idle tasks
+    .trigger_panic = true
+};
+esp_task_wdt_reconfigure(&wdt_config);
+
+//create new tasks for proscessing loop
+xTaskCreatePinnedToCore(core1_createData, "core1", 8192, NULL, 5, &core1TaskHandle, 1);
+xTaskCreatePinnedToCore(core2_push,       "core2", 8192, NULL, 5, &core2TaskHandle, 0);
+
+
+
+
+vTaskDelete(NULL); //KILL YOURSELF, BOOTLOADER! 
+//you need to kill yourself NOW,bootloader, your life is as useless as a summer ant.......
+/*
+you serve ONE purpose
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⠏⠄⠄⠄⠄⠄⠄⠄⠄⠙⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⠄⠄⢀⣀⣀⣀⡀⠄⢀⣠⡔⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣰⢿⣿⣿⣿⣿⣿⣿⣷⡆⢠⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⡏⣻⣟⣿⣿⡿⣟⣛⣿⡃⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
+⣿⣿⣿⣿⣿⣿⣿⣿⣧⣿⣾⣿⣷⣿⣷⣿⣿⣿⣷⣽⣹⣿⣿⣿⣿⣿⣿⣿⣿⣿
+⣿⣿⣿⣿⣿⣿⣿⣿⡟⣟⣿⣿⠺⣟⣻⣿⣿⣿⡏⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⢿⡝⠻⠵⠿⠿⢿⣿⣿⢳⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣯⣧⠈⣛⣛⣿⣿⡿⣡⣞⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡧⠄⠙⠛⠛⢁⣴⣿⣿⣷⣿⢿⣿⣿⣿⣿⣿⣿⣿⣿
+⣿⣿⣿⣿⣿⣿⡿⠟⠉⠄⠄⢠⠄⣀⣠⣾⣿⣿⡿⠟⠁⠄⠈⠛⢿⣿⣿⣿⣿⣿
+⣿⣿⣿⣿⡟⠉⠄⠄⢀⠠⠐⠒⠐⠾⠿⢟⠋⠁⠄⢀⣀⠠⠐⠄⠂⠈⠻⢿⣿⣿
+⣿⣿⣿⠋⠁⠄⢀⡈⠄⠄⠄⠄⠄⠄⠄⠄⠁⠒⠉⠄⢠⣶⠄⠄⠄⠄⠄⠈⠫⢿
+⣿⣿⡟⠄⢔⠆⡀⠄⠈⢀⠄⠄⠄⠄⠄⠄⠄⢄⡀⠄⠈⡐⢠⠒⠄⠄⠄⠄⢀⣂
+⣿⣿⠁⡀⠄⠄⢇⠄⠄⢈⠆⠄⠄⢀⠔⠉⠁⠉⠉⠣⣖⠉⡂⡔⠂⠄⢀⠔⠁⠄
+⣿⡿⠄⠄⠄⠄⢰⠹⣗⣺⠤⠄⠰⡎⠄⠄⠄⠄⠄⠄⠘⢯⡶⢟⡠⠰⠄⠄⠄⠄
+*/
+
+/*while (1) {
 	
     update_display_time(&v_env.displayTime);
     WindowManager::getInstance().UpdateAll(0,1,1,1);
     //fb_clear(0xB1C8);
+    
     esp_task_wdt_reset();//reset between creating the data and pushing to the screen, because each step is a heavy blocking task for this core
     //this may need to have substantial changes in the future for stability
-    
+    vTaskDelay(pdMS_TO_TICKS(1));
     refreshScreen();
     
 	
     vTaskDelayUntil(&lastWakeTime, targetTicks);
-}
+}*/
 
 }
+
+
+
 
 //to-do add boot time and multi thread this

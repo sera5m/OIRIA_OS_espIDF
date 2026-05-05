@@ -1660,13 +1660,13 @@ void WindowManager::SortWindowsByLayer() {
 
 
 // Update UpdateAll to handle toolbar
+// Update UpdateAll to handle toolbar with cooperative yielding
 void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWindows, bool draw_toolbar_ontop) {
     // Only reposition on first run after toolbar change
     if (repositionWindows && !windows_repositioned) {
         RepositionAllWindows();
-       // fb_clear(0x0000);           // ✅ Clear screen once
         tb_dirty = true;  
-           }
+    }
     
     // Remove dead windows
     for (auto it = windows.begin(); it != windows.end(); ) {
@@ -1688,18 +1688,30 @@ void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWin
     // Draw toolbar BEHIND windows (if requested)
     if (!draw_toolbar_ontop && ToolbarUpdate && m_toolbarConfig.showToolbar) {
         DrawToolBar();
+        vTaskDelay(pdMS_TO_TICKS(1));  // ✅ Yield after toolbar
     }
     
-    // Draw all windows
+    // Draw all windows - yield between each window
+    int window_count = 0;
     for (auto& win : windows) {
         if (!win) continue;
+        
         if (force) win->enable_refresh_override = true;
+        esp_task_wdt_reset();  // god please stop crashing
         win->WinDraw();
-        esp_task_wdt_reset(); //calm the angry watchdog down
+        esp_task_wdt_reset();
+        // ✅ Yield every window to let idle task breathe
+        window_count++;
+        if ((window_count & 0x03) == 0) {  // Every 4 windows
+            vTaskDelay(pdMS_TO_TICKS(1));  // 1ms yield
+        }
+        
+        esp_task_wdt_reset();  // Keep watchdog happy too
     }
     
     // Draw toolbar ON TOP (if requested)
     if (draw_toolbar_ontop && ToolbarUpdate && m_toolbarConfig.showToolbar) {
         DrawToolBar();
+        vTaskDelay(pdMS_TO_TICKS(1)); //just wait
     }
 }

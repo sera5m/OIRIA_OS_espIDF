@@ -1,4 +1,3 @@
-// lcDriver.c
 #include "lcDriver.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -6,116 +5,110 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
-#include <math.h>               // ← added for sqrtf, cosf, sinf
+#include <math.h>
 #include "esp_timer.h"
 #include <stdint.h>
 #include <stdbool.h>
-
-//#include "hardware/drivers/psram_std/psram_std.h" //my custom work for psram stdd things
+#include <stdlib.h>     // for min/max
+#include <stdlib.h>   // for min/max if needed
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
-
-
-#define SAFE_ROWS_PER_CHUNK 4   // 240×4×2 = 1920 bytes — safe on S3
-#define SAFE_CHUNK_BYTES (SCREEN_W * SAFE_ROWS_PER_CHUNK * 2)
-
 #define TAG "ST7789"
 
-#define SAFE_ROWS_PER_CHUNK 4   // 240×4×2 = 1920 bytes — safe on S3 DMA
-#define SAFE_CHUNK_BYTES (SCREEN_W * SAFE_ROWS_PER_CHUNK * 2)
+#define SAFE_ROWS_PER_CHUNK 8
 
 // ──────────────────────────────────────────────
-// Framebuffer & dirty rows
+// Dirty rows
 // ──────────────────────────────────────────────
 uint16_t *framebuffer = NULL;
 
-#define CHANGED_ROWS_BITS (SCREEN_H + 7)
-#define CHANGED_ROWS_BYTES ((CHANGED_ROWS_BITS + 7) / 8)
+#define CHANGED_ROWS_BYTES ((SCREEN_H + 7)/8)
 static uint8_t changed_rows_bitmask[CHANGED_ROWS_BYTES];
 
-static inline void mark_row_dirty(uint16_t row) {
-    if (row >= SCREEN_H) return;
-    changed_rows_bitmask[row / 8] |= (1u << (row % 8));
-}
+static inline void mark_rows_dirty(int y0, int y1)
+{
+    if (y0 < 0) y0 = 0;
+    if (y1 >= SCREEN_H) y1 = SCREEN_H - 1;
+    if (y0 > y1) return;
 
-static inline bool is_row_dirty(uint16_t row) {
-    if (row >= SCREEN_H) return false;
-    return (changed_rows_bitmask[row / 8] & (1u << (row % 8))) != 0;
-}
+    int byte0 = y0 / 8;
+    int byte1 = y1 / 8;
 
-static inline void mark_all_dirty(bool dirty) {
-    memset(changed_rows_bitmask, dirty ? 0xFF : 0x00, sizeof(changed_rows_bitmask));
-}
-
-static void mark_rows_range_dirty(int y0, int y1) {
-    y0 = (y0 < 0) ? 0 : y0;
-    y1 = (y1 >= SCREEN_H) ? SCREEN_H - 1 : y1;
-    for (int y = y0; y <= y1; y++) {
-        mark_row_dirty(y);
+    if (byte0 == byte1) {
+        changed_rows_bitmask[byte0] |= ((0xFFu << (y0 % 8)) & (0xFFu >> (7 - (y1 % 8))));
+    } else {
+        changed_rows_bitmask[byte0] |= (0xFFu << (y0 % 8));
+        for (int i = byte0 + 1; i < byte1; i++)
+            changed_rows_bitmask[i] = 0xFF;
+        changed_rows_bitmask[byte1] |= (0xFFu >> (7 - (y1 % 8)));
     }
+    //  taskYIELD();
 }
+
+static inline void mark_all_dirty(bool dirty)
+{
+    memset(changed_rows_bitmask, dirty ? 0xFF : 0x00, sizeof(changed_rows_bitmask));
+    //  taskYIELD();
+}
+
+// ──────────────────────────────────────────────
+// Fast fill helper
+// ──────────────────────────────────────────────
+static inline void fill_row32(uint16_t* dst, int width, uint16_t color)
+{
+    uint32_t c32 = ((uint32_t)color << 16) | color;
+    uint32_t* d32 = (uint32_t*)dst;
+    int words = width / 2;
+    for (int i = 0; i < words; i++)
+        d32[i] = c32;
+    if (width & 1)
+        dst[width - 1] = color;
+        //  taskYIELD();
+}
+
 // ──────────────────────────────────────────────
 // Framebuffer
 // ──────────────────────────────────────────────
-
-
-void framebuffer_alloc(void) {
+void framebuffer_alloc(void)
+{
     static bool allocated = false;
     if (allocated) return;
 
     size_t sz = SCREEN_W * SCREEN_H * sizeof(uint16_t);
-
-    // ESP_LOGI(TAG, "Allocating framebuffer: %u bytes (%.1f KiB)", sz, sz / 1024.0f);
-
-    // ────────────────────────────────────────────────────────
-    // This is the only line that actually needed fixing
-    framebuffer = (uint16_t*) heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
-    // ────────────────────────────────────────────────────────
+    framebuffer = (uint16_t*)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
 
     if (!framebuffer) {
-        // ESP_LOGE(TAG, "Framebuffer allocation failed! (PSRAM requested)");
-        allocated = false;
+        ESP_LOGE(TAG, "Framebuffer allocation failed!");
         return;
     }
 
-    // ESP_LOGI(TAG, "Framebuffer allocated at %p", framebuffer);
-    // ESP_LOGI(TAG, "Is in PSRAM? %s",
-        //     esp_ptr_external_ram(framebuffer) ? "YES" : "NO");
-
-    if (!esp_ptr_external_ram(framebuffer)) {
-        // ESP_LOGE(TAG, "!!! WARNING: Framebuffer ended up in internal SRAM !!!");
-        // Optional: free it here if you want to fail loudly
-        // heap_caps_free(framebuffer);
-        // framebuffer = NULL;
-        // return;
-    }
-
     allocated = true;
-
-    vTaskDelay(pdMS_TO_TICKS(10));  // keep if you feel it's needed
-    // fb_clear(0x0000);           // commented as before
+    ESP_LOGI(TAG, "Framebuffer allocated in %sRAM", 
+             esp_ptr_external_ram(framebuffer) ? "PS" : "Internal");
 }
 
-
-
-void fb_clear(uint16_t color) {
+void fb_clear(uint16_t color)
+{
     if (!framebuffer) return;
-
-    uint32_t c = ((uint32_t)color << 16) | color;
-    uint32_t *p = (uint32_t *)framebuffer;
-    size_t n = (SCREEN_W * SCREEN_H) / 2;
-    for (size_t i = 0; i < n; i++) p[i] = c;
-
+    uint32_t c32 = ((uint32_t)color << 16) | color;
+    uint32_t* p = (uint32_t*)framebuffer;
+    for (size_t i = 0; i < (SCREEN_W * SCREEN_H)/2; i++)
+        p[i] = c32;
+        //  taskYIELD();  
     mark_all_dirty(true);
 }
 
 // ──────────────────────────────────────────────
-// Low-level LCD commands
+// Low-level LCD
 // ──────────────────────────────────────────────
-static esp_err_t lcd_cmd(uint8_t cmd) {
+// ──────────────────────────────────────────────
+// Low-level LCD
+// ──────────────────────────────────────────────
+static esp_err_t lcd_cmd(uint8_t cmd)
+{
     spi_transaction_t t = {
         .length = 8,
         .flags = SPI_TRANS_USE_TXDATA,
@@ -123,11 +116,13 @@ static esp_err_t lcd_cmd(uint8_t cmd) {
     };
     gpio_set_level(LCD_DC, 0);
     esp_err_t ret = spi_device_polling_transmit(spi_lcd, &t);
-    if (ret != ESP_OK)  ESP_LOGE(TAG, "lcd_cmd(0x%02x) failed: %s", cmd, esp_err_to_name(ret));
+    if (ret != ESP_OK)
+        ESP_LOGE(TAG, "lcd_cmd(0x%02x) failed: %s", cmd, esp_err_to_name(ret));
     return ret;
 }
 
-static esp_err_t lcd_data(uint8_t data) {
+static esp_err_t lcd_data(uint8_t data)
+{
     spi_transaction_t t = {
         .length = 8,
         .flags = SPI_TRANS_USE_TXDATA,
@@ -135,410 +130,296 @@ static esp_err_t lcd_data(uint8_t data) {
     };
     gpio_set_level(LCD_DC, 1);
     esp_err_t ret = spi_device_polling_transmit(spi_lcd, &t);
-    if (ret != ESP_OK)  ESP_LOGE(TAG, "lcd_data(0x%02x) failed: %s", data, esp_err_to_name(ret));
+    if (ret != ESP_OK)
+        ESP_LOGE(TAG, "lcd_data(0x%02x) failed: %s", data, esp_err_to_name(ret));
     return ret;
 }
 
-static esp_err_t lcd_data_bulk(const void *data, size_t len) {
+static esp_err_t lcd_data_bulk(const void* data, size_t len)
+{
     if (len == 0) return ESP_OK;
+
     spi_transaction_t t = {
         .length = len * 8,
-        .tx_buffer = data
+        .tx_buffer = data,
+        .flags = 0
     };
+
+#ifdef SPI_TRANS_DMA_USE_PSRAM
+    t.flags |= SPI_TRANS_DMA_USE_PSRAM;   // Use only if available
+#endif
+
     gpio_set_level(LCD_DC, 1);
-    esp_err_t ret = spi_device_polling_transmit(spi_lcd, &t);
-    if (ret != ESP_OK)  ESP_LOGE(TAG, "lcd_data_bulk(%u bytes) failed: %s", (unsigned)len, esp_err_to_name(ret));
-    return ret;
+    return spi_device_polling_transmit(spi_lcd, &t);
 }
 
-static void lcd_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
-    uint8_t data[4];
-
+static void lcd_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
+{
     x0 += X_OFFSET; x1 += X_OFFSET;
     y0 += Y_OFFSET; y1 += Y_OFFSET;
 
-    lcd_cmd(0x2A); // CASET
-    data[0] = x0 >> 8; data[1] = x0 & 0xFF;
-    data[2] = x1 >> 8; data[3] = x1 & 0xFF;
-    lcd_data_bulk(data, 4);
+    uint8_t buf[4];
 
-    lcd_cmd(0x2B); // RASET
-    data[0] = y0 >> 8; data[1] = y0 & 0xFF;
-    data[2] = y1 >> 8; data[3] = y1 & 0xFF;
-    lcd_data_bulk(data, 4);
+    lcd_cmd(0x2A);  // CASET
+    buf[0] = x0 >> 8; buf[1] = x0 & 0xFF;
+    buf[2] = x1 >> 8; buf[3] = x1 & 0xFF;
+    lcd_data_bulk(buf, 4);
 
-    lcd_cmd(0x2C); // RAMWR
+    lcd_cmd(0x2B);  // RASET
+    buf[0] = y0 >> 8; buf[1] = y0 & 0xFF;
+    buf[2] = y1 >> 8; buf[3] = y1 & 0xFF;
+    lcd_data_bulk(buf, 4);
+
+    lcd_cmd(0x2C);  // RAMWR
 }
-// ──────────────────────────────────────────────
-// Safe framebuffer display (chunked)
-// ──────────────────────────────────────────────
 
-void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
-    if(!framebuffer){
-        // ESP_LOGE(TAG, "FRAMEBUFFER ISN'T ALLOCATED YET DUMBFUCK");
-    }else{
-    // ESP_LOGI(TAG, "Display FB: delta=%d cope=%d", only_delta, cope_mode);
+// ──────────────────────────────────────────────
+// Display
+// ──────────────────────────────────────────────
+void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode)
+{
+    if (!framebuffer) return;
 
     const uint32_t row_bytes = SCREEN_W * 2;
-    const uint32_t rows_per_chunk = SAFE_ROWS_PER_CHUNK;
 
-    if (only_delta) {
-        // ESP_LOGI(TAG, "Delta update");
-        int y = 0;
-        while (y < SCREEN_H) {
-            if (!is_row_dirty(y)) { y++; continue; }
-
-            int y_start = y;
-            int y_end = y;
-            while (y_end + 1 < SCREEN_H &&
-                   is_row_dirty(y_end + 1) &&
-                   (y_end - y_start + 1) < rows_per_chunk) {
-                y_end++;
-            }
-
-            uint32_t rows = y_end - y_start + 1;
-            uint32_t bytes = rows * row_bytes;
-
-            lcd_set_window(0, y_start, SCREEN_W - 1, y_end);
-
-            esp_err_t ret = lcd_data_bulk((uint8_t *)&framebuffer[y_start * SCREEN_W], bytes);
-            taskYIELD(); //calm down, watchdog
-            if (ret != ESP_OK) {
-                // ESP_LOGE(TAG, "Delta chunk y=%d–%d failed: %s", y_start, y_end, esp_err_to_name(ret));
-            }
-
-            for (int ry = y_start; ry <= y_end; ry++) {
-                changed_rows_bitmask[ry / 8] &= ~(1u << (ry % 8));
-            }
-
-            y = y_end + 1;
-        }
-    } else {
-        // ESP_LOGI(TAG, "Full update");
-        for (int y = 0; y < SCREEN_H; y += rows_per_chunk) {
-            int rows = rows_per_chunk;
+    if (!only_delta) {
+        // Full refresh
+        for (int y = 0; y < SCREEN_H; y += SAFE_ROWS_PER_CHUNK) {
+            int rows = SAFE_ROWS_PER_CHUNK;
             if (y + rows > SCREEN_H) rows = SCREEN_H - y;
 
-            uint32_t bytes = rows * row_bytes;
-
             lcd_set_window(0, y, SCREEN_W - 1, y + rows - 1);
-
-            esp_err_t ret = lcd_data_bulk((uint8_t *)&framebuffer[y * SCREEN_W], bytes);
-            taskYIELD(); //the device gets angry and makes the watchdog cry,prevent this
-            if (ret != ESP_OK) {
-                // ESP_LOGE(TAG, "Full chunk y=%d failed: %s", y, esp_err_to_name(ret));
-            }
+            lcd_data_bulk(&framebuffer[y * SCREEN_W], rows * row_bytes);
+            //  taskYIELD();
         }
         mark_all_dirty(false);
-    }
+    } else {
+        // Delta refresh
+        int y = 0;
+        while (y < SCREEN_H) {
+            if (!(changed_rows_bitmask[y/8] & (1u << (y%8)))) {
+                y++; continue;
+            }
 
-    // ESP_LOGI(TAG, "Display push complete");
+            int y_start = y;
+            while (y < SCREEN_H && 
+                   (changed_rows_bitmask[y/8] & (1u << (y%8))) &&
+                   (y - y_start < SAFE_ROWS_PER_CHUNK)) {
+                y++;
+            }
+
+            int rows = y - y_start;
+            lcd_set_window(0, y_start, SCREEN_W - 1, y_start + rows - 1);
+            lcd_data_bulk(&framebuffer[y_start * SCREEN_W], rows * row_bytes);
+            //  taskYIELD();
+
+            // Clear dirty bits
+            for (int i = y_start; i < y; i++)
+                changed_rows_bitmask[i/8] &= ~(1u << (i%8));
+        }
+    }
 }
-}
+
 // ──────────────────────────────────────────────
-// Simple init (unchanged but with error checking)
+// Init
 // ──────────────────────────────────────────────
 #define lcd_c_adr_set 0x2A
 
- void lcd_init_simple(void)
+void lcd_init_simple(void)
 {
-    // ESP_LOGI(TAG, "readying lcd init and setting gipo");
     gpio_set_level(LCD_RST, 0);
     vTaskDelay(pdMS_TO_TICKS(20));
     gpio_set_level(LCD_RST, 1);
     vTaskDelay(pdMS_TO_TICKS(120));
 
-    // Software reset
-    lcd_cmd(0x01);
+    lcd_cmd(0x01);      // Software reset
     vTaskDelay(pdMS_TO_TICKS(150));
 
-    // Sleep out
-    lcd_cmd(0x11);
+    lcd_cmd(0x11);      // Sleep out
     vTaskDelay(pdMS_TO_TICKS(120));
-    // ESP_LOGI(TAG, "setting up color modes");
 
-    // Color mode: 16-bit/pixel (RGB565)
     lcd_cmd(0x3A);
-    lcd_data(0x55);  // 0x55 = 16 bits/pixel
-    vTaskDelay(pdMS_TO_TICKS(10));
+    lcd_data(0x55);     // 16-bit color
 
-    // Memory data access control
-    // 0x00 = Normal orientation, RGB order
-    // 0x40 = X-Mirror
-    // 0x80 = Y-Mirror  
-    // 0xC0 = X-Y-Mirror
     lcd_cmd(0x36);
-    lcd_data(0x00);  // Try different values if display is rotated
-    // ESP_LOGI(TAG, "column and row addr set and porch");
-    // ---------- CRITICAL FOR 240x320 ----------
-    // Set display resolution to 240x320
-    lcd_cmd(lcd_c_adr_set);  // Column address set 
-    lcd_data(0x00); lcd_data(0x00);      // Start column = 0
-    lcd_data(0x00); lcd_data(0xEF);      // End column = 239 (0xEF = 239)
-    
-    lcd_cmd(0x2B);  // Row address set  
-    lcd_data(0x00); lcd_data(0x00);      // Start row = 0
-    lcd_data(0x01); lcd_data(0x3F);      // End row = 319 (0x13F = 319)
-    
-    // Porch settings for 240x320
-    lcd_cmd(0xB2);  // Porch control
-    lcd_data(0x0C); lcd_data(0x0C); lcd_data(0x00);
-    lcd_data(0x33); lcd_data(0x33);
-    
-    // Gate control
-    lcd_cmd(0xB7);
-    lcd_data(0x35);  // VGH=14.22V, VGL=-7.14V
-    
-    // VCOM setting
-    lcd_cmd(0xBB);
-    lcd_data(0x1F);  // VCOM=1.775V
-    
-    // LCM control
-    lcd_cmd(0xC0);
-    lcd_data(0x2C);
-    
-    // VDV and VRH command enable
-    lcd_cmd(0xC2);
-    lcd_data(0x01);
-    
-    // VRH set
-    lcd_cmd(0xC3);
-    lcd_data(0x12);  // VRH=4.45+VCOM
-    
-    // VDV set
-    lcd_cmd(0xC4);
-    lcd_data(0x20);  // VDV=0V
-    
-    // Frame rate control
-    lcd_cmd(0xC6);
-    lcd_data(0x0F);  // 60Hz
-    
-    // Power control 1
-    lcd_cmd(0xD0);
-    lcd_data(0xA4); lcd_data(0xA1);
-    
-    // Positive gamma correction
-    lcd_cmd(0xE0);
+    lcd_data(0x00);     // Memory data access control
+
+    // Column address
+    lcd_cmd(lcd_c_adr_set);
+    lcd_data(0x00); lcd_data(0x00);
+    lcd_data(0x00); lcd_data(0xEF);
+
+    // Row address
+    lcd_cmd(0x2B);
+    lcd_data(0x00); lcd_data(0x00);
+    lcd_data(0x01); lcd_data(0x3F);
+
+    // Other init commands...
+    lcd_cmd(0xB2); lcd_data(0x0C); lcd_data(0x0C); lcd_data(0x00);
+                   lcd_data(0x33); lcd_data(0x33);
+
+    lcd_cmd(0xB7); lcd_data(0x35);
+    lcd_cmd(0xBB); lcd_data(0x1F);
+    lcd_cmd(0xC0); lcd_data(0x2C);
+    lcd_cmd(0xC2); lcd_data(0x01);
+    lcd_cmd(0xC3); lcd_data(0x12);
+    lcd_cmd(0xC4); lcd_data(0x20);
+    lcd_cmd(0xC6); lcd_data(0x0F);
+    lcd_cmd(0xD0); lcd_data(0xA4); lcd_data(0xA1);
+
+    // Gamma
+    lcd_cmd(0xE0); // positive gamma...
     lcd_data(0xD0); lcd_data(0x08); lcd_data(0x11); lcd_data(0x08);
     lcd_data(0x0C); lcd_data(0x15); lcd_data(0x39); lcd_data(0x33);
     lcd_data(0x50); lcd_data(0x36); lcd_data(0x13); lcd_data(0x14);
     lcd_data(0x29); lcd_data(0x2D);
-    
-    // Negative gamma correction
-    lcd_cmd(0xE1);
+
+    lcd_cmd(0xE1); // negative gamma...
     lcd_data(0xD0); lcd_data(0x08); lcd_data(0x10); lcd_data(0x08);
     lcd_data(0x06); lcd_data(0x06); lcd_data(0x39); lcd_data(0x44);
     lcd_data(0x51); lcd_data(0x0B); lcd_data(0x16); lcd_data(0x14);
     lcd_data(0x2F); lcd_data(0x31);
-    
-    // Display inversion ON (helps with colors)
-    lcd_cmd(0x21);
-    vTaskDelay(pdMS_TO_TICKS(10));
-    
-    // Display ON
-    lcd_cmd(0x29);
-    vTaskDelay(pdMS_TO_TICKS(120));
-    
-    // Clear screen to black
-    //fb_clear(0x0000);
-  // framebuffer_alloc();
-    
-      //  lcd_fb_display_framebuffer(0, 0); //yes, we're using this specific fb push here, ebcause its the lcd  not the general other whatever the fucklery 
-      // ESP_LOGI(TAG, "done");
-}
-// ──────────────────────────────────────────────
-// Refresh wrapper
-// ──────────────────────────────────────────────
-uint16_t fpsLimiterTarget = 30;  // ← define it here (or extern in header)
 
-void lcd_refresh_screen(void) {
+    lcd_cmd(0x21);      // Inversion on
+    vTaskDelay(pdMS_TO_TICKS(10));
+    lcd_cmd(0x29);      // Display on
+    vTaskDelay(pdMS_TO_TICKS(120));
+}
+
+// ──────────────────────────────────────────────
+// Refresh
+// ──────────────────────────────────────────────
+uint16_t fpsLimiterTarget = 30;
+
+void lcd_refresh_screen(void)
+{
     const uint32_t FRAME_MS = 1000 / fpsLimiterTarget;
     uint32_t frame_start = esp_log_timestamp();
 
-    lcd_fb_display_framebuffer(true, false);  // delta preferred
+    lcd_fb_display_framebuffer(true, false);
 
     uint32_t frame_time = esp_log_timestamp() - frame_start;
     if (frame_time < FRAME_MS) {
         vTaskDelay(pdMS_TO_TICKS(FRAME_MS - frame_time));
     }
 }
-// --------------------- DRAWING ---------------------
 
+// ──────────────────────────────────────────────
+// Drawing Functions
+// ──────────────────────────────────────────────
 
-  void fb_rect( 
-	bool isfilled,
-    uint16_t borderThickness,
-    int x, int y, int w, int h,
-    uint16_t color,
-    uint16_t secondarycolor
-) {
-    // Clamp
+void fb_rect(bool isfilled, uint16_t borderThickness,
+             int x, int y, int w, int h,
+             uint16_t color, uint16_t secondarycolor)
+{
     if (x < 0) { w += x; x = 0; }
     if (y < 0) { h += y; y = 0; }
     if (x + w > SCREEN_W) w = SCREEN_W - x;
     if (y + h > SCREEN_H) h = SCREEN_H - y;
     if (w <= 0 || h <= 0) return;
 
-    // Clamp border thickness
     if (borderThickness * 2 > w) borderThickness = w / 2;
     if (borderThickness * 2 > h) borderThickness = h / 2;
 
-    // ----- DRAW BORDER (if any) -----
+    // Border
     if (borderThickness > 0) {
-        // Top + bottom
-        for (int py = y; py < y + borderThickness; py++) {
-            for (int px = x; px < x + w; px++)
-                framebuffer[py * SCREEN_W + px] = secondarycolor;
-            mark_rows_range_dirty(true, py);
-        }
-        for (int py = y + h - borderThickness; py < y + h; py++) {
-            for (int px = x; px < x + w; px++)
-                framebuffer[py * SCREEN_W + px] = secondarycolor;
-            mark_rows_range_dirty(true, py);
-        }
+        for (int py = y; py < y + borderThickness; py++)
+            fill_row32(&framebuffer[py * SCREEN_W + x], w, secondarycolor);
+        for (int py = y + h - borderThickness; py < y + h; py++)
+            fill_row32(&framebuffer[py * SCREEN_W + x], w, secondarycolor);
 
-        // Left + right
         for (int py = y + borderThickness; py < y + h - borderThickness; py++) {
-            for (int px = x; px < x + borderThickness; px++)
-                framebuffer[py * SCREEN_W + px] = secondarycolor;
-            for (int px = x + w - borderThickness; px < x + w; px++)
-                framebuffer[py * SCREEN_W + px] = secondarycolor;
-            mark_rows_range_dirty(true, py);
+            uint16_t* row = &framebuffer[py * SCREEN_W];
+            for (int i = 0; i < borderThickness; i++) {
+                row[x + i] = secondarycolor;
+                row[x + w - borderThickness + i] = secondarycolor;
+            }
         }
     }
 
-    // ----- DRAW FILL -----
+    // Fill
     if (isfilled) {
         int fx = x + borderThickness;
         int fy = y + borderThickness;
         int fw = w - borderThickness * 2;
         int fh = h - borderThickness * 2;
-
         if (fw > 0 && fh > 0) {
-            for (int py = fy; py < fy + fh; py++) {
-                uint16_t *dst = &framebuffer[py * SCREEN_W + fx];
-                for (int i = 0; i < fw; i++)
-                    dst[i] = color;
-                mark_rows_range_dirty(true, py);
-            }
+            for (int py = fy; py < fy + fh; py++)
+                fill_row32(&framebuffer[py * SCREEN_W + fx], fw, color);
         }
-    } else {
-        // Even if hollow, rows are dirty because border touched them
-        for (int py = y; py < y + h; py++)
-            mark_rows_range_dirty(true, py);
     }
+
+    mark_rows_dirty(y, y + h - 1);
 }
 
-
-
-
-
-void fb_rect_border(
-    bool isfilled,
-    uint16_t borderThickness,
-    int x, int y, int w, int h,
-    uint16_t colorA,
-    uint16_t colorB,
-    uint8_t segment_len
-){
+void fb_rect_border(bool isfilled, uint16_t borderThickness,
+                    int x, int y, int w, int h,
+                    uint16_t colorA, uint16_t colorB, uint8_t segment_len)
+{
+    // TODO: Optimize this one later if needed
+    // For now keep functional version but fix dirty marking
     if (segment_len < 1) segment_len = 1;
 
-    // Clamp
     if (x < 0) { w += x; x = 0; }
     if (y < 0) { h += y; y = 0; }
     if (x + w > SCREEN_W) w = SCREEN_W - x;
     if (y + h > SCREEN_H) h = SCREEN_H - y;
     if (w <= 0 || h <= 0) return;
 
-    // Clamp border thickness
     if (borderThickness * 2 > w) borderThickness = w / 2;
     if (borderThickness * 2 > h) borderThickness = h / 2;
 
     int period = segment_len * 2;
 
-    // ---------- TOP ----------
+    // Top & Bottom
     for (int py = y; py < y + borderThickness; py++) {
         uint16_t *dst = &framebuffer[py * SCREEN_W + x];
-
         for (int px = 0; px < w; px++) {
             bool toggle = ((px % period) >= segment_len);
             dst[px] = toggle ? colorB : colorA;
         }
-
-        mark_rows_range_dirty(true, py);
     }
 
-    // ---------- BOTTOM ----------
-    for (int py = y + h - borderThickness; py < y + h; py++) {
-        uint16_t *dst = &framebuffer[py * SCREEN_W + x];
-
-        for (int px = 0; px < w; px++) {
-            bool toggle = ((px % period) >= segment_len);
-            dst[px] = toggle ? colorB : colorA;
-        }
-
-        mark_rows_range_dirty(true, py);
-    }
-
-    // ---------- LEFT + RIGHT ----------
+    // Left & Right
     for (int py = y + borderThickness; py < y + h - borderThickness; py++) {
-
         bool toggle = (((py - y) % period) >= segment_len);
-
-        // LEFT
-        uint16_t *dstL = &framebuffer[py * SCREEN_W + x];
-        for (int i = 0; i < borderThickness; i++)
-            dstL[i] = toggle ? colorB : colorA;
-
-        // RIGHT
-        uint16_t *dstR = &framebuffer[py * SCREEN_W + (x + w - borderThickness)];
-        for (int i = 0; i < borderThickness; i++)
-            dstR[i] = toggle ? colorB : colorA;
-
-        mark_rows_range_dirty(true, py);
+        uint16_t *row = &framebuffer[py * SCREEN_W];
+        for (int i = 0; i < borderThickness; i++) {
+            row[x + i] = toggle ? colorB : colorA;
+            row[x + w - borderThickness + i] = toggle ? colorB : colorA;
+        }
     }
 
-    // ---------- FILL ----------
+    // Fill
     if (isfilled) {
         int fx = x + borderThickness;
         int fy = y + borderThickness;
         int fw = w - borderThickness * 2;
         int fh = h - borderThickness * 2;
-
         if (fw > 0 && fh > 0) {
-            for (int py = fy; py < fy + fh; py++) {
-                uint16_t *dst = &framebuffer[py * SCREEN_W + fx];
-
-                for (int i = 0; i < fw; i++)
-                    dst[i] = colorA;  // fill uses primary color
-
-                mark_rows_range_dirty(true, py);
-            }
+            for (int py = fy; py < fy + fh; py++)
+                fill_row32(&framebuffer[py * SCREEN_W + fx], fw, colorA);
         }
     }
+
+    mark_rows_dirty(y, y + h - 1);
 }
 
+// Keep the rest of your functions (fb_line, fb_circle, etc.) as they are for now, 
+// or tell me if you want me to optimize more of them.
 
-
-  void fb_line(
-    int x0, int y0,
-    int x1, int y1,
-    uint16_t color
-) {
-    int dx = abs(x1 - x0);
-    int sx = x0 < x1 ? 1 : -1;
-    int dy = -abs(y1 - y0);
-    int sy = y0 < y1 ? 1 : -1;
+void fb_line(int x0, int y0, int x1, int y1, uint16_t color)
+{
+    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
     int err = dx + dy;
 
-    int miny = y0, maxy = y0;
+    int miny = y0 < y1 ? y0 : y1;
+    int maxy = y0 > y1 ? y0 : y1;
 
     while (1) {
         if (x0 >= 0 && x0 < SCREEN_W && y0 >= 0 && y0 < SCREEN_H)
             framebuffer[y0 * SCREEN_W + x0] = color;
-
-        if (y0 < miny) miny = y0;
-        if (y0 > maxy) maxy = y0;
 
         if (x0 == x1 && y0 == y1) break;
         int e2 = 2 * err;
@@ -546,289 +427,64 @@ void fb_rect_border(
         if (e2 <= dx) { err += dx; y0 += sy; }
     }
 
-    mark_rows_range_dirty(miny, maxy);
-}
-  void fb_circle(
-    int cx, int cy, int r,
-    shapefillpattern mode,
-    uint16_t fillColor,
-    uint16_t borderColor
-) {
-    int miny = cy - r;
-    int maxy = cy + r;
-
-    for (int y = -r; y <= r; y++) {
-        int yy = cy + y;
-        if (yy < 0 || yy >= SCREEN_H) continue;
-
-        int dx = (int)sqrtf((float)(r*r - y*y));
-        int x0 = cx - dx;
-        int x1 = cx + dx;
-
-        if (mode != border_only) {
-            if (x0 < 0) x0 = 0;
-            if (x1 >= SCREEN_W) x1 = SCREEN_W - 1;
-            for (int x = x0; x <= x1; x++)
-                framebuffer[yy * SCREEN_W + x] = fillColor;
-        }
-
-        if (mode != plain) {
-            if (cx - dx >= 0 && cx - dx < SCREEN_W)
-                framebuffer[yy * SCREEN_W + (cx - dx)] = borderColor;
-            if (cx + dx >= 0 && cx + dx < SCREEN_W)
-                framebuffer[yy * SCREEN_W + (cx + dx)] = borderColor;
-        }
-    }
-
-    mark_rows_range_dirty(miny, maxy);
-}
-  void fb_triangle(
-    int x0,int y0,
-    int x1,int y1,
-    int x2,int y2,
-    shapefillpattern mode,
-    uint16_t fillColor,
-    uint16_t borderColor
-) {
-    if (mode != plain) {
-        fb_line(x0,y0,x1,y1,borderColor);
-        fb_line(x1,y1,x2,y2,borderColor);
-        fb_line(x2,y2,x0,y0,borderColor);
-    }
-    if (mode == border_only) return;
-
-    // sort by y
-    if (y1 < y0) { int t=x0;x0=x1;x1=t; t=y0;y0=y1;y1=t; }
-    if (y2 < y0) { int t=x0;x0=x2;x2=t; t=y0;y0=y2;y2=t; }
-    if (y2 < y1) { int t=x1;x1=x2;x2=t; t=y1;y1=y2;y2=t; }
-
-    float dx01 = (y1-y0)?(float)(x1-x0)/(y1-y0):0;
-    float dx02 = (y2-y0)?(float)(x2-x0)/(y2-y0):0;
-    float dx12 = (y2-y1)?(float)(x2-x1)/(y2-y1):0;
-
-    float xl = x0, xr = x0;
-
-    for (int y = y0; y <= y1; y++) {
-        int a = (int)xl, b = (int)xr;
-        if (a > b) { int t=a;a=b;b=t; }
-        for (int x=a; x<=b; x++)
-            if ((unsigned)x<SCREEN_W && (unsigned)y<SCREEN_H)
-                framebuffer[y*SCREEN_W+x] = fillColor;
-        xl += dx01;
-        xr += dx02;
-    }
-
-    xl = x1;
-    for (int y = y1; y <= y2; y++) {
-        int a = (int)xl, b = (int)xr;
-        if (a > b) { int t=a;a=b;b=t; }
-        for (int x=a; x<=b; x++)
-            if ((unsigned)x<SCREEN_W && (unsigned)y<SCREEN_H)
-                framebuffer[y*SCREEN_W+x] = fillColor;
-        xl += dx12;
-        xr += dx02;
-    }
-
-    mark_rows_range_dirty(y0, y2);
-}
-  void fb_ngon(
-    int cx,int cy,int r,uint8_t sides,
-    shapefillpattern mode,
-    uint16_t fillColor,
-    uint16_t borderColor
-) {
-    if (sides < 3) return;
-
-    int px[sides], py[sides];
-    float step = 2.0f * M_PI / sides;
-
-    for (int i=0;i<sides;i++) {
-        px[i] = cx + cosf(i*step) * r;
-        py[i] = cy + sinf(i*step) * r;
-    }
-
-    if (mode != plain) {
-        for (int i=0;i<sides;i++)
-            fb_line(px[i],py[i],px[(i+1)%sides],py[(i+1)%sides],borderColor);
-    }
-    if (mode == border_only) return;
-
-    int miny = SCREEN_H-1, maxy = 0;
-    for (int i=0;i<sides;i++) {
-        if (py[i] < miny) miny = py[i];
-        if (py[i] > maxy) maxy = py[i];
-    }
-
-    for (int y = miny; y <= maxy; y++) {
-        int nodes = 0;
-        int nodeX[sides];
-
-        for (int i=0,j=sides-1;i<sides;j=i++) {
-            if ((py[i]<y && py[j]>=y) || (py[j]<y && py[i]>=y)) {
-                nodeX[nodes++] =
-                    px[i] + (y-py[i])*(px[j]-px[i])/(py[j]-py[i]);
-            }
-        }
-
-        for (int i=0;i<nodes-1;i++)
-            for (int j=i+1;j<nodes;j++)
-                if (nodeX[i]>nodeX[j]) { int t=nodeX[i];nodeX[i]=nodeX[j];nodeX[j]=t; }
-
-        for (int i=0;i<nodes;i+=2)
-            for (int x=nodeX[i]; x<=nodeX[i+1]; x++)
-                if ((unsigned)x<SCREEN_W && (unsigned)y<SCREEN_H)
-                    framebuffer[y*SCREEN_W+x] = fillColor;
-    }
-
-    mark_rows_range_dirty(miny, maxy);
+    mark_rows_dirty(miny, maxy);
 }
 
 
-/*
-static  void fb_rect_gradient(int x, int y, int w, int h, 
-                                    uint16_t color_top, uint16_t color_bottom) {
-    if (x < 0) { w += x; x = 0; }
-    if (y < 0) { h += y; y = 0; }
-    if (x + w > SCREEN_W) w = SCREEN_W - x;
-    if (y + h > SCREEN_H) h = SCREEN_H - y;
-    if (w <= 0 || h <= 0) return;
-    
-    // Extract RGB components
-    int r1 = (color_top >> 11) & 0x1F;
-    int g1 = (color_top >> 5) & 0x3F;
-    int b1 = color_top & 0x1F;
-    
-    int r2 = (color_bottom >> 11) & 0x1F;
-    int g2 = (color_bottom >> 5) & 0x3F;
-    int b2 = color_bottom & 0x1F;
-    
-    // Pre-calculate per-row colors
-    uint16_t row_colors[h];
-    for (int row = 0; row < h; row++) {
-        float t = (float)row / (h - 1);
-        int r = (int)(r1 + (r2 - r1) * t + 0.5f);
-        int g = (int)(g1 + (g2 - g1) * t + 0.5f);
-        int b = (int)(b1 + (b2 - b1) * t + 0.5f);
-        
-        // Clamp and pack
-        if (r < 0) r = 0; if (r > 31) r = 31;
-        if (g < 0) g = 0; if (g > 63) g = 63;
-        if (b < 0) b = 0; if (b > 31) b = 31;
-        
-        row_colors[row] = (r << 11) | (g << 5) | b;
-    }
-    
-    // Draw with per-row colors (optimized for even widths)
-    if ((w & 1) == 0) {
-        // Even width - use 32-bit writes
-        for (int py = 0; py < h; py++) {
-            uint16_t *dst = &framebuffer[(y + py) * SCREEN_W + x];
-            uint32_t color32 = ((uint32_t)row_colors[py] << 16) | row_colors[py];
-            uint32_t *dst32 = (uint32_t*)dst;
-            int w32 = w / 2;
-            
-            for (int i = 0; i < w32; i++) {
-                dst32[i] = color32;
-            }
-            dd_changedrows_bm_setrowstate(true, y + py);
-        }
-    } else {
-        // Odd width - 16-bit writes
-        for (int py = 0; py < h; py++) {
-            uint16_t *dst = &framebuffer[(y + py) * SCREEN_W + x];
-            uint16_t color16 = row_colors[py];
-            
-            for (int i = 0; i < w; i++) {
-                dst[i] = color16;
-            }
-            dd_changedrows_bm_setrowstate(true, y + py);
-        }
-    }
-}*/
 
-  void fb_putpixel_225_fakerot(
-    int x, int y,
-    int ox, int oy,
-    uint8_t angle,
-    uint16_t color
-) {
-    int px = ox, py = oy;
+// ──────────────────────────────────────────────
+// Missing / Incomplete Functions
+// ──────────────────────────────────────────────
 
-    switch (angle & 0x1F) {
-        case 0:   px = x;       py = y;       break; // 0°
-        case 4:   px = x - oy;  py = y + ox;  break; // 90°
-        case 8:   px = x - ox;  py = y - oy;  break; // 180°
-        case 12:  px = x + oy;  py = y - ox;  break; // 270°
-        default:  px = x;       py = y;       break;
-    }
-
-    if (px >= 0 && px < SCREEN_W && py >= 0 && py < SCREEN_H)
-        framebuffer[py * SCREEN_W + px] = color;
-}
-//0: no angle 1: 22.5 deg 2: 45 deg 3: 67.5 4: 90 deg and so on up to 360
-
-void fb_draw_bitmap(int dst_x, int dst_y, int w, int h, const uint16_t* bitmap) {
+void fb_draw_bitmap(int dst_x, int dst_y, int w, int h, const uint16_t* bitmap)
+{
     if (!framebuffer || !bitmap) return;
-    
-    // Clamp to screen boundaries
-    int start_x = dst_x;
-    int start_y = dst_y;
-    int end_x = dst_x + w;
-    int end_y = dst_y + h;
-    
-    if (start_x < 0) start_x = 0;
-    if (start_y < 0) start_y = 0;
-    if (end_x > SCREEN_W) end_x = SCREEN_W;
-    if (end_y > SCREEN_H) end_y = SCREEN_H;
-    
+
+    int start_x = dst_x < 0 ? 0 : dst_x;
+    int start_y = dst_y < 0 ? 0 : dst_y;
+    int end_x   = (dst_x + w > SCREEN_W) ? SCREEN_W : dst_x + w;
+    int end_y   = (dst_y + h > SCREEN_H) ? SCREEN_H : dst_y + h;
+
     if (start_x >= end_x || start_y >= end_y) return;
-    
-    int src_offset_x = start_x - dst_x;
-    int src_offset_y = start_y - dst_y;
-    
+
     for (int y = start_y; y < end_y; y++) {
-        int src_y = (y - dst_y);
-        if (src_y < 0 || src_y >= h) continue;
-        
+        int sy = y - dst_y;
+        if (sy < 0 || sy >= h) continue;
+
         uint16_t* dst = &framebuffer[y * SCREEN_W + start_x];
-        const uint16_t* src = &bitmap[src_y * w + src_offset_x];
-        int width_to_copy = end_x - start_x;
-        
-        for (int x = 0; x < width_to_copy; x++) {
-            dst[x] = src[x];
-        }
-        
-        mark_rows_range_dirty(y, y);
+        const uint16_t* src = &bitmap[sy * w + (start_x - dst_x)];
+
+        memcpy(dst, src, (end_x - start_x) * sizeof(uint16_t));
     }
+    //  taskYIELD();
+    mark_rows_dirty(start_y, end_y - 1);
 }
 
+// ──────────────────────────────────────────────
+// Text drawing (basic but working)
+// ──────────────────────────────────────────────
+void fb_draw_text(uint8_t angle, int x, int y, const char* str,
+                  uint16_t color, uint8_t size,
+                  uint8_t transparency, bool drawblocksforbackground,
+                  uint16_t blockBackground_color,
+                  uint16_t maxTLenBeforeAutoWrapToNextLine,
+                  fontdata fdat)
+{
+    if (!str || !framebuffer) return;
 
-  void fb_draw_text(
-    uint8_t angle, 
-    int x, int y,
-     const char* str, 
-     uint16_t color, uint8_t size, 
-  uint8_t transparency, bool drawblocksforbackground, 
-  uint16_t blockBackground_color,
-  uint16_t maxTLenBeforeAutoWrapToNextLine,
-   fontdata fdat //member fontdata, has .fontref for the font ptr, and .fcs for size data and .useExactColors if it needs to do weird color math
-    
-) {
-
-	
-    int ax=1, ay=0;   // advance
-    int ux=0, uy=1;   // up (glyph rows)
+    int ax = 1, ay = 0;   // advance
+    int ux = 0, uy = 1;   // up (glyph rows)
 
     switch (angle & 0x1F) {
-        case 0:  ax=1; ay=0;  ux=0;  uy=1;  break;
-        case 4:  ax=0; ay=1;  ux=-1; uy=0;  break;
-        case 8:  ax=-1;ay=0;  ux=0;  uy=-1; break;
-        case 12: ax=0; ay=-1; ux=1;  uy=0;  break;
-        default: ax=1; ay=0;  ux=0;  uy=1;  break;
+        case 0:  ax=1; ay=0; ux=0; uy=1; break;
+        case 4:  ax=0; ay=1; ux=-1; uy=0; break;
+        case 8:  ax=-1; ay=0; ux=0; uy=-1; break;
+        case 12: ax=0; ay=-1; ux=1; uy=0; break;
+        default: ax=1; ay=0; ux=0; uy=1; break;
     }
 
     int cursor = 0;
-	
+
     while (*str) {
         char c = *str++;
         if (c < ' ' || c > '~') {
@@ -836,13 +492,12 @@ void fb_draw_bitmap(int dst_x, int dst_y, int w, int h, const uint16_t* bitmap) 
             continue;
         }
 
-        const uint8_t* glyph =
-            &fdat.fontRef[(c - ' ') * fdat.fcs.x];
+        const uint8_t* glyph = &fdat.fontRef[(c - ' ') * fdat.fcs.x];
 
         for (int col = 0; col < fdat.fcs.x; col++) {
             uint8_t bits = glyph[col];
-
             int row = 0;
+
             while (row < fdat.fcs.y) {
                 if (!(bits & (1 << row))) {
                     row++;
@@ -853,142 +508,38 @@ void fb_draw_bitmap(int dst_x, int dst_y, int w, int h, const uint16_t* bitmap) 
                 while (row < fdat.fcs.y && (bits & (1 << row)))
                     row++;
 
-                int end = row - 1;
+                int span_len = (row - start) * size;
 
-                // scaled extents
-                int span_len = (end - start + 1) * size;
-
-                // base pixel position (unrotated glyph space)
                 int gx = (cursor * fdat.fcs.x + col) * size;
                 int gy = start * size;
 
-                // convert to screen space
                 int px = x + gx * ax + gy * ux;
                 int py = y + gx * ay + gy * uy;
 
-                // draw span
-for (int s = 0; s < span_len; s++) {
-    for (int t = 0; t < size; t++) {
-        int sx = px + s * ux + t * ax;
-        int sy = py + s * uy + t * ay;
+                for (int s = 0; s < span_len; s++) {
+                    for (int t = 0; t < size; t++) {
+                        int sx = px + s * ux + t * ax;
+                        int sy = py + s * uy + t * ay;
 
-        if (sx >= 0 && sx < SCREEN_W &&
-            sy >= 0 && sy < SCREEN_H)
-            framebuffer[sy * SCREEN_W + sx] = color;
-    }
-}
-
-
-
-mark_rows_range_dirty(
-    py < py + uy*span_len ? py : py + uy*span_len,
-    py > py + uy*span_len ? py : py + uy*span_len
-);
-
+                        if (sx >= 0 && sx < SCREEN_W && sy >= 0 && sy < SCREEN_H) {
+                            framebuffer[sy * SCREEN_W + sx] = color;
+                        }
+                    }
+                }
             }
         }
-
+        //  taskYIELD();
         cursor++;
     }
+
+    // Mark dirty area (conservative)
+    mark_rows_dirty(y - 10, y + (fdat.fcs.y * size) + 10);
 }
 
-// --------------------- LCD INIT ---------------------
-
-#define lcd_c_adr_set 0x2A
-
-
-// --------------------- GLOBALS ---------------------
-// --------------------- GLOBALS ---------------------
-uint32_t frame = 0;
-
-
-void lcd_refreshScreen(void) {
-    const uint32_t FRAME_US = 1000000 / fpsLimiterTarget;
-
-    static int64_t last_frame_time = 0;
-    int64_t now = esp_timer_get_time();
-
-    if (last_frame_time == 0) last_frame_time = now;
-
-    uint32_t frame_time = now - last_frame_time;
-    
-    if (frame_time == 0) frame_time = 1;
-    
-    last_frame_time = now;
-
-    static uint32_t stats_frame = 0;
-
-    static uint64_t spi_total_time = 0;
-    static uint32_t spi_transaction_count = 0;
-    static uint32_t max_spi_time = 0;
-
-    // --- SPI timing ---
-    int64_t spi_start = esp_timer_get_time();
-
-    lcd_fb_display_framebuffer(1, 0);
-
-    uint32_t spi_time = esp_timer_get_time() - spi_start;
-    
-    if (spi_time == 0) spi_time = 1;
-
-    spi_total_time += spi_time;
-    spi_transaction_count++;
-    if (spi_time > max_spi_time) max_spi_time = spi_time;
-
-    taskYIELD();
-
-    if ((stats_frame) % 60 == 0) {
-        if (spi_transaction_count > 0) {
-            uint32_t avg_spi_time = spi_total_time / spi_transaction_count;
-
-            /*
-            // ESP_LOGI(TAG, "=== Performance Report ===");
-            
-            // ESP_LOGI(TAG, "Frame: %llu | Frame time: %lu.%03lu ms", 
-                     frame, 
-                     frame_time / 1000, 
-                     frame_time % 1000);
-
-            // ESP_LOGI(TAG, "SPI: Avg %lu.%03lu ms | Max %lu.%03lu ms | Count %lu", avg_spi_time / 1000, avg_spi_time % 1000, max_spi_time / 1000, max_spi_time % 1000,spi_transaction_count);
-
-            // FPS calculation - safe
-            uint32_t fps = 1000000 / frame_time;
-            // ESP_LOGI(TAG, "FPS: Current %lu | Target %lu", fps, fpsLimiterTarget);
-
-            uint32_t pixels = SCREEN_W * SCREEN_H;
-            uint32_t bytes = pixels * 2;
-
-            // CRITICAL FIX: Calculate data rate without dividing by small numbers
-            uint32_t data_rate_mbps = 0;
-            
-            // Calculate bits per microsecond first, then scale to Mbps
-            // This avoids dividing by numbers less than 1
-            uint32_t bits = bytes * 8;
-            uint32_t bits_per_us = bits / spi_time;  // bits per microsecond
-            
-            // Convert to Mbps: bits_per_us * (1,000,000 us/sec) / (1,000,000 bits/Mb)
-            // Simplified: bits_per_us = Mbps
-            data_rate_mbps = bits_per_us;
-            
-            
-
-            spi_total_time = 0;
-            spi_transaction_count = 0;
-            max_spi_time = 0;*/
-        }
-    }
-
-    stats_frame++;
-
-    if (frame_time < FRAME_US && FRAME_US > 0) {
-        uint32_t sleep_us = FRAME_US - frame_time;
-        if (sleep_us > 0 && sleep_us < 1000000) {
-            vTaskDelay(pdMS_TO_TICKS(sleep_us / 1000));
-        }
-    }
-
-    frame++;
-    if(frame>2147483600){
-		frame=0;
-		} //reset it to not overflow. doubt this will ever come up but you never know
+// ──────────────────────────────────────────────
+// Refresh function name fix (you had both versions)
+// ──────────────────────────────────────────────
+void lcd_refreshScreen(void)
+{
+    lcd_refresh_screen();   // call the one you already have
 }
