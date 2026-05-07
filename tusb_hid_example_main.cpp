@@ -31,6 +31,7 @@
 
 #include "os_code/middle_layer/input/input_devs_agg.hpp"
  
+ #include "hardware/drivers/generic/button_driver.hpp"
 #include "os_code/middle_layer/input/input_handler.hpp" 	
 #include "hardware/drivers/encoders/ky040_driver.hpp"
 #include "tusb.h"
@@ -127,18 +128,24 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "===== ESP32-S3 Boot =====");
 
     // === Stage 1: Encoders FIRST ===
-    stage_1_encoders();                     // ← create devices + add to manager
+   //boot this inside cpp main fuc fuck fuck stage_1_encoders();                     // ← create devices + add to manager
 
-    // === INPUT SYSTEM INITIALISATION (now safe) ===
-    ProcInputQueTarget = xQueueCreate(32, sizeof(InputEvent));
-    if (ProcInputQueTarget == nullptr) {
-        ESP_LOGE(TAG, "Failed to create input queue");
-    } else {
-        ESP_LOGI(TAG, "Input queue created");
-    }
 
+
+// In main, BEFORE stage_1_encoders():
+ProcInputQueTarget = xQueueCreate(32, sizeof(InputEvent));
+if (ProcInputQueTarget == nullptr) {
+    ESP_LOGE(TAG, "Failed to create input queue");
+} else {
+    ESP_LOGI(TAG, "Input queue created");
+}
+
+// THEN start input task
+startInputTask();
+
+ stage_1_encoders(); 
     // Start consumer task AFTER devices exist
-    startInputTask();
+    
 
     // Continue with rest of boot
    // stage_2_i2c_scan();
@@ -153,41 +160,65 @@ extern "C" void app_main(void) {
 
 static esp_err_t stage_1_encoders()
 {
-    // Left encoder (Vertical)
+    // ========== LEFT ENCODER (no button in driver) ==========
     auto left_knob = std::make_unique<KnobDevice>();
     left_knob->props.cw_key  = KEY_DOWN;
     left_knob->props.ccw_key = KEY_UP;
-    left_knob->props.button_key = KEY_ENTER;   // ← button press = ENTER
 
     ky040_config_t cfg_left = {
         .clk_pin = ENCODER0_CLK_PIN,
         .dt_pin  = ENCODER0_DT_PIN,
-        .sw_pin  = ENCODER0_SW_PIN,
         .detents_per_rev = 20,
         .on_twist = nullptr,
-        .user_ctx = nullptr
+        .user_ctx = left_knob.get()
     };
     left_knob->initialize(&cfg_left);
-    deviceManager.addDevice(std::move(left_knob));
+    gDeviceManager.addDevice(std::move(left_knob));
 
-    // Right encoder (Horizontal)
+    // LEFT BUTTON (separate device)
+    auto left_btn = std::make_unique<ButtonDevice>();
+    left_btn->props.press_key = KEY_ENTER;
+    button_config_t btn_cfg_left = {
+        .pin = ENCODER0_SW_PIN,
+        .active_low = true,
+        .debounce_ms = 50,
+        .on_press = nullptr,
+        .on_release = nullptr,
+        .user_ctx = left_btn.get()
+    };
+    left_btn->initialize(&btn_cfg_left);
+    gDeviceManager.addDevice(std::move(left_btn));
+
+    // ========== RIGHT ENCODER ==========
     auto right_knob = std::make_unique<KnobDevice>();
     right_knob->props.cw_key  = KEY_RIGHT;
     right_knob->props.ccw_key = KEY_LEFT;
-right_knob->props.button_key = KEY_BACK; 
 
     ky040_config_t cfg_right = {
         .clk_pin = ENCODER1_CLK_PIN,
         .dt_pin  = ENCODER1_DT_PIN,
-        .sw_pin  = ENCODER1_SW_PIN,
         .detents_per_rev = 20,
         .on_twist = nullptr,
-        .user_ctx = nullptr
+        .user_ctx = right_knob.get()
     };
     right_knob->initialize(&cfg_right);
-    deviceManager.addDevice(std::move(right_knob));
+    gDeviceManager.addDevice(std::move(right_knob));
 
-    ESP_LOGI("ENCODERS", "Encoders registered successfully");
+    // RIGHT BUTTON (separate device)
+    auto right_btn = std::make_unique<ButtonDevice>();
+    right_btn->props.press_key = KEY_BACK;
+    button_config_t btn_cfg_right = {
+        .pin = ENCODER1_SW_PIN,
+        .active_low = true,
+        .debounce_ms = 50,
+        .on_press = nullptr,
+        .on_release = nullptr,
+        .user_ctx = right_btn.get()
+    };
+    right_btn->initialize(&btn_cfg_right);
+    gDeviceManager.addDevice(std::move(right_btn));
+
+    ESP_LOGI("ENCODERS", "Encoders and buttons registered separately");
     return ESP_OK;
 }
 
@@ -464,13 +495,14 @@ ESP_LOGI(TAG, "invoking fb clear");
   	vTaskDelay(50);
   	refreshScreen();
     //lcd_fb_display_framebuffer(false, false);
-    vTaskDelay(pdMS_TO_TICKS(200));
+    vTaskDelay(pdMS_TO_TICKS(50));
     
     
     //--------------------i'll just skip this it takes forever with all my testing
   //  stage_2_i2c_scan();
   //-------------------------
-  
+ 
+   vTaskDelay(pdMS_TO_TICKS(50));
     fb_clear(0x0000);
         // Initialize WindowManager
     auto& wm = WindowManager::getInstance();

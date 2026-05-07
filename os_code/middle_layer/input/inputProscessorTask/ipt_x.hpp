@@ -4,10 +4,10 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "code_stuff/types.h"
-#include "os_code/middle_layer/input/input_handler.hpp"
 
-// Start the unified input task
+// Start the unified input processing task
 void startInputTask();
 
-// Global queue handle (still needed for callbacks to push events)
-extern QueueHandle_t g_inputEventQueue;
+// NO queue here - using ProcInputQueTarget from main
+// NO callbacks here - those are in input_handler you fucktard,
+// do NOT move input hand ler into here holy fuck this set me back three days of work

@@ -42,6 +42,8 @@ idf_component_register(
    	#handle input		 
    			"hardware/drivers/encoders/ky040_driver.cpp"
    			"hardware/drivers/encoders/ky040_driver.hpp"
+   			"hardware/drivers/generic/button_driver.hpp"
+   			"hardware/drivers/generic/button_driver.cpp"
    			"os_code/middle_layer/input/input_devs_agg.hpp"
    			"os_code/middle_layer/input/input_handler.cpp"
   			"os_code/middle_layer/input/input_handler.hpp"

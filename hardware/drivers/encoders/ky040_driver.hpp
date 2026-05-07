@@ -5,7 +5,7 @@
 #include "esp_err.h"
 #include "driver/pulse_cnt.h"
 #include "driver/gpio.h"
-
+#include "hardware/drivers/generic/button_driver.hpp"
 
 #define CountsPerPhysicalDetent 2
 // Many KY-040 encoders produce ±4 or ±2 counts per physical detent/click (due to quadrature states).
@@ -36,22 +36,20 @@ extern "C" {
 #define KY040_PIN_UNUSED               ((gpio_num_t)-1)
 
 typedef void (*ky040_twist_cb_t)(void *user_ctx, int delta);  // +1 CW, -1 CCW
-typedef void (*ky040_button_cb_t)(void *user_ctx, bool pressed);
+
 // Opaque handle
 typedef struct ky040_impl_t ky040_impl_t;
 typedef ky040_impl_t *ky040_handle_t;
 
 typedef struct {
-    gpio_num_t          clk_pin;         // A / CLK
-    gpio_num_t          dt_pin;          // B / DT
-    gpio_num_t          sw_pin;          // KY040_PIN_UNUSED if unused
-    uint8_t             detents_per_rev; // usually 20
+    gpio_num_t          clk_pin;
+    gpio_num_t          dt_pin;
+    uint8_t             detents_per_rev;  // usually 20
     ky040_twist_cb_t    on_twist;
-    ky040_button_cb_t   on_button;
     void               *user_ctx;
 } ky040_config_t;
 
-typedef void (*ky040_button_cb_t)(void *user_ctx, bool pressed);
+
 esp_err_t ky040_new(const ky040_config_t *config, ky040_handle_t *out_handle);
 esp_err_t ky040_del(ky040_handle_t handle);
 
@@ -59,7 +57,7 @@ void      ky040_poll(ky040_handle_t handle);
 float     ky040_get_rate_detents_per_sec(ky040_handle_t handle);
 float     ky040_get_rate_deg_per_sec(ky040_handle_t handle);  // now non-inline
 
-bool      ky040_is_button_pressed(ky040_handle_t handle);
+
 
 #ifdef __cplusplus
 }

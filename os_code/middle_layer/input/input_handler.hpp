@@ -11,7 +11,7 @@
 #include "hardware/drivers/encoders/ky040_driver.hpp"
 #include "code_stuff/types.h"
 
-
+#include "hardware/drivers/generic/button_driver.hpp"
 
 
 // Forward declaration
@@ -36,6 +36,7 @@ enum class KeyAction : uint8_t {
 };
 
 enum class HIDInputDeviceType : uint8_t {
+    Button,
     Knob,
     Mouse,
     Keyboard,
@@ -84,6 +85,43 @@ public:
     virtual bool hasButton() const { return false; }
 };
 
+
+
+
+
+//a simple button device. cry harder about indection, fuck off. 
+class ButtonDevice : public Device {
+public:
+    struct Properties {
+        uint16_t press_key;    // key to send on press
+        bool send_on_press = true;
+        bool send_on_release = false;
+    };
+
+    Properties props;
+    esp_err_t initialize(const button_config_t* cfg);
+    ~ButtonDevice() override;
+
+    void update() override;
+    void interact(Device& other) override;
+
+    HIDInputDeviceType getType() const override { return HIDInputDeviceType::Button; }
+    const char* getName() const override { return "Button"; }
+    bool hasButton() const override { return true; }
+
+private:
+    button_handle_t btn_handle = nullptr;
+    static void pressCallback(void* user_ctx, bool pressed);
+};
+
+
+
+
+
+
+
+
+
 // ===================================================================
 // KnobDevice - one-axis scroller with optional key binding
 class KnobDevice : public Device {
@@ -91,7 +129,7 @@ public:
     struct Properties {
         uint16_t cw_key  = KEY_DOWN;   // what "clockwise" sends as Tap
         uint16_t ccw_key = KEY_UP;     // what "counter-clockwise" sends
-        uint16_t button_key; 
+     
         float    sensitivity = 1.0f;
         bool     send_delta_instead_of_keys = false;  // if true, use PositionDelta
     };
@@ -103,7 +141,7 @@ ky040_handle_t ky_handle = nullptr;
 
     // Declare static callbacks ONLY ONCE
     static void twistCallback(void* user_ctx, int delta);
-    static void buttonCallback(void* user_ctx, bool pressed);
+    //static void buttonCallback(void* user_ctx, bool pressed);
 
 public:
     esp_err_t initialize(const ky040_config_t* cfg);

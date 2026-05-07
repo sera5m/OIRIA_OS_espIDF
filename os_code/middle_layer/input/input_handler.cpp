@@ -1,6 +1,7 @@
 #include "freertos/FreeRTOS.h"      // MUST be first
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "hardware/drivers/generic/button_driver.hpp"
 
 #include "os_code/middle_layer/input/input_handler.hpp"
 #include "esp_log.h"
@@ -12,6 +13,69 @@ static const char* TAG = "InputHandler";
 extern QueueHandle_t ProcInputQueTarget;   // defined in main
 HIDTarget CurrentHIDTarget=HIDTarget::debug_log; //default behavior, not the target task. we have an input handler task for a reason, so this is global so every other task can see what's happening with that
 DeviceManager gDeviceManager;   // Global instance of the input handler object
+
+
+//
+// current order of implementations
+// devices: buttondevice,knobdevice
+
+//devicemanager
+
+
+
+esp_err_t ButtonDevice::initialize(const button_config_t* cfg)
+{
+    if (btn_handle) {
+        button_del(btn_handle);
+        btn_handle = nullptr;
+    }
+    if (!cfg) return ESP_ERR_INVALID_ARG;
+
+    button_config_t local = *cfg;
+    local.on_press = pressCallback;
+    local.on_release = nullptr;  // or use a separate callback if needed
+    local.user_ctx = this;
+
+    return button_new(&local, &btn_handle);
+}
+
+ButtonDevice::~ButtonDevice()
+{
+    if (btn_handle) button_del(btn_handle);
+}
+
+void ButtonDevice::update()
+{
+    if (btn_handle) {
+        button_poll(btn_handle);
+    }
+}
+
+void ButtonDevice::pressCallback(void* user_ctx, bool pressed)
+{
+    auto* self = static_cast<ButtonDevice*>(user_ctx);
+    if (!self || !pressed) return;   // only send on press for now
+
+    InputEvent ev{};
+    ev.source_device_type = HIDInputDeviceType::Button;
+    ev.key = self->props.press_key;
+    ev.action = KeyAction::Tap;
+    ev.timestamp = (uint32_t)(esp_timer_get_time() / 1000);
+
+    if (ProcInputQueTarget) {
+        xQueueSend(ProcInputQueTarget, &ev, pdMS_TO_TICKS(10));
+    }
+}
+
+void ButtonDevice::interact(Device& other) { /* not used */ }
+
+
+
+
+
+
+
+
 // ===================================================================
 // KnobDevice Implementation
 // ===================================================================
@@ -25,8 +89,8 @@ esp_err_t KnobDevice::initialize(const ky040_config_t* cfg)
     if (!cfg) return ESP_ERR_INVALID_ARG;
 
     ky040_config_t local = *cfg;
-    local.on_twist = twistCallback;
-    local.on_button = buttonCallback; //for buttons because yeah whatever
+    local.on_twist = twistCallback;      // ✅ keep this
+    // local.on_button = buttonCallback;  // removed button and put as seperate device class
     local.user_ctx = this;
 
     esp_err_t ret = ky040_new(&local, &ky_handle);
@@ -48,28 +112,13 @@ void KnobDevice::update()
 {
     if (ky_handle) {
         ky040_poll(ky_handle);
-
-        // Simple button polling (edge detection)
-        static bool last_btn = false;
-        bool now = ky040_is_button_pressed(ky_handle);
-        if (now && !last_btn) {
-            // Button just pressed
-            InputEvent ev{};
-            ev.source_device_type = HIDInputDeviceType::Knob;
-            ev.key = props.button_key;
-            ev.action = KeyAction::Tap;
-            ev.timestamp = (uint32_t)(esp_timer_get_time() / 1000);
-
-            if (ProcInputQueTarget) {
-                xQueueSend(ProcInputQueTarget, &ev, pdMS_TO_TICKS(10));
-            }
-        }
-        last_btn = now;
+        
     }
 }
 
 void KnobDevice::twistCallback(void* user_ctx, int delta)
 {
+    ESP_LOGI(TAG, "twistcallback");
     if (!user_ctx) return;
     auto* self = static_cast<KnobDevice*>(user_ctx);
 
@@ -89,8 +138,9 @@ void KnobDevice::twistCallback(void* user_ctx, int delta)
         xQueueSend(ProcInputQueTarget, &ev, pdMS_TO_TICKS(10));
     }
 }
-
+/*
  void KnobDevice::buttonCallback(void* user_ctx, bool pressed) {
+    ESP_LOGI(TAG, "buttonCallback");
     if (!user_ctx) return;
     auto* self = static_cast<KnobDevice*>(user_ctx);
 
@@ -106,7 +156,7 @@ void KnobDevice::twistCallback(void* user_ctx, int delta)
             xQueueSend(ProcInputQueTarget, &ev, pdMS_TO_TICKS(10));
         }
     }
-}
+}*/
 
 void KnobDevice::interact(Device& other) {
     // TODO: future - knob can control another device (e.g. scroll a list)

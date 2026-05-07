@@ -3,7 +3,7 @@
 #include "esp_check.h"
 #include "esp_timer.h"
 #include <stdlib.h>
-
+#include "hardware/drivers/generic/button_driver.hpp"
 #define TAG "KY040"
 
 
@@ -35,15 +35,15 @@ struct ky040_impl_t {
     int64_t last_event_us;
     int recent_deltas_sum;
     int delta_count;
-    gpio_num_t sw_pin;
+    
 
     // ── New software hysteresis fields ────────────────────────────────
     int pending_steps;          // accumulated net steps in current direction
     int last_direction;         // +1 or -1 — the direction we're building toward
     int64_t last_step_us;       // when we last saw any step (for timeout)
-    bool last_button_state;     // true = pressed
-    ky040_button_cb_t on_button;
+    
 };
+
 
 
 esp_err_t ky040_new(const ky040_config_t *cfg, ky040_handle_t *out_handle) {
@@ -61,19 +61,14 @@ esp_err_t ky040_new(const ky040_config_t *cfg, ky040_handle_t *out_handle) {
 
     self->detents_per_rev   = cfg->detents_per_rev ? cfg->detents_per_rev : KY040_DEFAULT_DETENTS_PER_REV;
     self->on_twist          = cfg->on_twist;
-    self->on_button         = cfg->on_button;
-    self->last_button_state = false; //might need a review later on because buttons MAY be depressed and therefore cause edge cases
-    //todo fix me
     self->user_ctx          = cfg->user_ctx;
-    self->sw_pin            = cfg->sw_pin;
     self->last_count        = 0;
     self->last_event_us     = 0;
     self->recent_deltas_sum = 0;
     self->delta_count       = 0;
-	    self->pending_steps   = 0;
-    self->last_direction  = 0;          // 0 = no direction yet
-    self->last_step_us    = 0;
-
+    self->pending_steps     = 0;
+    self->last_direction    = 0;
+    self->last_step_us      = 0;
 
     pcnt_unit_config_t unit_cfg{};
     unit_cfg.low_limit  = -32768;
@@ -84,8 +79,8 @@ esp_err_t ky040_new(const ky040_config_t *cfg, ky040_handle_t *out_handle) {
     chan_cfg.level_gpio_num = cfg->dt_pin;
 
     pcnt_glitch_filter_config_t filter_cfg = {
-        .max_glitch_ns = 5000, 
-    }; //Do not go above ~12750 ns — it will always fail with "glitch width out of range".
+        .max_glitch_ns = 5000,
+    };
 
     pcnt_channel_handle_t chan = NULL;
     esp_err_t ret;
@@ -118,34 +113,18 @@ esp_err_t ky040_new(const ky040_config_t *cfg, ky040_handle_t *out_handle) {
     ret = pcnt_unit_start(self->pcnt_unit);
     if (ret != ESP_OK) goto cleanup;
 
-    if (self->sw_pin != KY040_PIN_UNUSED) {
-        gpio_config_t io = {
-            .pin_bit_mask = (1ULL << self->sw_pin),
-            .mode         = GPIO_MODE_INPUT,
-            .pull_up_en   = GPIO_PULLUP_ENABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type    = GPIO_INTR_DISABLE,
-        };
-        ESP_ERROR_CHECK(gpio_config(&io));
-    } 
-
     *out_handle = self;
-    ESP_LOGI(TAG, "KY-040 init OK: CLK=%d DT=%d SW=%d detents=%d",
-             cfg->clk_pin, cfg->dt_pin, cfg->sw_pin, self->detents_per_rev);
+    ESP_LOGI(TAG, "KY-040 init OK: CLK=%d DT=%d detents=%d",
+             cfg->clk_pin, cfg->dt_pin, self->detents_per_rev);
     return ESP_OK;
 
 cleanup:
     if (self->pcnt_unit) {
         pcnt_unit_stop(self->pcnt_unit);
-        pcnt_del_unit(self->pcnt_unit);  // ← fixed: no &
+        pcnt_del_unit(self->pcnt_unit);
     }
     free(self);
     return ret;
-
-    
-    
-
-
 }
 
 esp_err_t ky040_del(ky040_handle_t self) {
@@ -161,8 +140,9 @@ esp_err_t ky040_del(ky040_handle_t self) {
 
 
 void ky040_poll(ky040_handle_t self) {
+   // ESP_LOGI(TAG, "ky040_poll");
     if (!self || !self->pcnt_unit) return;
-
+    
     int count = 0;
     if (pcnt_unit_get_count(self->pcnt_unit, &count) != ESP_OK) return;
 
@@ -175,17 +155,7 @@ void ky040_poll(ky040_handle_t self) {
     ESP_LOGI(TAG, "Raw delta_total = %+d   (count now %d)", delta_total, count);
 
 
-    if (self->sw_pin != KY040_PIN_UNUSED && self->on_button) {
-        bool currently_pressed = (gpio_get_level(self->sw_pin) == 0);  // active low
-
-        if (currently_pressed != self->last_button_state) {
-            // State changed → call callback
-            self->on_button(self->user_ctx, currently_pressed);
-            self->last_button_state = currently_pressed;
-
-            ESP_LOGD(TAG, "Button %s", currently_pressed ? "PRESSED" : "RELEASED");
-        }
-    }
+    
 
 
     self->last_count = count;
@@ -247,9 +217,4 @@ float ky040_get_rate_detents_per_sec(ky040_handle_t self) {
 float ky040_get_rate_deg_per_sec(ky040_handle_t self) {
     if (!self) return 0.0f;
     return ky040_get_rate_detents_per_sec(self) * (360.0f / (float)self->detents_per_rev);
-}
-
-bool ky040_is_button_pressed(ky040_handle_t self) {
-    if (!self || self->sw_pin == KY040_PIN_UNUSED) return false;
-    return gpio_get_level(self->sw_pin) == 0;
 }
