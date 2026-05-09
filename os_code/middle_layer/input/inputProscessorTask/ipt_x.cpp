@@ -2,11 +2,12 @@
 #include "esp_log.h"
 #include "os_code/core/rShell/s_hell.hpp"
 #include "os_code/middle_layer/input/input_handler.hpp"
-
+#include "os_code/core/rShell/enviroment/env_vars.h"
+#include "os_code/middle_layer/input/hid_t.h"
 static const char* TAG = "InputTask";
 
 // External queue from input_handler
-extern QueueHandle_t ProcInputQueTarget;
+extern QueueHandle_t ProcInputQueTarget; //the task target
 
 // Forward declarations
 static void dispatch_event_to_focused_app(const InputEvent& ev);
@@ -22,7 +23,7 @@ static void dispatch_event_to_focused_app(const InputEvent& ev)
     mgr.route_input_to_focused(ev);
 }
 
-static void handle_debug_output(const InputEvent& ev)
+static void handle_debug_output(const InputEvent& ev) //i should probably switch this for a map, but oh well lol
 {
     switch (ev.key) {
         case KEY_UP:    ESP_LOGI(TAG, "↑ UP"); break;
@@ -65,7 +66,7 @@ static void input_task(void* pvParameters)
         // Check for events (non-blocking, since we're polling)
         while (xQueueReceive(ProcInputQueTarget, &ev, 0) == pdTRUE)
         {
-            ESP_LOGI(TAG, " Received input event! key=0x%04X", ev.key);
+            ESP_LOGI(TAG, "Event key=0x%04X target=%d", ev.key, (int)ev.target);
             
             switch (ev.target)
             {

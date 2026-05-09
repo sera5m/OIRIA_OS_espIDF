@@ -40,6 +40,7 @@ idf_component_register(
    				 
    				 
    	#handle input		 
+   			"os_code/middle_layer/input/hid_t.h"
    			"hardware/drivers/encoders/ky040_driver.cpp"
    			"hardware/drivers/encoders/ky040_driver.hpp"
    			"hardware/drivers/generic/button_driver.hpp"
@@ -47,6 +48,7 @@ idf_component_register(
    			"os_code/middle_layer/input/input_devs_agg.hpp"
    			"os_code/middle_layer/input/input_handler.cpp"
   			"os_code/middle_layer/input/input_handler.hpp"
+  			
   			#"os_code/middle_layer/input/hostusb/usb_hid_host.cpp"
   			#"os_code/middle_layer/input/hostusb/usb_hid_host.hpp"
   			"os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"

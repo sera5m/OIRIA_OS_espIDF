@@ -1,4 +1,4 @@
-#include <stdint.h>
+//#include <stdint.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -8,14 +8,14 @@
 #include <time.h>
 #include "esp_timer.h"
 #include "code_stuff/types.h"
-
-
+//#include "os_code/middle_layer/input/input_handler.hpp"
+#include "os_code/middle_layer/input/hid_t.h"
 
 const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", //i miss when we had pride month but nooo conservitard cult-ure war
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
 
-
+    
 
 EnvConfig v_env = { //vars_env
     // =========================
@@ -66,7 +66,8 @@ EnvConfig v_env = { //vars_env
     // =========================
     // INPUT / UI STATE
     // =========================
-    
+    .CurrentHIDTarget = 5, 
+     // debug_log is the 6th item (debug_log=5). oh my god
     
     // =========================
     // SYSTEM FLAGS

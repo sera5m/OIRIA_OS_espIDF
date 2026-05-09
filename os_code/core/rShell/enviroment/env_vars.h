@@ -11,9 +11,22 @@
 #include <time.h>
 #include "esp_timer.h"
 #include "code_stuff/types.h"
+
+#include "os_code/middle_layer/input/hid_t.h"
+
+
+// ✅ Forward declare HIDTarget instead of including full header
+#ifdef __cplusplus
+enum class HIDTarget : uint8_t;
+#else
+typedef uint8_t HIDTarget;  // C fallback (or don't use in C)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+
 
 typedef struct __attribute__((packed)) {
     uint16_t year;
@@ -76,7 +89,7 @@ typedef struct {
     // =========================
     // INPUT / UI STATE
     // =========================
-    
+    HIDTarget CurrentHIDTarget; //technically uint8 type, so we'll just use that, unfortunately
 
     // =========================
     // SYSTEM FLAGS

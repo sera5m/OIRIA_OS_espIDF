@@ -15,7 +15,7 @@
 #include "sdmmc_cmd.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
-
+#include "os_code/middle_layer/input/hid_t.h"
 
 #include "hardware/wiring/wiring.h"  // ← your pins!
 #include "hardware/drivers/abstraction_layers/al_scr.h"
@@ -523,7 +523,7 @@ ESP_LOGI(TAG, "WindowManager init-d");
     auto watchapp = std::make_shared<MyWatchApp>(cfg);
 watchapp->init();
     watchapp->start_task();     // ✅ phase 3: run the FreeRTOS tas
-    
+    v_env.CurrentHIDTarget=(HIDTarget)HIDTarget::toTaskAndDebug; //for now we'll use debug too. this is position 7. see hid_t.h if this doesn't work right
     appManager::instance().set_focused_app(watchapp);
     
     //added dynamic throttle because display overperforms above target to ease cpu
@@ -545,6 +545,7 @@ esp_task_wdt_reconfigure(&wdt_config);
 //create new tasks for proscessing loop
 xTaskCreatePinnedToCore(core1_createData, "core1", 8192, NULL, 5, &core1TaskHandle, 1);
 xTaskCreatePinnedToCore(core2_push,       "core2", 8192, NULL, 5, &core2TaskHandle, 0);
+
 
 
 

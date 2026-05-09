@@ -1,22 +1,24 @@
-#pragma once
+
 
 #include <cstdint>
 #include <vector>
 #include <memory>
 #include <string>
 
+#pragma once
 #include "freertos/FreeRTOS.h"   // Keep FreeRTOS early
 #include "freertos/queue.h"
 
 #include "hardware/drivers/encoders/ky040_driver.hpp"
 #include "code_stuff/types.h"
-
+#include "os_code/core/rShell/enviroment/env_vars.h"
 #include "hardware/drivers/generic/button_driver.hpp"
-
+#include "os_code/middle_layer/input/hid_t.h"
 
 // Forward declaration
 extern QueueHandle_t ProcInputQueTarget;
-
+//struct EnvConfig;
+//extern EnvConfig v_env;
 // ===================================================================
 // Key definitions (keep yours)
 #define KEY_ENTER   0x23CE
@@ -44,26 +46,29 @@ enum class HIDInputDeviceType : uint8_t {
     Unknown
 };
 
-enum class HIDTarget: uint8_t{
-    nothing, //why is this selected
-    actAsUsbHID, //pretend to be a gamepad or keyboard
-    wireless_hid, //wireless keyboard
-    toTask,//direct the input to whatever task we have going here
-    toTask_and_usbHid,
-    debug_log, //prints it over the serial
-    everything, //do not do this
-    toTaskAndDebug
-};
-extern HIDTarget CurrentHIDTarget; 
+
+
+
+struct __attribute__((packed)) full_PositionPointer{ //where is my position pointer? equivalent to mouse pointer
+int Xpos; int Ypos; int Zpos;
+bool Xdown; bool Ydown; bool Zdown; //selective for axial constraints. regular nav and clicks are only
+bool Xdim; bool Ydim; bool Zdim; //does it even have these dimensions for this device descriptor
+
+}; //stores this mouse pointer fot the mouse itself 
+
+
+
+// ===================================================================
+// Input Event
 // ===================================================================
 // Input Event
 struct InputEvent {
     uint16_t           key = 0;
     KeyAction          action = KeyAction::Unknown;
     HIDInputDeviceType source_device_type = HIDInputDeviceType::Unknown;
-    int32_t            delta = 0;        // for knobs / scroll
+    int32_t            delta = 0;
     uint32_t           timestamp = 0;
-    HIDTarget target = CurrentHIDTarget; 
+    HIDTarget target;  // ← No default here - set explicitly when creating events
 };
 
 
@@ -167,6 +172,9 @@ private:
 public:
     void addDevice(std::unique_ptr<Device> device);
     void updateAll();
+    // In DeviceManager class
+    void removeDevice(const char* name);
+    void listDevices();
 
     size_t getDeviceCount() const { return devices.size(); }
     const std::vector<std::unique_ptr<Device>>& getDevices() const { return devices; }

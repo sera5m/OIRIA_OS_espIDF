@@ -1,20 +1,23 @@
 #include "freertos/FreeRTOS.h"      // MUST be first
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "os_code/core/rShell/enviroment/env_vars.h" 
 #include "hardware/drivers/generic/button_driver.hpp"
-
+#include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/middle_layer/input/input_handler.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <memory>
+#include "os_code/middle_layer/input/hid_t.h"
 
 static const char* TAG = "InputHandler";
 
 extern QueueHandle_t ProcInputQueTarget;   // defined in main
-HIDTarget CurrentHIDTarget=HIDTarget::debug_log; //default behavior, not the target task. we have an input handler task for a reason, so this is global so every other task can see what's happening with that
+//HIDTarget CurrentHIDTarget=HIDTarget::debug_log; //default behavior, not the target task. we have an input handler task for a reason, so this is global so every other task can see what's happening with that
+//moved above to env_vars for global access
+//extern HIDTarget;
 DeviceManager gDeviceManager;   // Global instance of the input handler object
-
-
+//extern EnvConfig v_env; 
 //
 // current order of implementations
 // devices: buttondevice,knobdevice
@@ -57,6 +60,7 @@ void ButtonDevice::pressCallback(void* user_ctx, bool pressed)
     if (!self || !pressed) return;   // only send on press for now
 
     InputEvent ev{};
+   ev.target = (HIDTarget)v_env.CurrentHIDTarget;//get event copy to current hid target
     ev.source_device_type = HIDInputDeviceType::Button;
     ev.key = self->props.press_key;
     ev.action = KeyAction::Tap;
@@ -123,6 +127,7 @@ void KnobDevice::twistCallback(void* user_ctx, int delta)
     auto* self = static_cast<KnobDevice*>(user_ctx);
 
     InputEvent ev{};
+   ev.target = (HIDTarget)v_env.CurrentHIDTarget;
     ev.source_device_type = HIDInputDeviceType::Knob;
     ev.timestamp = (uint32_t)(esp_timer_get_time() / 1000);
     ev.delta = delta;
@@ -138,25 +143,7 @@ void KnobDevice::twistCallback(void* user_ctx, int delta)
         xQueueSend(ProcInputQueTarget, &ev, pdMS_TO_TICKS(10));
     }
 }
-/*
- void KnobDevice::buttonCallback(void* user_ctx, bool pressed) {
-    ESP_LOGI(TAG, "buttonCallback");
-    if (!user_ctx) return;
-    auto* self = static_cast<KnobDevice*>(user_ctx);
 
-    InputEvent ev{};
-    ev.source_device_type = HIDInputDeviceType::Knob;
-    ev.timestamp = (uint32_t)(esp_timer_get_time() / 1000);
-
-    if (pressed) {
-        ev.key = self->props.button_key;   // e.g., KEY_ENTER or KEY_BACK
-        ev.action = KeyAction::Tap;
-
-        if (ProcInputQueTarget) {
-            xQueueSend(ProcInputQueTarget, &ev, pdMS_TO_TICKS(10));
-        }
-    }
-}*/
 
 void KnobDevice::interact(Device& other) {
     // TODO: future - knob can control another device (e.g. scroll a list)
@@ -182,5 +169,21 @@ void DeviceManager::updateAll()
 {
     for (auto& dev : devices) {
         dev->update();
+    }
+}
+// In DeviceManager class
+void DeviceManager::removeDevice(const char* name) {
+    auto it = std::remove_if(devices.begin(), devices.end(),
+        [name](const std::unique_ptr<Device>& dev) {
+            return strcmp(dev->getName(), name) == 0;
+        });
+    devices.erase(it, devices.end());
+}
+
+void DeviceManager::listDevices() {
+    ESP_LOGI("DeviceManager", "Connected devices: %d", devices.size());
+    for (auto& dev : devices) {
+        ESP_LOGI("DeviceManager", "  - %s (type %d)", 
+                 dev->getName(), (int)dev->getType());
     }
 }

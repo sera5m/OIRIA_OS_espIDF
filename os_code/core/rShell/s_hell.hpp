@@ -28,7 +28,7 @@ enum class AppCapability : uint32_t {
     PINNED_TO_CORE      =   1<<10  //PIN TO CORE 1 (core 0 runs spi and wifi and hence should be avoided in 
     //overload, but this adds some potential issues with threading
 };
-
+//i think that is unused, i should use it
 // Bitmask type
 using AppCapabilities = uint32_t;
 
