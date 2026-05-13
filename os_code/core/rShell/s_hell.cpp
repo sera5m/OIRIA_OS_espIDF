@@ -170,7 +170,7 @@ void appManager::set_focused_app(std::shared_ptr<AppBase> app) {
     
     focused_app = app;
 
-    ESP_LOGI(TAG, "Focus set to app: %s",
+    ESP_LOGI(TAG, ">>>>>>>>>Focus set to app: %s",
              app ? app->get_app_name() : "none");
 
     // disable highlight on old app
