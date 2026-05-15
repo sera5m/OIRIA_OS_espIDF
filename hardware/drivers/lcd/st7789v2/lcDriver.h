@@ -77,14 +77,25 @@ typedef enum {
 
 //debug options
 extern spi_device_handle_t spi_lcd;
-extern uint16_t *framebuffer;
+// In lcDriver.h
+// lcDriver.h - add these declarations
+extern uint16_t *framebuffer;        // Already exists - keep it
+extern uint16_t *framebuffer_front;  // For display task
+extern uint16_t *framebuffer_back;   // For drawing task
+
+void framebuffer_swap(void);         // New function
+extern volatile bool buffer_swap_pending;
+
+void framebuffer_swap(void);  // Atomically swap front/back
 
 // --------------------- INIT ---------------------
 void framebuffer_alloc(void);
 void fb_clear(uint16_t color);
+// lcDriver.h - should have these
 void lcd_init_simple(void);
-void lcd_init_angry(void);
 void lcd_refresh_screen(void);
+void lcd_init_angry(void);
+
 
 // --------------------- DISPLAY ---------------------
 void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode);

@@ -163,28 +163,41 @@ void appManager::DestroyAllApps() {
 
     apps.clear();
 }
+void AppBase::bind_main_window(std::shared_ptr<Window> win) {
+    if (window_) {
+        ESP_LOGW(TAG, "App %s already has a window bound", get_app_name());
+    }
+    window_ = std::move(win);
+    ESP_LOGI(TAG, "App %s bound window %s", get_app_name(), 
+             window_ ? window_->Currentcfg.name : "nullptr");
+}
 
 void appManager::set_focused_app(std::shared_ptr<AppBase> app) {
-
-    auto old = focused_app;   // SAVE OLD FIRST
-    
+    auto old = focused_app;
     focused_app = app;
 
-    ESP_LOGI(TAG, ">>>>>>>>>Focus set to app: %s",
-             app ? app->get_app_name() : "none");
+    ESP_LOGI(TAG, "<<<<<<<<<<<<<<<<<<<Focus changed → %s", app ? app->get_app_name() : "none");
 
-    // disable highlight on old app
-    if (old) {
-        if (auto win = old->get_window()) {
-            win->window_highlighted = false;
+    // Old app loses focus
+    if (old && old != app) {
+        if (auto window_ = old->get_main_window()) {
+            window_->window_highlighted = false;
+            window_->dirty = true;           // important
         }
+        old->on_focus_lost();
     }
 
-    // enable highlight on new app
+    // New app gains focus
     if (focused_app) {
-        if (auto win = focused_app->get_window()) {
-            win->window_highlighted = true;
+        if (auto window_ = focused_app->get_main_window()) {
+            window_->window_highlighted = true;
+            window_->dirty = true;
+            // Optional: bring to front
+            // ref_wm.BringToFront(win);  // if you have this method
+        } else {
+            ESP_LOGW(TAG, "Focused app %s has no window bound!", focused_app->get_app_name());
         }
+        focused_app->on_focus_gained();
     }
 }
 

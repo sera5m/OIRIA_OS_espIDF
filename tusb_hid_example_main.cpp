@@ -434,42 +434,32 @@ TaskHandle_t core1TaskHandle = NULL;
 TaskHandle_t core2TaskHandle = NULL;
 
 void core1_createData(void* pv) {
-    esp_task_wdt_add(NULL);
-    
+	esp_task_wdt_add(NULL); 
     while (1) {
-        uint32_t frame_start = esp_log_timestamp();
-        
+		
+        // Draw to framebuffer (which points to BACK buffer)
         update_display_time(&v_env.displayTime);
+        esp_task_wdt_reset(); 
         WindowManager::getInstance().UpdateAll(0,1,1,1);
-        
-        // Feed watchdog AFTER heavy work
-        esp_task_wdt_reset();
-        
+        esp_task_wdt_reset(); 
+        // After drawing, swap so this frame becomes the FRONT buffer
+        framebuffer_swap();
+        esp_task_wdt_reset(); 
         xTaskNotifyGive(core2TaskHandle);
-        
-        // Frame rate limiting + yield
-        uint32_t frame_time = esp_log_timestamp() - frame_start;
-        uint32_t target_ms = 1000 / v_env.fpsTarget;
-        if (frame_time < target_ms) {
-            vTaskDelay(pdMS_TO_TICKS(target_ms - frame_time));
-        } else {
-            vTaskDelay(pdMS_TO_TICKS(1));  // At least yield
-        }
+        esp_task_wdt_reset(); 
+        // Frame rate limiting...
+        vTaskDelay(pdMS_TO_TICKS(1000 / v_env.fpsTarget));
     }
 }
 
 void core2_push(void* pv) {
-    esp_task_wdt_add(NULL);
-    
+	esp_task_wdt_add(NULL); 
     while (1) {
-        // Block until core1 says "go" - NO TIMEOUT
+		esp_task_wdt_reset(); 
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         
-        refreshScreen();
-        esp_task_wdt_reset();
-        
-        // Yield to let idle task run
-        taskYIELD();
+        // This now reads from framebuffer_front (stable frame)
+        display_framebuffer(true, false);
     }
 }
 

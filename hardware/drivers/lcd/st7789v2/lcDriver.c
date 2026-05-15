@@ -4,29 +4,54 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include <string.h>
 #include <math.h>
 #include "esp_timer.h"
 #include <stdint.h>
 #include <stdbool.h>
-#include <stdlib.h>     // for min/max
-#include <stdlib.h>   // for min/max if needed
-
+#include <stdlib.h>
+#include "os_code/core/rShell/enviroment/env_vars.h"
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
 #define TAG "ST7789"
-
 #define SAFE_ROWS_PER_CHUNK 8
 
-// ──────────────────────────────────────────────
-// Dirty rows
-// ──────────────────────────────────────────────
+// ===================================================================
+// GLOBALS
+// ===================================================================
+
+// Single global pointer that drawing code uses
 uint16_t *framebuffer = NULL;
 
+// Internal double buffer pointers
+uint16_t *framebuffer_front = NULL;
+uint16_t *framebuffer_back = NULL;
+
+// Dirty row tracking
 #define CHANGED_ROWS_BYTES ((SCREEN_H + 7)/8)
 static uint8_t changed_rows_bitmask[CHANGED_ROWS_BYTES];
+
+// Mutex for thread-safe swapping
+static SemaphoreHandle_t fb_mutex = NULL;
+
+// ===================================================================
+// FORWARD DECLARATIONS (so functions can be called in any order)
+// ===================================================================
+
+static inline void mark_rows_dirty(int y0, int y1);
+static inline void mark_all_dirty(bool dirty);
+static inline void fill_row32(uint16_t* dst, int width, uint16_t color);
+static esp_err_t lcd_cmd(uint8_t cmd);
+static esp_err_t lcd_data(uint8_t data);
+static esp_err_t lcd_data_bulk(const void* data, size_t len);
+static void lcd_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
+
+// ===================================================================
+// DIRTY ROW TRACKING
+// ===================================================================
 
 static inline void mark_rows_dirty(int y0, int y1)
 {
@@ -45,18 +70,17 @@ static inline void mark_rows_dirty(int y0, int y1)
             changed_rows_bitmask[i] = 0xFF;
         changed_rows_bitmask[byte1] |= (0xFFu >> (7 - (y1 % 8)));
     }
-    //  taskYIELD();
 }
 
 static inline void mark_all_dirty(bool dirty)
 {
     memset(changed_rows_bitmask, dirty ? 0xFF : 0x00, sizeof(changed_rows_bitmask));
-    //  taskYIELD();
 }
 
-// ──────────────────────────────────────────────
-// Fast fill helper
-// ──────────────────────────────────────────────
+// ===================================================================
+// FAST FILL HELPER
+// ===================================================================
+
 static inline void fill_row32(uint16_t* dst, int width, uint16_t color)
 {
     uint32_t c32 = ((uint32_t)color << 16) | color;
@@ -66,28 +90,59 @@ static inline void fill_row32(uint16_t* dst, int width, uint16_t color)
         d32[i] = c32;
     if (width & 1)
         dst[width - 1] = color;
-        //  taskYIELD();
 }
 
-// ──────────────────────────────────────────────
-// Framebuffer
-// ──────────────────────────────────────────────
+// ===================================================================
+// FRAMEBUFFER MANAGEMENT
+// ===================================================================
+
 void framebuffer_alloc(void)
 {
     static bool allocated = false;
     if (allocated) return;
 
     size_t sz = SCREEN_W * SCREEN_H * sizeof(uint16_t);
-    framebuffer = (uint16_t*)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
-
-    if (!framebuffer) {
+    
+    // Create mutex
+    if (!fb_mutex) {
+        fb_mutex = xSemaphoreCreateMutex();
+    }
+    
+    // Allocate two buffers
+    framebuffer_front = (uint16_t*)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+    framebuffer_back = (uint16_t*)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+    
+    if (!framebuffer_front || !framebuffer_back) {
         ESP_LOGE(TAG, "Framebuffer allocation failed!");
         return;
     }
-
+    
+    // Clear both buffers
+    memset(framebuffer_front, 0, sz);
+    memset(framebuffer_back, 0, sz);
+    
+    // Set framebuffer to point to BACK buffer (drawing buffer)
+    framebuffer = framebuffer_back;
+    
     allocated = true;
-    ESP_LOGI(TAG, "Framebuffer allocated in %sRAM", 
-             esp_ptr_external_ram(framebuffer) ? "PS" : "Internal");
+    ESP_LOGI(TAG, "Double framebuffers allocated (%zu KB total)", (sz * 2) / 1024);
+}
+
+void framebuffer_swap(void)
+{
+    if (!fb_mutex) return;
+    
+    xSemaphoreTake(fb_mutex, portMAX_DELAY);
+    
+    // Swap the pointers
+    uint16_t *tmp = framebuffer_front;
+    framebuffer_front = framebuffer_back;
+    framebuffer_back = tmp;
+    
+    // Update framebuffer to point to the NEW back buffer (for drawing)
+    framebuffer = framebuffer_back;
+    
+    xSemaphoreGive(fb_mutex);
 }
 
 void fb_clear(uint16_t color)
@@ -97,16 +152,13 @@ void fb_clear(uint16_t color)
     uint32_t* p = (uint32_t*)framebuffer;
     for (size_t i = 0; i < (SCREEN_W * SCREEN_H)/2; i++)
         p[i] = c32;
-        //  taskYIELD();  
     mark_all_dirty(true);
 }
 
-// ──────────────────────────────────────────────
-// Low-level LCD
-// ──────────────────────────────────────────────
-// ──────────────────────────────────────────────
-// Low-level LCD
-// ──────────────────────────────────────────────
+// ===================================================================
+// LOW-LEVEL LCD (SPI)
+// ===================================================================
+
 static esp_err_t lcd_cmd(uint8_t cmd)
 {
     spi_transaction_t t = {
@@ -146,7 +198,7 @@ static esp_err_t lcd_data_bulk(const void* data, size_t len)
     };
 
 #ifdef SPI_TRANS_DMA_USE_PSRAM
-    t.flags |= SPI_TRANS_DMA_USE_PSRAM;   // Use only if available
+    t.flags |= SPI_TRANS_DMA_USE_PSRAM;
 #endif
 
     gpio_set_level(LCD_DC, 1);
@@ -173,57 +225,12 @@ static void lcd_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
     lcd_cmd(0x2C);  // RAMWR
 }
 
-// ──────────────────────────────────────────────
-// Display
-// ──────────────────────────────────────────────
-void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode)
-{
-    if (!framebuffer) return;
-
-    const uint32_t row_bytes = SCREEN_W * 2;
-
-    if (!only_delta) {
-        // Full refresh
-        for (int y = 0; y < SCREEN_H; y += SAFE_ROWS_PER_CHUNK) {
-            int rows = SAFE_ROWS_PER_CHUNK;
-            if (y + rows > SCREEN_H) rows = SCREEN_H - y;
-
-            lcd_set_window(0, y, SCREEN_W - 1, y + rows - 1);
-            lcd_data_bulk(&framebuffer[y * SCREEN_W], rows * row_bytes);
-            //  taskYIELD();
-        }
-        mark_all_dirty(false);
-    } else {
-        // Delta refresh
-        int y = 0;
-        while (y < SCREEN_H) {
-            if (!(changed_rows_bitmask[y/8] & (1u << (y%8)))) {
-                y++; continue;
-            }
-
-            int y_start = y;
-            while (y < SCREEN_H && 
-                   (changed_rows_bitmask[y/8] & (1u << (y%8))) &&
-                   (y - y_start < SAFE_ROWS_PER_CHUNK)) {
-                y++;
-            }
-
-            int rows = y - y_start;
-            lcd_set_window(0, y_start, SCREEN_W - 1, y_start + rows - 1);
-            lcd_data_bulk(&framebuffer[y_start * SCREEN_W], rows * row_bytes);
-            //  taskYIELD();
-
-            // Clear dirty bits
-            for (int i = y_start; i < y; i++)
-                changed_rows_bitmask[i/8] &= ~(1u << (i%8));
-        }
-    }
-}
-
-// ──────────────────────────────────────────────
-// Init
-// ──────────────────────────────────────────────
-#define lcd_c_adr_set 0x2A
+// ===================================================================
+// DISPLAY FUNCTIONS
+// ===================================================================
+// ===================================================================
+// LCD INITIALIZATION
+// ===================================================================
 
 void lcd_init_simple(void)
 {
@@ -244,17 +251,14 @@ void lcd_init_simple(void)
     lcd_cmd(0x36);
     lcd_data(0x00);     // Memory data access control
 
-    // Column address
-    lcd_cmd(lcd_c_adr_set);
+    lcd_cmd(0x2A);      // Column address
     lcd_data(0x00); lcd_data(0x00);
     lcd_data(0x00); lcd_data(0xEF);
 
-    // Row address
-    lcd_cmd(0x2B);
+    lcd_cmd(0x2B);      // Row address
     lcd_data(0x00); lcd_data(0x00);
     lcd_data(0x01); lcd_data(0x3F);
 
-    // Other init commands...
     lcd_cmd(0xB2); lcd_data(0x0C); lcd_data(0x0C); lcd_data(0x00);
                    lcd_data(0x33); lcd_data(0x33);
 
@@ -267,14 +271,13 @@ void lcd_init_simple(void)
     lcd_cmd(0xC6); lcd_data(0x0F);
     lcd_cmd(0xD0); lcd_data(0xA4); lcd_data(0xA1);
 
-    // Gamma
-    lcd_cmd(0xE0); // positive gamma...
+    lcd_cmd(0xE0); // positive gamma
     lcd_data(0xD0); lcd_data(0x08); lcd_data(0x11); lcd_data(0x08);
     lcd_data(0x0C); lcd_data(0x15); lcd_data(0x39); lcd_data(0x33);
     lcd_data(0x50); lcd_data(0x36); lcd_data(0x13); lcd_data(0x14);
     lcd_data(0x29); lcd_data(0x2D);
 
-    lcd_cmd(0xE1); // negative gamma...
+    lcd_cmd(0xE1); // negative gamma
     lcd_data(0xD0); lcd_data(0x08); lcd_data(0x10); lcd_data(0x08);
     lcd_data(0x06); lcd_data(0x06); lcd_data(0x39); lcd_data(0x44);
     lcd_data(0x51); lcd_data(0x0B); lcd_data(0x16); lcd_data(0x14);
@@ -286,14 +289,13 @@ void lcd_init_simple(void)
     vTaskDelay(pdMS_TO_TICKS(120));
 }
 
-// ──────────────────────────────────────────────
-// Refresh
-// ──────────────────────────────────────────────
-uint16_t fpsLimiterTarget = 30;
+// ===================================================================
+// REFRESH FUNCTION
+// ===================================================================
 
 void lcd_refresh_screen(void)
 {
-    const uint32_t FRAME_MS = 1000 / fpsLimiterTarget;
+    const uint32_t FRAME_MS = 1000 / (v_env.fpsTarget);
     uint32_t frame_start = esp_log_timestamp();
 
     lcd_fb_display_framebuffer(true, false);
@@ -304,9 +306,66 @@ void lcd_refresh_screen(void)
     }
 }
 
-// ──────────────────────────────────────────────
-// Drawing Functions
-// ──────────────────────────────────────────────
+// Also add this alias if something calls lcd_refreshScreen (capital S)
+void lcd_refreshScreen(void)
+{
+    lcd_refresh_screen();
+}
+
+void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode)
+{
+    if (!framebuffer_front) return;
+    
+    xSemaphoreTake(fb_mutex, portMAX_DELAY);
+    
+    // Use the FRONT buffer for display (stable, complete frame)
+    uint16_t *display_buffer = framebuffer_front;
+    
+    const uint32_t row_bytes = SCREEN_W * 2;
+    
+    if (!only_delta) {
+        for (int y = 0; y < SCREEN_H; y += SAFE_ROWS_PER_CHUNK) {
+            int rows = SAFE_ROWS_PER_CHUNK;
+            if (y + rows > SCREEN_H) rows = SCREEN_H - y;
+            lcd_set_window(0, y, SCREEN_W - 1, y + rows - 1);
+            lcd_data_bulk(&display_buffer[y * SCREEN_W], rows * row_bytes);
+        }
+        mark_all_dirty(false);
+    } else {
+        // Delta refresh
+        int y = 0;
+        while (y < SCREEN_H) {
+            if (!(changed_rows_bitmask[y/8] & (1u << (y%8)))) {
+                y++;
+                continue;
+            }
+            
+            int y_start = y;
+            while (y < SCREEN_H && 
+                   (changed_rows_bitmask[y/8] & (1u << (y%8))) &&
+                   (y - y_start < SAFE_ROWS_PER_CHUNK)) {
+                y++;
+            }
+            
+            int rows = y - y_start;
+            lcd_set_window(0, y_start, SCREEN_W - 1, y_start + rows - 1);
+            lcd_data_bulk(&display_buffer[y_start * SCREEN_W], rows * row_bytes);
+            
+            // Clear dirty bits
+            for (int i = y_start; i < y; i++) {
+                changed_rows_bitmask[i/8] &= ~(1u << (i%8));
+            }
+        }
+    }
+    
+    xSemaphoreGive(fb_mutex);
+}
+
+uint16_t fpsLimiterTarget = 30;
+
+// ===================================================================
+// DRAWING FUNCTIONS
+// ===================================================================
 
 void fb_rect(bool isfilled, uint16_t borderThickness,
              int x, int y, int w, int h,
@@ -356,8 +415,6 @@ void fb_rect_border(bool isfilled, uint16_t borderThickness,
                     int x, int y, int w, int h,
                     uint16_t colorA, uint16_t colorB, uint8_t segment_len)
 {
-    // TODO: Optimize this one later if needed
-    // For now keep functional version but fix dirty marking
     if (segment_len < 1) segment_len = 1;
 
     if (x < 0) { w += x; x = 0; }
@@ -405,9 +462,6 @@ void fb_rect_border(bool isfilled, uint16_t borderThickness,
     mark_rows_dirty(y, y + h - 1);
 }
 
-// Keep the rest of your functions (fb_line, fb_circle, etc.) as they are for now, 
-// or tell me if you want me to optimize more of them.
-
 void fb_line(int x0, int y0, int x1, int y1, uint16_t color)
 {
     int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
@@ -430,12 +484,6 @@ void fb_line(int x0, int y0, int x1, int y1, uint16_t color)
     mark_rows_dirty(miny, maxy);
 }
 
-
-
-// ──────────────────────────────────────────────
-// Missing / Incomplete Functions
-// ──────────────────────────────────────────────
-
 void fb_draw_bitmap(int dst_x, int dst_y, int w, int h, const uint16_t* bitmap)
 {
     if (!framebuffer || !bitmap) return;
@@ -456,13 +504,35 @@ void fb_draw_bitmap(int dst_x, int dst_y, int w, int h, const uint16_t* bitmap)
 
         memcpy(dst, src, (end_x - start_x) * sizeof(uint16_t));
     }
-    //  taskYIELD();
     mark_rows_dirty(start_y, end_y - 1);
 }
 
-// ──────────────────────────────────────────────
-// Text drawing (basic but working)
-// ──────────────────────────────────────────────
+// Stub for fb_circle - you can implement later
+void fb_circle(int cx, int cy, int r, shapefillpattern mode,
+               uint16_t fillColor, uint16_t borderColor)
+{
+    (void)cx; (void)cy; (void)r; (void)mode; (void)fillColor; (void)borderColor;
+    ESP_LOGW(TAG, "fb_circle not yet implemented");
+}
+
+// Stub for fb_triangle
+void fb_triangle(int x0, int y0, int x1, int y1, int x2, int y2,
+                 shapefillpattern mode, uint16_t fillColor, uint16_t borderColor)
+{
+    (void)x0; (void)y0; (void)x1; (void)y1; (void)x2; (void)y2;
+    (void)mode; (void)fillColor; (void)borderColor;
+    ESP_LOGW(TAG, "fb_triangle not yet implemented");
+}
+
+// Stub for fb_ngon
+void fb_ngon(int cx, int cy, int r, uint8_t sides,
+             shapefillpattern mode, uint16_t fillColor, uint16_t borderColor)
+{
+    (void)cx; (void)cy; (void)r; (void)sides;
+    (void)mode; (void)fillColor; (void)borderColor;
+    ESP_LOGW(TAG, "fb_ngon not yet implemented");
+}
+
 void fb_draw_text(uint8_t angle, int x, int y, const char* str,
                   uint16_t color, uint8_t size,
                   uint8_t transparency, bool drawblocksforbackground,
@@ -470,10 +540,13 @@ void fb_draw_text(uint8_t angle, int x, int y, const char* str,
                   uint16_t maxTLenBeforeAutoWrapToNextLine,
                   fontdata fdat)
 {
+    (void)transparency; (void)drawblocksforbackground; (void)blockBackground_color;
+    (void)maxTLenBeforeAutoWrapToNextLine;
+    
     if (!str || !framebuffer) return;
 
-    int ax = 1, ay = 0;   // advance
-    int ux = 0, uy = 1;   // up (glyph rows)
+    int ax = 1, ay = 0;
+    int ux = 0, uy = 1;
 
     switch (angle & 0x1F) {
         case 0:  ax=1; ay=0; ux=0; uy=1; break;
@@ -528,18 +601,8 @@ void fb_draw_text(uint8_t angle, int x, int y, const char* str,
                 }
             }
         }
-        //  taskYIELD();
         cursor++;
     }
 
-    // Mark dirty area (conservative)
     mark_rows_dirty(y - 10, y + (fdat.fcs.y * size) + 10);
-}
-
-// ──────────────────────────────────────────────
-// Refresh function name fix (you had both versions)
-// ──────────────────────────────────────────────
-void lcd_refreshScreen(void)
-{
-    lcd_refresh_screen();   // call the one you already have
 }

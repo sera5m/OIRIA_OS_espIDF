@@ -95,6 +95,7 @@ void MyWatchApp::on_start()
     );
     
     WindowManager::getInstance().registerWindow(watch_window);
+    bind_main_window(watch_window);
     ESP_LOGI(TAG, "watch screen Window registered");
     ESP_LOGI(TAG, "attemtping watch screen draw.....");
     on_draw();  // initial draw

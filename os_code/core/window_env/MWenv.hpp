@@ -458,7 +458,7 @@ void DrawCanvas();  // Call this in WinDraw()
 
     private:
     std::shared_ptr<Canvas> m_canvas;
-    bool OtherTick=0; //true every OTHER update
+    bool TenthTick=0; //true every OTHER update
 
     BgFillType lastBackgroundPattern = BgFillType::Solid;
     uint16_t   lastPrimaryColor      = 0;
@@ -546,7 +546,8 @@ uint16_t currentPhysY = 0;
                 static WindowManager instance;  // created once
                 return instance;
             }
-        
+            
+            void DebugPrintWindowDOM() const;
             void UpdateAll(bool force = false, bool ToolbarUpdate = true, bool repositionWindows = true, bool draw_toolbar_ontop = true);
             bool PruneDeadWindows();   
             bool registerWindow(std::shared_ptr<Window> window);

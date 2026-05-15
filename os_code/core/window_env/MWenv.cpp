@@ -1123,26 +1123,36 @@ if (last_x != wi_sizing.Xpos || last_y != wi_sizing.Ypos) {
 
     // === 5. HIGHLIGHT DASHED BORDER (ONLY if window is highlighted) ===
     if (window_highlighted) {
-        // isfilled = false → only the dashed outline, not a filled rectangle
-        // Adjust thickness, colors and segment_len to your liking
+        // Only update the border color every 10 frames
+        static uint8_t frame_counter = 0;
+        frame_counter++;
+        
+        uint16_t border_color;
+        if (frame_counter >= 10) {
+            // Every 10th frame, toggle the blink state
+            TenthTick = !TenthTick;
+            frame_counter = 0;
+        }
+        
+        // Use TenthTick for blinking (now updates 10x slower)
+        border_color = (TenthTick & 1) ? 0x0000 : 0xFFFF;
+        
         fb_rect_border(false, 2, physX, physY, physW, physH,
-               Currentcfg.BorderColor,
-               ((OtherTick & 1) ? 0x0000 : 0xFFFF),
-               //what's wild is when in the cpp cert exam i never thought i'd use a?b:c in the real world, and here i am. wild
-               8);          // segment_len (dash length)
-               //ESP_LOGI(TAG, "highlighted this window!");
-    }else {
-//i could put more args here if needed
-//ESP_LOGI(TAG, "no highlight today");
-
-}
-
+                       Currentcfg.BorderColor,
+                       border_color,
+                       8);  // segment_len (dash length)
+        
+        ESP_LOGI(TAG, "highlighted this window! TenthTick=%d frame=%d", TenthTick, frame_counter);
+    } else {
+        // no highlight today
+    }
+    
     // === FINISH ===
     currentPhysX = physX;
     currentPhysY = physY;
-    OtherTick = !OtherTick;//flipflop
-    ESP_LOGI(TAG, "highlight=%d OtherTick=%d dirty=%d", 
-         window_highlighted, OtherTick, dirty);
+    // NO TenthTick toggle here anymore — it's handled above every 10 frames
+    ESP_LOGI(TAG, "highlight=%d TenthTick=%d dirty=%d", 
+             window_highlighted, TenthTick, dirty);
     dirty = false;
     lastUpdateTime = esp_timer_get_time();
 }
@@ -1656,13 +1666,64 @@ void WindowManager::SortWindowsByLayer() {
         });
 }
 
+void WindowManager::DebugPrintWindowDOM() const {
+    ESP_LOGI(TAG, "[debug print]");
+    ESP_LOGI(TAG, "<window manager>");
+    ESP_LOGI(TAG, "<bar>");  // placeholder for toolbar if you want
 
+    for (const auto& win : windows) {
+        if (!win || !win->IsWindowShown) continue;
+
+        ESP_LOGI(TAG, ">window \"%s\"", win->Currentcfg.name);
+
+        // Background info
+        const char* tileType = "unknown";
+        switch (win->Currentcfg.backgroundType) {
+            case BgFillType::Solid:              tileType = "solid"; break;
+            case BgFillType::GradientVertical:   tileType = "gradient_v"; break;
+            case BgFillType::GradientHorizontal: tileType = "gradient_h"; break;
+            case BgFillType::Checkerboard:       tileType = "checkerboard"; break;
+            case BgFillType::Noise:              tileType = "noise"; break;
+            case BgFillType::Diagonal_lines:     tileType = "diagonal"; break;
+            case BgFillType::Transparent:        tileType = "transparent"; break;
+            case BgFillType::waves:              tileType = "waves"; break;
+            case BgFillType::triangles:          tileType = "triangles"; break;
+            case BgFillType::dots:               tileType = "dots"; break;
+            default: break;
+        }
+        ESP_LOGI(TAG, ".backgroundtile: \"%s\"", tileType);
+
+        // Canvas(es) - currently one per window
+        if (auto canvas = win->GetCanvas()) {
+            ESP_LOGI(TAG, ">>canvas \"default_canvas\"");  // name it as you prefer
+            // TODO: dump objects in canvas if you expose shape list
+            ESP_LOGI(TAG, ">>>objects in canvas: %d shapes", 
+                     canvas->GetShapeBuffer() ? canvas->GetShapeBuffer()->count : 0);
+        }
+
+        // Focused / highlighted state
+        ESP_LOGI(TAG, "  focused=%d  highlighted=%d  animated_border=%d", 
+                 (win->window_highlighted ? 1 : 0),
+                 (win->window_highlighted ? 1 : 0),
+                 (win->win_internal_optionsBitmask & WIN_OPT_ANIMATED_BORDER ? 1 : 0));
+    }
+}
 
 
 // Update UpdateAll to handle toolbar
 // Update UpdateAll to handle toolbar with cooperative yielding
 void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWindows, bool draw_toolbar_ontop) {
     // Only reposition on first run after toolbar change
+    
+        static uint32_t last_update_ms = 0;
+        uint32_t now_ms = esp_timer_get_time() / 1000;
+        const uint32_t min_frame_interval_ms = 22;  // 45 FPS max
+        
+        if (!force && (now_ms - last_update_ms) < min_frame_interval_ms) {
+            return;  // Too soon, skip this frame
+        }
+        last_update_ms = now_ms;
+
     if (repositionWindows && !windows_repositioned) {
         RepositionAllWindows();
         tb_dirty = true;  

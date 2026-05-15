@@ -55,6 +55,11 @@ void request_priority(int new_priority);
 // Base class for all applications which will never work anyway
 class AppBase : public std::enable_shared_from_this<AppBase> {
 public:
+
+
+void bind_main_window(std::shared_ptr<Window> win);
+std::shared_ptr<Window> get_main_window() const { return window_; }  // renamed for clarity
+
 const char* get_app_name() const { return cfg_.name; } //getter because we love input handling so much!!!
     explicit AppBase(const ApplicationConfig& cfg);
     virtual ~AppBase();
@@ -78,7 +83,7 @@ const char* get_app_name() const { return cfg_.name; } //getter because we love 
     virtual void on_focus_lost() {}
 
     // Window access
-    std::shared_ptr<Window> get_window() const { return window_; }
+    
     int appTickRateHZ; //tick rate of the app in hz
     // Configuration queries
     AppCapabilities get_capabilities() const { return cfg_.capabilities; }
