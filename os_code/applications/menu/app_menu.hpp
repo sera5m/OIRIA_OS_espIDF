@@ -33,29 +33,13 @@
 
 
 
-typedef enum{WM_MAIN,
-     WM_STOPWATCH,
-     WM_ALARMS,
-     WM_TIMER,
-     WM_NTP_SYNCH,
-      WM_SET_TIME,
-     WM_SET_TIMEZONE,
-     WM_COUNT
-    }WatchMode;
-//back in 2025ish when i was originally working on this i had a mode thing for a menu,it was messy so i'll just add a menu app instead of this nonsense
 
-// Helper function to convert numbers to string with 2-digit formatting
-inline std::string tostr(int value) {
-    char buffer[3];
-    snprintf(buffer, sizeof(buffer), "%02d", value);
-    return std::string(buffer);
-}
 
-extern char time_str[];
 
-class MyWatchApp : public AppBase {
+
+class app_launcher_menu : public AppBase {
 public:
-    explicit MyWatchApp(const ApplicationConfig& cfg);
+    explicit app_launcher_menu(const ApplicationConfig& cfg);
 
     void tick_app(uint32_t delta_ms) override;
     void receive_event_input(const void* event) override;
@@ -68,8 +52,6 @@ public:
     void on_resume() override;
     void on_draw() override;
 
-    //custom locals
-    void watchapp_back();
 private:
     std::shared_ptr<Window> watch_window;
 };

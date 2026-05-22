@@ -10,8 +10,8 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_err.h"
-#include "esp_vfs_fat.h"
 #include "hal/i2c_types.h"
+#include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -58,6 +58,16 @@
 #include "os_code/applications/watch/MS_watchapp.hpp"
 
 #include "esp_task_wdt.h"
+
+
+
+
+
+#include  "os_code/applications/fileviewwer/MS_file_viewwer.hpp"
+#include "os_code/applications/watch/MS_watchapp.hpp"
+
+
+
 // Known devices (fill in your full list)
 typedef struct {
     uint8_t addr;
@@ -464,6 +474,19 @@ void core2_push(void* pv) {
 }
 
 
+static ApplicationConfig make_watch_config() {
+    ApplicationConfig cfg;
+    cfg.capabilities = static_cast<uint32_t>(AppCapability::FULLSCREEN) |
+                       static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
+    cfg.stack_size_bytes = 8192;
+    cfg.priority = 5;
+    cfg.name = "WatchApp";
+    cfg.tick_rate_hz = 5;
+    return cfg;
+}
+
+// Registration at file scope (runs before main)
+REGISTER_APP(MyWatchApp, "WatchApp", make_watch_config);
 
 
 //handles some boot stuff and will also update sensors (not input, it's got it's own task)
@@ -503,18 +526,19 @@ ESP_LOGI(TAG, "WindowManager init-d");
     //start application manager object, we will tick and own it inside this task
 	auto& manager = appManager::instance();
     vTaskDelay(8);
-    ApplicationConfig cfg;
-    cfg.capabilities = static_cast<uint32_t>(AppCapability::FULLSCREEN) |
-                       static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
-    cfg.stack_size_bytes = 8192;
-    cfg.priority = 5;
-    cfg.name = "WatchApp";
+    
+        v_env.CurrentHIDTarget=(HIDTarget)HIDTarget::toTaskAndDebug; //for now we'll use debug too. this is position 7. see hid_t.h if this doesn't work right
 
-    auto watchapp = std::make_shared<MyWatchApp>(cfg);
-watchapp->init();
-    watchapp->start_task();     // ✅ phase 3: run the FreeRTOS tas
-    v_env.CurrentHIDTarget=(HIDTarget)HIDTarget::toTaskAndDebug; //for now we'll use debug too. this is position 7. see hid_t.h if this doesn't work right
+    
+    // Create or get the instance first
+auto watchapp = appManager::instance().launch_app("WatchApp");  // This creates and starts it
+if (watchapp) {
     appManager::instance().set_focused_app(watchapp);
+}
+
+
+
+    
     
     //added dynamic throttle because display overperforms above target to ease cpu
 const TickType_t targetTicks = pdMS_TO_TICKS(1000 / v_env.fpsTarget);

@@ -23,13 +23,21 @@ idf_component_register(
         "os_code/middle_layer/input/input_handler.cpp"
         "os_code/middle_layer/input/inputProscessorTask/ipt_x.cpp"
         
+        #storage 
+        "hardware/drivers/sd_card/d_sdc.c" #this isn't an app! it's a driver!
+        
+        
         # OS code
         "os_code/core/rShell/enviroment/env_vars.c"
         "os_code/core/window_env/MWenv.cpp"
         "os_code/core/rShell/s_hell.cpp"
         
+        
         # Applications
         "os_code/applications/watch/MS_watchapp.cpp"
+        #"os_code/applications/fileviewwer/MS_file_viewwer.cpp"
+       # "os_code/applications/menu/app_menu.cpp"
+        
     
     INCLUDE_DIRS 
         "."

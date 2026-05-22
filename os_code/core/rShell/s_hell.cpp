@@ -5,7 +5,7 @@
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/middle_layer/input/input_devs_agg.hpp"
 #include "os_code/middle_layer/input/input_handler.hpp"
-
+#include <functional>
 
 #include "os_code/core/rShell/s_hell.hpp"
 #include "esp_log.h"
@@ -210,5 +210,62 @@ void appManager::route_input_to_focused(const InputEvent& ev) {
         focused_app->receive_event_input(&ev);
     } else {
         ESP_LOGW(TAG, "No focused app to receive input");
+    }
+}
+
+// In s_hell.cpp
+void appManager::register_app_type(const std::string& name, AppFactory factory) {
+    app_factories[name] = factory;
+}
+
+std::shared_ptr<AppBase> appManager::create_app(const std::string& name) {
+    auto it = app_factories.find(name);
+    if (it != app_factories.end()) {
+        auto app = it->second();
+        if (app) {
+            app->init();
+            ESP_LOGI(TAG, "Created app: %s", name.c_str());
+        }
+        return app;
+    }
+    ESP_LOGE(TAG, "Unknown app type: %s", name.c_str());
+    return nullptr;
+}
+
+// In appManager class:
+
+// Implement:
+std::shared_ptr<AppBase> appManager::launch_app(const std::string& name) {
+    auto app = create_app(name);
+    if (app) {
+        app->start_task();
+        set_focused_app(app);
+    }
+    return app;
+}
+
+void appManager::swap_to_app(std::shared_ptr<AppBase> new_app) {
+    if (focused_app) {
+        focused_app->stop_task();   // stop the current one
+    }
+    new_app->start_task();
+    set_focused_app(new_app);
+}
+
+void appManager::close_current_and_open(const std::string& name) {
+    ESP_LOGI(TAG, "Closing current and opening: %s", name.c_str());
+    
+    // Don't delete the old app yet, just stop it
+    auto old_app = focused_app;
+    
+    // Launch new app (creates, starts, focuses)
+    auto new_app = launch_app(name);
+    
+    if (new_app && old_app && old_app != new_app) {
+        // Optionally remove old app from vector if you want it destroyed
+        auto it = std::find(apps.begin(), apps.end(), old_app);
+        if (it != apps.end()) {
+            apps.erase(it);
+        }
     }
 }

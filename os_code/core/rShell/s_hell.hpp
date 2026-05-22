@@ -11,6 +11,24 @@
 #include "os_code/core/window_env/MWenv.hpp" //for added linkage to window manager singleton
 #include <vector>
 #include <memory>
+
+#include <functional>
+#include <unordered_map>
+#include <string>
+
+// Registration macro - must be used at file scope (outside any function)
+#define REGISTER_APP(CLASS, NAME, CONFIG_BUILDER) \
+    static bool _registered_##CLASS = []() { \
+        appManager::instance().register_app_type(NAME, []() { \
+            return std::make_shared<CLASS>(CONFIG_BUILDER()); \
+        }); \
+        return true; \
+    }()
+
+
+
+
+
 // -------------------------------------------------------------------
 // Application configuration bitmask (order fixed as requested)
 enum class AppCapability : uint32_t {
@@ -84,7 +102,7 @@ const char* get_app_name() const { return cfg_.name; } //getter because we love 
 
     // Window access
     
-    int appTickRateHZ; //tick rate of the app in hz
+    
     // Configuration queries
     AppCapabilities get_capabilities() const { return cfg_.capabilities; }
     bool has_capability(AppCapability cap) const {
@@ -94,6 +112,7 @@ const char* get_app_name() const { return cfg_.name; } //getter because we love 
     // Task control
     void start_task();
     void stop_task();
+    int appTickRateHZ; //tick rate of the app in hz
 
 protected:
     ApplicationConfig cfg_;
@@ -116,23 +135,35 @@ apps.push_back(std::make_shared<WatchApp>()); //then make a shared app and push 
 
 
 
+// /-------------------------------------------------------------------
+// appManager class
 class appManager {
-    public:
-        static appManager& instance();
+public:
+    using AppFactory = std::function<std::shared_ptr<AppBase>()>;
     
-        void register_app(const std::shared_ptr<AppBase>& app);
-        void draw_all();
-        void DestroyAllApps();
+    static appManager& instance();
     
-
-        void set_focused_app(std::shared_ptr<AppBase> app);
-        std::shared_ptr<AppBase> get_focused_app() const;
-        void route_input_to_focused(const InputEvent& ev);
-        
-
-
+    void register_app(const std::shared_ptr<AppBase>& app);
+    void draw_all();
+    void DestroyAllApps();
+    
+    void set_focused_app(std::shared_ptr<AppBase> app);
+    std::shared_ptr<AppBase> get_focused_app() const;
+    void route_input_to_focused(const InputEvent& ev);
+    
+    // App factory methods
+    void register_app_type(const std::string& name, AppFactory factory);
+    std::shared_ptr<AppBase> create_app(const std::string& name);
+    std::shared_ptr<AppBase> launch_app(const std::string& name);
+    void swap_to_app(std::shared_ptr<AppBase> new_app);
+    void close_current_and_open(const std::string& name);
+    
+    // Legacy swap methods
+    void swap_task(std::shared_ptr<AppBase> close, std::shared_ptr<AppBase> open);
+    void close_this_and_open_menu(std::shared_ptr<AppBase> self);
 
     private:
+           
         appManager();   // private constructor
         ~appManager();  // private destructor
     
@@ -140,8 +171,14 @@ class appManager {
         appManager& operator=(const appManager&) = delete;
         WindowManager& ref_wm; //blank reference, we attempt to fill on create of this object
         //create order MUST be windowmanager then appmanager on boot or you're fucked
-    
-    private:
+        
+        
         std::vector<std::shared_ptr<AppBase>> apps;
         std::shared_ptr<AppBase> focused_app; //so now we can have the app manager know what we're focused on
+        std::unordered_map<std::string, AppFactory> app_factories;
+    
     };
+
+
+
+

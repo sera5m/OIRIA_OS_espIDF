@@ -32,10 +32,13 @@ extern QueueHandle_t ProcInputQueTarget;
 // Enums
 enum class KeyAction : uint8_t {
     Tap,
+    Press = Tap,     // alias
     Hold,
+    Release,         // ← Add this
+    Repeat,          // ← Add this
     PositionDelta,
     Unknown
-};
+};//NOT SURE why i didnt put twist in here
 
 enum class HIDInputDeviceType : uint8_t {
     Button,

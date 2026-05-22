@@ -32,7 +32,7 @@
 #include "code_stuff/helperfunctions.hpp"
 
 static const char* TAG = "MyWatchApp";
-
+WatchMode CurrentWatchMode=WatchMode::WM_MAIN;
 // ===================================================================
 // Fast helpers (no snprintf)
 // ===================================================================
@@ -153,10 +153,84 @@ void MyWatchApp::tick_app(uint32_t delta_ms)
     }
 }
 
+
+
+
+
+
+
+
+
+
+
+void MyWatchApp::watchapp_back(){  // This is a FREE function (not a class member)
+    if (CurrentWatchMode == WM_MAIN) {
+        appManager::instance().close_current_and_open("MenuApp");
+    } else {
+        CurrentWatchMode = WM_MAIN;
+        on_draw();  // ❌ ERROR: on_draw() is a MEMBER function of MyWatchApp
+    }
+}
+
+
 void MyWatchApp::receive_event_input(const void* event)
 {
-    ESP_LOGI(TAG, "Watch received input event");
+    if (!event) return;
+    
+    const InputEvent* ev = static_cast<const InputEvent*>(event);
+    
+    ESP_LOGI(TAG, "Watch received input: key=0x%04X, action=%d", ev->key, (int)ev->action);
+    
+    switch (ev->action) {
+        case KeyAction::Tap:
+            ESP_LOGI(TAG, "Key tap: 0x%04X", ev->key);
+            switch (ev->key) {
+                case KEY_UP:
+                    ESP_LOGI(TAG, "UP pressed");
+                    break;
+                case KEY_DOWN:
+                    ESP_LOGI(TAG, "DOWN pressed");
+                    break;
+                case KEY_LEFT:
+                    ESP_LOGI(TAG, "LEFT pressed");
+                    break;
+                case KEY_RIGHT:
+                    ESP_LOGI(TAG, "RIGHT pressed");
+                    break;
+                case KEY_ENTER:
+                    ESP_LOGI(TAG, "ENTER pressed - switch to stopwatch?");
+                    CurrentWatchMode = WM_STOPWATCH;
+                    on_draw();
+                    break;
+                case KEY_BACK:
+                    ESP_LOGI(TAG, "BACK pressed");
+                    watchapp_back();
+                    break;
+            }
+            break;
+            
+        case KeyAction::PositionDelta:
+            ESP_LOGI(TAG, "Knob delta: %+d", ev->delta);
+            // Use knob for something - maybe brightness, volume, or scrolling
+            if (ev->delta > 0) {
+                // Rotated clockwise
+            } else if (ev->delta < 0) {
+                // Rotated counter-clockwise
+            }
+            break;
+            
+        case KeyAction::Hold:
+            ESP_LOGI(TAG, "Key hold: 0x%04X", ev->key);
+            break;
+            
+        default:
+            ESP_LOGW(TAG, "Unknown action: %d", (int)ev->action);
+            break;
+    }
 }
+
+
+//appManager::swap_task
 
 void MyWatchApp::suspend()
 {
