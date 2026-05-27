@@ -585,7 +585,7 @@ Window::Window(const WindowCfg& cfg, const std::string& initialContent)
     // Create small fixed-size tile (32×32 is perfect for repeating patterns)
     bgTile = std::make_shared<PsramBackgroundTile>(32, 32);
 
-    // ✅ FIXED: Calculate logicalW and logicalH using the same formula as WinDraw()
+   
     calculateLogicalDimensions();
 }
 
@@ -975,7 +975,7 @@ if (last_x != wi_sizing.Xpos || last_y != wi_sizing.Ypos) {
     physX = std::max(0, std::min(physX, v_env.clamped_screen_dim_w - physW));
     physY = std::max(0, std::min(physY, v_env.clamped_screen_dim_h - physH));
 
-    ESP_LOGI(TAG, "WinDraw rot=%d | logical(%dx%d) @ (%d,%d) → phys(%d,%d %dx%d)",rot, rawW, rawH, wi_sizing.Xpos, wi_sizing.Ypos, physX, physY, physW, physH);
+  //  ESP_LOGI(TAG, "WinDraw rot=%d | logical(%dx%d) @ (%d,%d) → phys(%d,%d %dx%d)",rot, rawW, rawH, wi_sizing.Xpos, wi_sizing.Ypos, physX, physY, physW, physH);
 
     // === 1. BACKGROUND ===
     uint16_t clipX = physX;
@@ -1142,7 +1142,7 @@ if (last_x != wi_sizing.Xpos || last_y != wi_sizing.Ypos) {
                        border_color,
                        8);  // segment_len (dash length)
         
-        ESP_LOGI(TAG, "highlighted this window! TenthTick=%d frame=%d", TenthTick, frame_counter);
+     //   ESP_LOGI(TAG, "highlighted this window! TenthTick=%d frame=%d", TenthTick, frame_counter);
     } else {
         // no highlight today
     }
@@ -1151,8 +1151,7 @@ if (last_x != wi_sizing.Xpos || last_y != wi_sizing.Ypos) {
     currentPhysX = physX;
     currentPhysY = physY;
     // NO TenthTick toggle here anymore — it's handled above every 10 frames
-    ESP_LOGI(TAG, "highlight=%d TenthTick=%d dirty=%d", 
-             window_highlighted, TenthTick, dirty);
+   // ESP_LOGI(TAG, "highlight=%d TenthTick=%d dirty=%d",  window_highlighted, TenthTick, dirty);
     dirty = false;
     lastUpdateTime = esp_timer_get_time();
 }
@@ -1302,10 +1301,7 @@ bool WindowManager::registerWindow(std::shared_ptr<Window> window) {
     }
     
     windows.push_back(window);
-    ESP_LOGI(TAG, "Window registered at pos(%d,%d) size(%dx%d), total: %d", 
-             window->wi_sizing.Xpos, window->wi_sizing.Ypos,
-             window->wi_sizing.Width, window->wi_sizing.Height,
-             (int)windows.size());
+   // ESP_LOGI(TAG, "Window registered at pos(%d,%d) size(%dx%d), total: %d", window->wi_sizing.Xpos, window->wi_sizing.Ypos, window->wi_sizing.Width, window->wi_sizing.Height,(int)windows.size());
     return true;
 }
 

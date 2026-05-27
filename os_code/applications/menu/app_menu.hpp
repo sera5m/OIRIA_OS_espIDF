@@ -30,12 +30,10 @@
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/core/rShell/s_hell.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
+#include "os_code/core/rShell/defaultAppList.hpp" 
 
 
-
-
-
-
+struct MenuItem;
 
 class app_launcher_menu : public AppBase {
 public:
@@ -53,5 +51,18 @@ public:
     void on_draw() override;
 
 private:
-    std::shared_ptr<Window> watch_window;
+    std::shared_ptr<Window> menu_window;
+    int selected_index = 0;
+    std::vector<MenuItem>* current_menu;  // Pointer to active menu
 };
+
+static ApplicationConfig make_menu_config() {
+    ApplicationConfig cfg;
+    cfg.capabilities = static_cast<uint32_t>(AppCapability::FULLSCREEN) |
+                       static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
+    cfg.stack_size_bytes = 8192;
+    cfg.priority = 5;
+    cfg.name = "MenuApp";
+    cfg.tick_rate_hz = 10;
+    return cfg;
+}

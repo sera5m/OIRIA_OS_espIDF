@@ -232,14 +232,21 @@ std::shared_ptr<AppBase> appManager::create_app(const std::string& name) {
     return nullptr;
 }
 
-// In appManager class:
 
-// Implement:
 std::shared_ptr<AppBase> appManager::launch_app(const std::string& name) {
+    // Check if already running
+    if (auto existing = get_app(name)) {
+        ESP_LOGI(TAG, "App %s already running, focusing it", name.c_str());
+        set_focused_app(existing);
+        return existing;
+    }
+    
     auto app = create_app(name);
     if (app) {
         app->start_task();
         set_focused_app(app);
+        running_apps[name] = app;  // Store weak_ptr
+        ESP_LOGI(TAG, "Launched app: %s", name.c_str());
     }
     return app;
 }
@@ -269,3 +276,23 @@ void appManager::close_current_and_open(const std::string& name) {
         }
     }
 }
+
+
+
+
+
+std::shared_ptr<AppBase> appManager::get_app(const std::string& name) {
+    auto it = running_apps.find(name);
+    if (it != running_apps.end()) {
+        auto app = it->second.lock();
+        if (app) return app;
+        running_apps.erase(it);  // Clean up dead weak_ptr
+    }
+    return nullptr;
+}
+
+bool appManager::is_app_running(const std::string& name) {
+    return get_app(name) != nullptr;
+}
+
+

@@ -168,7 +168,7 @@ void MyWatchApp::watchapp_back(){  // This is a FREE function (not a class membe
         appManager::instance().close_current_and_open("MenuApp");
     } else {
         CurrentWatchMode = WM_MAIN;
-        on_draw();  // ❌ ERROR: on_draw() is a MEMBER function of MyWatchApp
+        on_draw();  
     }
 }
 

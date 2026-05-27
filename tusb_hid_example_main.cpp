@@ -65,7 +65,7 @@
 
 #include  "os_code/applications/fileviewwer/MS_file_viewwer.hpp"
 #include "os_code/applications/watch/MS_watchapp.hpp"
-
+#include  "os_code/applications/menu/app_menu.hpp"
 
 
 // Known devices (fill in your full list)
@@ -474,16 +474,10 @@ void core2_push(void* pv) {
 }
 
 
-static ApplicationConfig make_watch_config() {
-    ApplicationConfig cfg;
-    cfg.capabilities = static_cast<uint32_t>(AppCapability::FULLSCREEN) |
-                       static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
-    cfg.stack_size_bytes = 8192;
-    cfg.priority = 5;
-    cfg.name = "WatchApp";
-    cfg.tick_rate_hz = 5;
-    return cfg;
-}
+
+
+
+
 
 // Registration at file scope (runs before main)
 REGISTER_APP(MyWatchApp, "WatchApp", make_watch_config);
@@ -556,15 +550,20 @@ esp_task_wdt_config_t wdt_config = {
 };
 esp_task_wdt_reconfigure(&wdt_config);
 
-//create new tasks for proscessing loop
+//create new tasks for proscessing loop-needed for video
 xTaskCreatePinnedToCore(core1_createData, "core1", 8192, NULL, 5, &core1TaskHandle, 1);
 xTaskCreatePinnedToCore(core2_push,       "core2", 8192, NULL, 5, &core2TaskHandle, 0);
 
+
+// Register MenuApp
+
+REGISTER_APP(app_launcher_menu, "MenuApp", make_menu_config); //don't worry, we declared this in the menu app
 
 
 
 
 vTaskDelete(NULL); //KILL YOURSELF, BOOTLOADER! 
+
 //you need to kill yourself NOW,bootloader, your life is as useless as a summer ant.......
 /*
 you serve ONE purpose
@@ -599,6 +598,13 @@ you serve ONE purpose
 	
     vTaskDelayUntil(&lastWakeTime, targetTicks);
 }*/
+
+
+
+
+
+
+
 
 }
 

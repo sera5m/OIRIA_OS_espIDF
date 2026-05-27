@@ -26,6 +26,9 @@ idf_component_register(
         #storage 
         "hardware/drivers/sd_card/d_sdc.c" #this isn't an app! it's a driver!
         
+        #program loading and storage
+        "os_code/core/rShell/defaultAppList.hpp" 
+        
         
         # OS code
         "os_code/core/rShell/enviroment/env_vars.c"
@@ -36,7 +39,7 @@ idf_component_register(
         # Applications
         "os_code/applications/watch/MS_watchapp.cpp"
         #"os_code/applications/fileviewwer/MS_file_viewwer.cpp"
-       # "os_code/applications/menu/app_menu.cpp"
+        "os_code/applications/menu/app_menu.cpp"
         
     
     INCLUDE_DIRS 

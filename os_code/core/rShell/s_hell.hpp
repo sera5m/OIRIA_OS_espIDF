@@ -161,7 +161,10 @@ public:
     // Legacy swap methods
     void swap_task(std::shared_ptr<AppBase> close, std::shared_ptr<AppBase> open);
     void close_this_and_open_menu(std::shared_ptr<AppBase> self);
+    std::shared_ptr<AppBase> get_app(const std::string& name);
+    bool is_app_running(const std::string& name);
 
+    
     private:
            
         appManager();   // private constructor
@@ -176,7 +179,7 @@ public:
         std::vector<std::shared_ptr<AppBase>> apps;
         std::shared_ptr<AppBase> focused_app; //so now we can have the app manager know what we're focused on
         std::unordered_map<std::string, AppFactory> app_factories;
-    
+        std::unordered_map<std::string, std::weak_ptr<AppBase>> running_apps; 
     };
 
 

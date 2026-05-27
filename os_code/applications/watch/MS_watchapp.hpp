@@ -73,3 +73,15 @@ public:
 private:
     std::shared_ptr<Window> watch_window;
 };
+
+
+static ApplicationConfig make_watch_config() {
+    ApplicationConfig cfg;
+    cfg.capabilities = static_cast<uint32_t>(AppCapability::FULLSCREEN) |
+                       static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
+    cfg.stack_size_bytes = 8192;
+    cfg.priority = 5;
+    cfg.name = "WatchApp";
+    cfg.tick_rate_hz = 5;
+    return cfg;
+}
