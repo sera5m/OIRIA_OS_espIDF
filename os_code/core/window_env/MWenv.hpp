@@ -551,6 +551,7 @@ uint16_t currentPhysY = 0;
             void UpdateAll(bool force = false, bool ToolbarUpdate = true, bool repositionWindows = true, bool draw_toolbar_ontop = true);
             bool PruneDeadWindows();   
             bool registerWindow(std::shared_ptr<Window> window);
+            bool unregisterWindow(std::shared_ptr<Window> window);
             void ClampToArea(s_bounds_16u bounds, bool is_universal); 
             //change clamping behavior for registering and drawing windows
             void ClampToArea(s_bounds_16u bounds, std::shared_ptr<Window> target); //clamp this window to this target

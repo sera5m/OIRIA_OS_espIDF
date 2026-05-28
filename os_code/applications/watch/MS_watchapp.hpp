@@ -82,6 +82,6 @@ static ApplicationConfig make_watch_config() {
     cfg.stack_size_bytes = 8192;
     cfg.priority = 5;
     cfg.name = "WatchApp";
-    cfg.tick_rate_hz = 5;
+    cfg.tick_rate_hz = 20;
     return cfg;
 }

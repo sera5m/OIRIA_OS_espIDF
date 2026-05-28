@@ -1305,6 +1305,36 @@ bool WindowManager::registerWindow(std::shared_ptr<Window> window) {
     return true;
 }
 
+bool WindowManager::unregisterWindow(std::shared_ptr<Window> window) {
+    if (!window) {
+        ESP_LOGE(TAG, "unregisterWindow: window is null!");
+        return false;
+    }
+    
+    // Find the window in the vector
+    auto it = std::find(windows.begin(), windows.end(), window);
+    if (it == windows.end()) {
+        ESP_LOGW(TAG, "unregisterWindow: window '%s' not found in registry", 
+                 window->Currentcfg.name);
+        return false;
+    }
+    
+    // Mark window as hidden before removal
+    window->IsWindowShown = false;
+    window->dirty = true;
+    
+    // Remove from vector
+    windows.erase(it);
+    
+    ESP_LOGI(TAG, "Window '%s' unregistered, remaining windows: %d", 
+             window->Currentcfg.name, (int)windows.size());
+    
+    // Force a full screen redraw since a window was removed
+    fb_clear(0x0000);  // Clear screen to background color
+    
+    return true;
+}
+
 bool WindowManager::PruneDeadWindows() {
     size_t before = windows.size();
     windows.erase(std::remove_if(windows.begin(), windows.end(),
