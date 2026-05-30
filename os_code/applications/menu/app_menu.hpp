@@ -63,6 +63,6 @@ static ApplicationConfig make_menu_config() {
     cfg.stack_size_bytes = 8192;
     cfg.priority = 5;
     cfg.name = "MenuApp";
-    cfg.tick_rate_hz = 10;
+    cfg.tick_rate_hz = 5;
     return cfg;
 }

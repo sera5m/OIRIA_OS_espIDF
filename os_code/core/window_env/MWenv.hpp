@@ -552,9 +552,10 @@ uint16_t currentPhysY = 0;
             bool PruneDeadWindows();   
             bool registerWindow(std::shared_ptr<Window> window);
             bool unregisterWindow(std::shared_ptr<Window> window);
-            void ClampToArea(s_bounds_16u bounds, bool is_universal); 
+            void ClampWinToArea(s_bounds_16u bounds, std::shared_ptr<Window> target);
+            void ClampToArea(s_bounds_16u bounds, std::shared_ptr<Window> window, bool is_universal);
             //change clamping behavior for registering and drawing windows
-            void ClampToArea(s_bounds_16u bounds, std::shared_ptr<Window> target); //clamp this window to this target
+            
                 
             // prevent copying
             WindowManager(const WindowManager&) = delete;
@@ -578,8 +579,22 @@ uint16_t currentPhysY = 0;
               uint16_t GetAvailableWidth();
               uint16_t GetAvailableHeight();
               uint16_t GetToolbarOffset();  // offset from top/left where windows should start  
+
+              //fullscreen specific state
+              void make_window_fullscreen(std::shared_ptr<Window> win);
+                void restore_from_fullscreen();
+                                void ResetTheRepositioning();
         
               private:
+    // Fullscreen state cache
+    struct FullscreenState {
+        bool was_toolbar_active = true;
+        uint16_t old_clamped_w = 0;
+        uint16_t old_clamped_h = 0;
+        uint16_t old_toolbar_offset = 0;
+        std::shared_ptr<Window> fullscreen_win = nullptr;
+    };
+    FullscreenState fs_state;
               bool windows_repositioned = false;
               WindowManager(); 
               ~WindowManager();

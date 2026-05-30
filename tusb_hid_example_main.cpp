@@ -450,7 +450,9 @@ void core1_createData(void* pv) {
         // Draw to framebuffer (which points to BACK buffer)
         update_display_time(&v_env.displayTime);
         esp_task_wdt_reset(); 
-        WindowManager::getInstance().UpdateAll(0,1,1,1);
+        //WindowManager::getInstance().UpdateAll(0,1,1,1); //no, this is bad
+        // Use false for repositioning when in fullscreen
+WindowManager::getInstance().UpdateAll(false, true, true, true);
         esp_task_wdt_reset(); 
         // After drawing, swap so this frame becomes the FRONT buffer
         framebuffer_swap();

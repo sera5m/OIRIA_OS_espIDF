@@ -103,8 +103,11 @@ void MyWatchApp::on_start()
 
 void MyWatchApp::on_stop()
 {
-    ESP_LOGI(TAG, "WatchApp stopped");
-    if (watch_window) watch_window.reset();
+    ESP_LOGI(TAG, "WatchApp stopped - full cleanup");
+    if (watch_window) {
+        WindowManager::getInstance().unregisterWindow(watch_window);
+        watch_window.reset();
+    }
 }
 
 void MyWatchApp::on_pause()  { ESP_LOGI(TAG, "WatchApp paused"); }

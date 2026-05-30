@@ -395,8 +395,8 @@ fb_shape_t* Canvas::AddShape(fb_shape_type type, s_bounds_16u bounds,
     
     // Bounds check - ensure shape is within canvas
     s_bounds_16u clampedBounds = bounds;
-    if (clampedBounds.x < 0) {
-        clampedBounds.w += clampedBounds.x;
+    if (clampedBounds.x < 0) {  // or just remove if x is unsigned. nah
+        clampedBounds.w += clampedBounds.x;  // this line is also suspicious
         clampedBounds.x = 0;
     }
     if (clampedBounds.y < 0) {
@@ -688,10 +688,7 @@ int16_t x = parse_int(inside.substr(4, comma - 4));
 int16_t y = parse_int(inside.substr(comma + 1));
 */
 // Helper: parse integer from stdpsram::String substring (no exceptions, fallback to default)
-// MWenv.cpp – add these right after includes or before tokenize
 
-// MWenv.cpp
-// Add this block right after your includes (or before tokenize)
 
 // Anonymous namespace = visible only in this .cpp file
 
@@ -774,38 +771,36 @@ uint16_t safe_parse_color(std::string_view str, uint16_t default_val = 0xFFFF) {
 
 // ====================== IMPROVED TOKENIZER ======================
 
-stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& input) {
+stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& input) 
+{
     stdpsram::Vector<TextChunk> chunks;
     if (input.empty()) {
         return chunks;
     }
 
-    std::string_view s(input.c_str(), input.length());  // zero-copy view
+    std::string_view s(input.c_str(), input.length());
     stdpsram::String text_buffer;
     text_buffer.reserve((input.length() + 1) / 2 + 32);
 
     auto flush = [&]() {
         if (!text_buffer.empty()) {
             chunks.emplace_back(TextChunk(std::move(text_buffer)));
-            text_buffer.clear();   // note, moved-from string is now empty again
+            text_buffer.clear();
         }
     };
 
     size_t i = 0;
     while (i < s.length()) {
-        // Fast path: normal character
         if (s[i] != '<' || i + 1 >= s.length() || s[i + 1] != '|') {
             text_buffer += s[i];
             ++i;
             continue;
         }
 
-        // Found potential tag: "<|"
         flush();
 
         size_t end = s.find("|>", i + 2);
         if (end == std::string_view::npos) {
-            // Unclosed tag → treat rest as text
             text_buffer = s.substr(i);
             break;
         }
@@ -815,52 +810,41 @@ stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& input) {
 
         if (inside.empty()) continue;
 
-        // ───── Short toggle tags ─────
+        // Short toggle tags
         if (inside.length() <= 2) {
             bool is_off = (inside.length() == 2 && inside[0] == '/');
             char first = is_off ? inside[1] : inside[0];
 
             switch (first) {
-                case 'n':
-                    if (!is_off) chunks.emplace_back(TagType::LineBreak);
-                    break;
-
-                case 'u':
-                    chunks.emplace_back(is_off ? TagType::UnderlineOff : TagType::UnderlineToggle);
-                    break;
-
-                case 's':
-                    chunks.emplace_back(is_off ? TagType::StrikethroughOff : TagType::StrikethroughToggle);
-                    break;
-
-                case 'b':
-                    chunks.emplace_back(is_off ? TagType::BoldOff : TagType::BoldToggle);
-                    break;
-
-                case 'i':
-                    chunks.emplace_back(is_off ? TagType::ItalicOff : TagType::ItalicToggle);
-                    break;
-
-                default:
-                    // Unknown short tag → treat as literal text
-                    text_buffer.append(inside.data(), inside.size());
-                    break;
+                case 'n': if (!is_off) chunks.emplace_back(TagType::LineBreak); break;
+                case 'u': chunks.emplace_back(is_off ? TagType::UnderlineOff : TagType::UnderlineToggle); break;
+                case 's': chunks.emplace_back(is_off ? TagType::StrikethroughOff : TagType::StrikethroughToggle); break;
+                case 'b': chunks.emplace_back(is_off ? TagType::BoldOff : TagType::BoldToggle); break;
+                case 'i': chunks.emplace_back(is_off ? TagType::ItalicOff : TagType::ItalicToggle); break;
+                default: text_buffer.append(inside.data(), inside.size()); break;
             }
             continue;
         }
 
-        // ───── Value tags ─────
-        if (inside.starts_with("color=")) {
+        // Value tags - safer parsing
+        if (inside.starts_with("size=")) {
+            auto val = inside.substr(5);
+            int sz = safe_parse_int(val, 1);
+            if (sz >= 1 && sz <= 16) {
+                chunks.emplace_back(TagType::SizeChange, SizeTag{static_cast<uint8_t>(sz)});
+            } else {
+                text_buffer.append(inside.data(), inside.size());
+            }
+        }
+        else if (inside.starts_with("color=")) {
             auto val = inside.substr(6);
             uint16_t col = safe_parse_color(val);
             chunks.emplace_back(TagType::ColorChange, ColorTag{col});
         }
-        else if (inside.starts_with("size=")) {
-            auto val = inside.substr(5);
-            int sz = safe_parse_int(val, 1);
-            if (sz >= 1 && sz <= 255) {
-                chunks.emplace_back(TagType::SizeChange, SizeTag{static_cast<uint8_t>(sz)});
-            }
+        else if (inside.starts_with("hl=")) {
+            auto val = inside.substr(3);
+            uint16_t col = safe_parse_color(val, 0xFFFF);
+            chunks.emplace_back(TagType::HighlightChange, HighlighterTag{col, true});
         }
         else if (inside.starts_with("pos=")) {
             size_t comma = inside.find(',', 4);
@@ -870,15 +854,11 @@ stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& input) {
                 int16_t x = safe_parse_int(x_str);
                 int16_t y = safe_parse_int(y_str);
                 chunks.emplace_back(TagType::PosChange, PosTag{x, y});
+            } else {
+                text_buffer.append(inside.data(), inside.size());
             }
         }
-        else if (inside.starts_with("hl=")) {
-            auto val = inside.substr(3);
-            uint16_t col = safe_parse_color(val, 0xFFFF);
-            chunks.emplace_back(TagType::HighlightChange, HighlighterTag{col, true});
-        }
         else {
-            // Unknown tag → treat as literal text
             text_buffer.append(inside.data(), inside.size());
         }
     }
@@ -1096,17 +1076,25 @@ if (last_x != wi_sizing.Xpos || last_y != wi_sizing.Ypos) {
             curLY = p.y;
             break;
         }
-        case TagType::ColorChange:
-            Tstate.color = std::get<ColorTag>(chunk.content).value;
-            break;
         case TagType::SizeChange: {
-            int s = std::get<SizeTag>(chunk.content).value;
-            if (s >= 1 && s <= 16) Tstate.size = s;
+            if (auto* p = std::get_if<SizeTag>(&chunk.content)) {
+                int s = p->value;
+                if (s >= 1 && s <= 16) Tstate.size = s;
+            }
             break;
         }
+        
+        case TagType::ColorChange: {
+            if (auto* p = std::get_if<ColorTag>(&chunk.content)) {
+                Tstate.color = p->value;
+            }
+            break;
+        }
+        
         case TagType::HighlightChange: {
-            auto h = std::get<HighlighterTag>(chunk.content);
-            Tstate.highlight_bg = h.enabled ? h.color : 0;
+            if (auto* p = std::get_if<HighlighterTag>(&chunk.content)) {
+                Tstate.highlight_bg = p->enabled ? p->color : 0;
+            }
             break;
         }
         case TagType::UnderlineToggle:    Tstate.underline = true; break;
@@ -1349,35 +1337,35 @@ bool WindowManager::PruneDeadWindows() {
     return before != after;
 }
 
-void WindowManager::ClampToArea(s_bounds_16u bounds, bool is_universal) {
-    // Implementation depends on what s_bounds_16u is
-    // For now, just log that it's called
-    ESP_LOGI(TAG, "ClampToArea called (bounds: x=%d, y=%d, w=%d, h=%d, universal=%d)",
-             bounds.x, bounds.y, bounds.w, bounds.h, is_universal);
-    
-    if (is_universal) {
-        // Apply to all windows
-        for (auto& win : windows) {
-            if (win) {
-                if (win->wi_sizing.Xpos < bounds.x) 
-                    win->wi_sizing.Xpos = bounds.x;
-                if (win->wi_sizing.Ypos < bounds.y) 
-                    win->wi_sizing.Ypos = bounds.y;
-                // etc...
-            }
-        }
+void WindowManager::ClampWinToArea(s_bounds_16u bounds, std::shared_ptr<Window> target) {
+    if (!target) return;
+
+    // Simple clamping
+    if (target->wi_sizing.Xpos < bounds.x) target->wi_sizing.Xpos = bounds.x;
+    if (target->wi_sizing.Ypos < bounds.y) target->wi_sizing.Ypos = bounds.y;
+    if (target->wi_sizing.Xpos + target->wi_sizing.Width > bounds.x + bounds.w) {
+        target->wi_sizing.Width = (bounds.x + bounds.w) - target->wi_sizing.Xpos;
     }
+    if (target->wi_sizing.Ypos + target->wi_sizing.Height > bounds.y + bounds.h) {
+        target->wi_sizing.Height = (bounds.y + bounds.h) - target->wi_sizing.Ypos;
+    }
+
+    target->dirty = true;
 }
 
-void WindowManager::ClampToArea(s_bounds_16u bounds, std::shared_ptr<Window> target) {
-    if (!target) return;
-    
-    ESP_LOGI(TAG, "ClampToArea called for specific window");
-    if (target->wi_sizing.Xpos < bounds.x) 
-        target->wi_sizing.Xpos = bounds.x;
-    if (target->wi_sizing.Ypos < bounds.y) 
-        target->wi_sizing.Ypos = bounds.y;
-    // Add more clamping logic as needed
+
+void WindowManager::ClampToArea(s_bounds_16u bounds, std::shared_ptr<Window> window, bool is_universal) {
+    if (is_universal) {
+        for (auto& win : windows) {
+            if (!win) continue;
+            ClampWinToArea(bounds, win);
+        }
+    }else{
+        //just this one
+        ClampWinToArea(bounds, window); 
+//you were in the middle of fixing the clamp to area bug to avoid oscilation and repositioning of the window
+
+    }
 }
 
 
@@ -1424,20 +1412,7 @@ uint16_t WindowManager::GetToolbarOffset() {
         default: return 0;
     }
 }
-/*
-void WindowManager::SetToolbarActive(bool on) {
-    m_toolbarConfig.showToolbar = on;
-    tb_dirty = true;
-    
-    // Force all windows to recalibrate their positions
-    for (auto& win : windows) {
-        if (win) {
-            win->dirty = true;
-        }
-    }
-}
-*/
-//disabled that because we changed how this fucker operates
+
 
 void WindowManager::SetToolbarActive(bool on) {
     m_toolbarConfig.showToolbar = on;
@@ -1668,7 +1643,81 @@ void WindowManager::SortWindowsByZOrder() {
 }
 
 
+// ====================== FULLSCREEN MANAGEMENT ======================
 
+void WindowManager::make_window_fullscreen(std::shared_ptr<Window> win)
+{
+    if (!win) return;
+
+    ESP_LOGI(TAG, "=== FULLSCREEN LOCK ENGAGED for '%s' ===", win->Currentcfg.name);
+
+    // Cache state
+    fs_state.was_toolbar_active = m_toolbarConfig.showToolbar;
+    fs_state.old_clamped_w = v_env.clamped_screen_dim_w;
+    fs_state.old_clamped_h = v_env.clamped_screen_dim_h;
+    fs_state.fullscreen_win = win;
+
+    // Kill toolbar!
+    SetToolbarActive(false);
+
+    v_env.clamped_screen_dim_w = v_env.screen_dim_w;
+    v_env.clamped_screen_dim_h = v_env.screen_dim_h;
+
+    // Force this window to full control
+    win->set_layer(255);
+    win->set_position(0, 0, false);
+    win->set_size(v_env.screen_dim_w, v_env.screen_dim_h);
+    win->Initialcfg.borderless = true;
+    win->Currentcfg.borderless = true;
+    win->dirty = true;
+
+    // **Aggressive cleanup**
+    PruneDeadWindows();
+    windows_repositioned = true;
+    ResetRepositioning();
+
+    // Remove all other windows temporarily (except this one)
+    for (auto it = windows.begin(); it != windows.end(); ) {
+        if (*it && *it != win) {
+            (*it)->IsWindowShown = false;
+            it = windows.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    RepositionAllWindows();   // should be harmless now
+    win->WinDraw();
+
+    ESP_LOGI(TAG, "Fullscreen lock active. Other windows pruned.");
+}
+
+void WindowManager::restore_from_fullscreen()
+{
+    if (!fs_state.fullscreen_win) return;
+
+    ESP_LOGI(TAG, "Restoring from fullscreen");
+
+    v_env.clamped_screen_dim_w = fs_state.old_clamped_w;
+    v_env.clamped_screen_dim_h = fs_state.old_clamped_h;
+
+    SetToolbarActive(fs_state.was_toolbar_active);
+
+    if (fs_state.fullscreen_win) {
+        fs_state.fullscreen_win->set_layer(0);
+        fs_state.fullscreen_win->dirty = true;
+    }
+
+    fs_state.fullscreen_win.reset();
+    windows_repositioned = false;   // re-enable normal behavior
+    ResetRepositioning();
+    RepositionAllWindows();
+}
+
+void WindowManager::ResetTheRepositioning() {
+    windows_repositioned = false;
+    ResetRepositioning();  // your existing one
+}
 
 void WindowManager::UpdateToolbar() {
     if (!m_toolbarConfig.showToolbar) return;
@@ -1738,23 +1787,26 @@ void WindowManager::DebugPrintWindowDOM() const {
 
 // Update UpdateAll to handle toolbar
 // Update UpdateAll to handle toolbar with cooperative yielding
-void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWindows, bool draw_toolbar_ontop) {
-    // Only reposition on first run after toolbar change
-    
-        static uint32_t last_update_ms = 0;
-        uint32_t now_ms = esp_timer_get_time() / 1000;
-        const uint32_t min_frame_interval_ms = 22;  // 45 FPS max
-        
-        if (!force && (now_ms - last_update_ms) < min_frame_interval_ms) {
-            return;  // Too soon, skip this frame
-        }
-        last_update_ms = now_ms;
+void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWindows, bool draw_toolbar_ontop) 
+{
+    static uint32_t last_update_ms = 0;
+    uint32_t now_ms = esp_timer_get_time() / 1000;
+    const uint32_t min_frame_interval_ms = 22;
 
-    if (repositionWindows && !windows_repositioned) {
-        RepositionAllWindows();
-        tb_dirty = true;  
+    if (!force && (now_ms - last_update_ms) < min_frame_interval_ms) {
+        return;
     }
-    
+    last_update_ms = now_ms;
+
+    // === CRITICAL: Skip repositioning if we are in fullscreen mode ===
+
+    bool is_fullscreen_active = (fs_state.fullscreen_win != nullptr);
+
+    if (repositionWindows && !windows_repositioned && !is_fullscreen_active) {
+        RepositionAllWindows();
+        tb_dirty = true;
+    }
+
     // Remove dead windows
     for (auto it = windows.begin(); it != windows.end(); ) {
         if (!*it || !(*it)->IsWindowShown) {
@@ -1763,42 +1815,41 @@ void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWin
         }
         ++it;
     }
-    
-    // Sort by layer
+
+    // Sort by layer (higher number = drawn later = on top)
     std::sort(windows.begin(), windows.end(),
         [](const std::shared_ptr<Window>& a, const std::shared_ptr<Window>& b) {
             if (!a) return false;
             if (!b) return true;
             return a->Initialcfg.Layer < b->Initialcfg.Layer;
         });
-    
-    // Draw toolbar BEHIND windows (if requested)
+
+    // Draw toolbar BEHIND windows
     if (!draw_toolbar_ontop && ToolbarUpdate && m_toolbarConfig.showToolbar) {
         DrawToolBar();
-        vTaskDelay(pdMS_TO_TICKS(1));  // ✅ Yield after toolbar
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
-    
-    // Draw all windows - yield between each window
+
+    // Draw windows
     int window_count = 0;
     for (auto& win : windows) {
         if (!win) continue;
-        
+
         if (force) win->enable_refresh_override = true;
-        esp_task_wdt_reset();  // god please stop crashing
+        
+        esp_task_wdt_reset();
         win->WinDraw();
         esp_task_wdt_reset();
-        // ✅ Yield every window to let idle task breathe
+
         window_count++;
-        if ((window_count & 0x03) == 0) {  // Every 4 windows
-            vTaskDelay(pdMS_TO_TICKS(1));  // 1ms yield
+        if ((window_count & 0x03) == 0) {
+            vTaskDelay(pdMS_TO_TICKS(1));
         }
-        
-        esp_task_wdt_reset();  // Keep watchdog happy too
     }
-    
-    // Draw toolbar ON TOP (if requested)
+
+    // Draw toolbar ON TOP
     if (draw_toolbar_ontop && ToolbarUpdate && m_toolbarConfig.showToolbar) {
         DrawToolBar();
-        vTaskDelay(pdMS_TO_TICKS(1)); //just wait
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }

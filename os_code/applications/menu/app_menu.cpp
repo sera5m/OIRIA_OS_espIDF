@@ -71,6 +71,7 @@ static std::vector<MenuItem> utils_menu = {
 app_launcher_menu::app_launcher_menu(const ApplicationConfig& cfg)
  : AppBase(cfg), selected_index(0), current_menu(&main_menu)
 {
+    
     appTickRateHZ = 5;
 }
 
@@ -80,15 +81,15 @@ void app_launcher_menu::on_start()
 
     // Disable toolbar + reset positioning fights
     WindowManager::getInstance().SetToolbarActive(false);
-    // WindowManager::getInstance().ResetRepositioning();  // uncomment if this function exists
+    
 
     WindowCfg cfg{
         .Posx = 0,
         .Posy = 0,
-        .Layer = 0,                    // highest layer 0
+        .Layer = 0,                    // the highest layer is 0
         .renderPriority = 0,
-        .win_width = static_cast<uint16_t>(v_env.screen_dim_w),
-        .win_height = static_cast<uint16_t>(v_env.screen_dim_h),
+        .win_width = static_cast<uint16_t>((v_env.screen_dim_w-4)),
+        .win_height = static_cast<uint16_t>((v_env.screen_dim_h-4)),
         .win_rotation = 1,
         .AutoAlignment = false,
         .WrapText = true,
@@ -105,23 +106,23 @@ void app_launcher_menu::on_start()
         .UpdateRate = 1.0f
     };
 
-    menu_window = std::make_shared<Window>(cfg, "");
+    menu_window = std::make_shared<Window>(cfg, "menu_window");
 
     WindowManager::getInstance().registerWindow(menu_window);
     bind_main_window(menu_window);
 
+    WindowManager::getInstance().make_window_fullscreen(menu_window);
+
     selected_index = 0;
     current_menu = &main_menu;
-
     on_draw();
 }
 
 void app_launcher_menu::on_stop()
 {
-    ESP_LOGI(TAG, "app_launcher_menu stopped - cleaning up");
+    ESP_LOGI(TAG, "app_launcher_menu stopped");
 
-    WindowManager::getInstance().SetToolbarActive(true);
-    // WindowManager::getInstance().ResetRepositioning();
+    WindowManager::getInstance().restore_from_fullscreen();
 
     if (menu_window) {
         WindowManager::getInstance().unregisterWindow(menu_window);
@@ -141,11 +142,11 @@ void app_launcher_menu::on_draw() {
     std::string menu_text = "<|size=2|><|color=0xFFFF|>";
     
     if (current_menu == &main_menu) {
-        menu_text += "=== MAIN MENU ===<|n|><|n|>";
+        menu_text += "--- MAIN MENU ---<|n|><|n|>";
     } else if (current_menu == &games_menu) {
-        menu_text += "=== GAMES ===<|n|><|n|>";
+        menu_text += "--- GAMES ---<|n|><|n|>";
     } else if (current_menu == &utils_menu) {
-        menu_text += "=== UTILITIES ===<|n|><|n|>";
+        menu_text += "--- UTILITIES ---<|n|><|n|>";
     }
     
     int start_idx = 0;
@@ -158,29 +159,28 @@ void app_launcher_menu::on_draw() {
         const auto& item = (*current_menu)[i];
         
         if (i == selected_index) {
-            menu_text += "<|hl=0xFFFF|><|color=0x0000|> -> " + item.name + "<|/hl|><|color=0xFFFF|><|n|>";
+            menu_text += "<|color=0xFDFC|> > " + item.name + " <|/hl|><|color=0xFFFF|><|n|>";
         } else {
             menu_text += "   " + item.name;
-            if (item.is_submenu) menu_text += " →";
+            if (item.is_submenu) menu_text += " ->";
             menu_text += "<|n|>";
         }
     }
     
     menu_text += "<|n|><|size=1|><|color=0xFDFC|>";
-    menu_text += "▲/▼=Navigate  ENTER=Select  BACK=Exit";
+    menu_text += "^/v=Navigate  ENTER=Select  BACK=Exit";
     
     menu_window->SetText(menu_text);
     menu_window->dirty = true;
     menu_window->WinDraw();
     display_framebuffer(true, false);
 }
-
 void app_launcher_menu::tick_app(uint32_t delta_ms)
 {
     static uint32_t accumulator = 0;
     accumulator += delta_ms;
 
-    if (accumulator >= 100) {
+    if (accumulator >= 50) {           // faster update for menu
         if (menu_window && menu_window->dirty) {
             on_draw();
         }
@@ -194,7 +194,7 @@ void app_launcher_menu::receive_event_input(const void* event)
     
     const InputEvent* ev = static_cast<const InputEvent*>(event);
     
-    ESP_LOGI(TAG, "Menu received input: key=0x%04X action=%d", ev->key, (int)ev->action);  // debug
+    ESP_LOGI(TAG, "Menu received: key=0x%04X action=%d", ev->key, (int)ev->action);
 
     if (ev->action == KeyAction::Tap) {
         switch (ev->key) {
@@ -206,7 +206,7 @@ void app_launcher_menu::receive_event_input(const void* event)
             case KEY_DOWN:
                 selected_index = (selected_index + 1) % current_menu->size();
                 menu_window->dirty = true;
-                break;
+                 break;
                 
             case KEY_ENTER: {
                 if (selected_index < 0 || selected_index >= current_menu->size()) break;
@@ -215,18 +215,16 @@ void app_launcher_menu::receive_event_input(const void* event)
                 ESP_LOGI(TAG, "Selected: %s (submenu=%d)", item.name.c_str(), item.is_submenu);
                 
                 if (item.is_submenu) {
-                    if (item.name == "Games") {
-                        current_menu = &games_menu;
-                    } else if (item.name == "Utilities") {
-                        current_menu = &utils_menu;
-                    } else if (item.name == "<- Back") {
-                        current_menu = &main_menu;
-                    }
+                    if (item.name == "Games") current_menu = &games_menu;
+                    else if (item.name == "Utilities") current_menu = &utils_menu;
+                    else if (item.name == "<- Back") current_menu = &main_menu;
+                    
                     selected_index = 0;
                     menu_window->dirty = true;
+                    on_draw();
                 } else if (!item.app_name.empty()) {
                     ESP_LOGI(TAG, "Launching: %s", item.app_name.c_str());
-                    force_close();                    // Clean close menu first
+                    force_close();
                     AppRegistry::instance().open_app(item.app_name);
                 }
                 break;
@@ -242,13 +240,13 @@ void app_launcher_menu::receive_event_input(const void* event)
 }
 
 void app_launcher_menu::suspend()  { ESP_LOGI(TAG, "menu suspending"); }
+
 void app_launcher_menu::force_close()
 {
     ESP_LOGI(TAG, "force close");
     on_stop();
     stop_task();
 }
-
 // Register
 REGISTER_BUILTIN_APP(app_launcher_menu, "MenuApp", "App Launcher", "Launch other apps",
     static_cast<uint32_t>(AppCapability::FULLSCREEN) | 
