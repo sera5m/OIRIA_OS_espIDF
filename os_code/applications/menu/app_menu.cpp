@@ -118,15 +118,15 @@ void app_launcher_menu::on_start()
     on_draw();
 }
 
-void app_launcher_menu::on_stop()
-{
-    ESP_LOGI(TAG, "app_launcher_menu stopped");
 
+void app_launcher_menu::on_stop() {
+    ESP_LOGI(TAG, "app_launcher_menu stopped");
     WindowManager::getInstance().restore_from_fullscreen();
 
     if (menu_window) {
+        // No need for manual ClearText() anymore — destructor will do it
         WindowManager::getInstance().unregisterWindow(menu_window);
-        menu_window.reset();
+        menu_window.reset();   // This triggers ~Window()
     }
 
     selected_index = 0;
@@ -159,10 +159,10 @@ void app_launcher_menu::on_draw() {
         const auto& item = (*current_menu)[i];
         
         if (i == selected_index) {
-            menu_text += "<|color=0xFDFC|> > " + item.name + " <|/hl|><|color=0xFFFF|><|n|>";
+            menu_text += "<|color=0xFDFC|>" + item.name + " <|color=0xFFFF|><|n|>";
         } else {
             menu_text += "   " + item.name;
-            if (item.is_submenu) menu_text += " ->";
+            if (item.is_submenu) menu_text += "-";
             menu_text += "<|n|>";
         }
     }
@@ -175,17 +175,30 @@ void app_launcher_menu::on_draw() {
     menu_window->WinDraw();
     display_framebuffer(true, false);
 }
-void app_launcher_menu::tick_app(uint32_t delta_ms)
-{
+
+void app_launcher_menu::tick_app(uint32_t delta_ms) {
     static uint32_t accumulator = 0;
     accumulator += delta_ms;
 
-    if (accumulator >= 50) {           // faster update for menu
-        if (menu_window && menu_window->dirty) {
-            on_draw();
-        }
+    if (accumulator >= 100) {        // slower for menus
+        on_draw();
         accumulator = 0;
     }
+}
+
+void app_launcher_menu::force_tick(){
+    //if (!is_running_) return;   // safety
+
+    uint32_t current_time = (uint32_t)(esp_timer_get_time() / 1000);  // current ms
+    static uint32_t last_force_tick = 0;
+    
+    uint32_t delta = current_time - last_force_tick;
+    if (delta > 500) delta = 100;   // cap delta to avoid huge jumps
+
+    ESP_LOGD(TAG, "Force tick with delta=%lu ms", delta);
+    
+    tick_app(delta);
+    last_force_tick = current_time;
 }
 
 void app_launcher_menu::receive_event_input(const void* event)
@@ -196,23 +209,24 @@ void app_launcher_menu::receive_event_input(const void* event)
     
     ESP_LOGI(TAG, "Menu received: key=0x%04X action=%d", ev->key, (int)ev->action);
 
+    bool needs_redraw = false;
+
     if (ev->action == KeyAction::Tap) {
         switch (ev->key) {
             case KEY_UP:
                 selected_index = (selected_index - 1 + current_menu->size()) % current_menu->size();
-                menu_window->dirty = true;
+                needs_redraw = true;
                 break;
                 
             case KEY_DOWN:
                 selected_index = (selected_index + 1) % current_menu->size();
-                menu_window->dirty = true;
-                 break;
+                needs_redraw = true;
+                break;
                 
             case KEY_ENTER: {
                 if (selected_index < 0 || selected_index >= current_menu->size()) break;
                 
                 const auto& item = (*current_menu)[selected_index];
-                ESP_LOGI(TAG, "Selected: %s (submenu=%d)", item.name.c_str(), item.is_submenu);
                 
                 if (item.is_submenu) {
                     if (item.name == "Games") current_menu = &games_menu;
@@ -220,22 +234,25 @@ void app_launcher_menu::receive_event_input(const void* event)
                     else if (item.name == "<- Back") current_menu = &main_menu;
                     
                     selected_index = 0;
-                    menu_window->dirty = true;
-                    on_draw();
+                    needs_redraw = true;
                 } else if (!item.app_name.empty()) {
-                    ESP_LOGI(TAG, "Launching: %s", item.app_name.c_str());
                     force_close();
                     AppRegistry::instance().open_app(item.app_name);
+                    return;
                 }
                 break;
             }
                 
             case KEY_BACK:
-                ESP_LOGI(TAG, "BACK pressed - returning to watch");
                 force_close();
                 AppRegistry::instance().open_app("WatchApp");
-                break;
+                return;
         }
+    }
+
+    if (needs_redraw) {
+        menu_window->dirty = true;
+        app_launcher_menu::force_tick();          // ← This forces immediate tick + redraw
     }
 }
 

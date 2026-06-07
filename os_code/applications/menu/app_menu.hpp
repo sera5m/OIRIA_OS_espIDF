@@ -34,12 +34,14 @@
 
 
 struct MenuItem;
+//bool is_running_
 
 class app_launcher_menu : public AppBase {
 public:
     explicit app_launcher_menu(const ApplicationConfig& cfg);
 
     void tick_app(uint32_t delta_ms) override;
+    void force_tick() override;
     void receive_event_input(const void* event) override;
     void suspend() override;
     void force_close() override;

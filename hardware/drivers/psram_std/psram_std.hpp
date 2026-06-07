@@ -20,38 +20,44 @@ namespace stdpsram {
 
 template <typename T>
 struct Allocator {
-    using value_type      = T;
-    using pointer         = T*;
-    using const_pointer   = const T*;
-    using size_type       = std::size_t;
-    using difference_type = std::ptrdiff_t;
+    using value_type = T;
+    using pointer    = T*;
+    using size_type  = std::size_t;
 
-    // ─── Required for allocator_traits to work correctly ───
     using propagate_on_container_copy_assignment = std::true_type;
     using propagate_on_container_move_assignment = std::true_type;
     using propagate_on_container_swap            = std::true_type;
-    using is_always_equal                        = std::true_type;  // since stateless
+    using is_always_equal                        = std::true_type;
 
-    Allocator() = default;
-    template <class U> constexpr Allocator(const Allocator<U>&) noexcept {}
+    Allocator() noexcept = default;
+    template <class U> Allocator(const Allocator<U>&) noexcept {}
 
     pointer allocate(size_type n) {
         if (n == 0) return nullptr;
-        pointer p = static_cast<pointer>(heap_caps_malloc(n * sizeof(T), MALLOC_CAP_SPIRAM));
+        pointer p = static_cast<pointer>(
+            heap_caps_malloc(n * sizeof(T), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+        );
         if (!p) throw std::bad_alloc();
         return p;
     }
 
     void deallocate(pointer p, size_type) noexcept {
-        heap_caps_free(p);
+        if (p != nullptr) {                    // ← Critical safety
+            heap_caps_free(p);
+        }
     }
 
-    // Optional but useful
-    pointer reallocate(pointer ptr, size_type new_size) {
-        return static_cast<pointer>(heap_caps_realloc(ptr, new_size * sizeof(T), MALLOC_CAP_SPIRAM));
+    // Optional: better reallocate
+    pointer reallocate(pointer p, size_type new_n) {
+        if (new_n == 0) {
+            deallocate(p, 0);
+            return nullptr;
+        }
+        return static_cast<pointer>(
+            heap_caps_realloc(p, new_n * sizeof(T), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+        );
     }
 
-    // Equality (stateless allocators are always equal)
     friend bool operator==(const Allocator&, const Allocator&) noexcept { return true; }
     friend bool operator!=(const Allocator&, const Allocator&) noexcept { return false; }
 };

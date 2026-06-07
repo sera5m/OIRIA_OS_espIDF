@@ -58,9 +58,12 @@
 #include "os_code/applications/watch/MS_watchapp.hpp"
 
 #include "esp_task_wdt.h"
+#include "esp_system.h"
+#include "esp_cpu.h"
+#include "esp_pm.h"
 
-
-
+#include "tusb.h"
+#include "class/hid/hid.h"
 
 
 #include  "os_code/applications/fileviewwer/MS_file_viewwer.hpp"
@@ -125,9 +128,8 @@ static void       task_app_manager(bool sd_mounted);
 static void bootloader_final_app(void);
 // ────────────────────────────────────────────────
 
-
-
-
+//extern retardtasks to fucking handle this the slur slur slur sahlur way
+extern TaskHandle_t core2TaskHandle;
 
 
 
@@ -163,6 +165,16 @@ startInputTask();
     stage_3_spi_init();
     stage_3_sd_mount();
     bootloader_final_app();   // sd_ok was false anyway
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
 }
 
 // ────────────────────────────────────────────────
@@ -354,9 +366,17 @@ static esp_err_t stage_2_i2c_scan(void)
 
 
 static esp_err_t boot_stage2andaHalf(void){
-	 vTaskDelay(100);
+	//set cpu speed
+	esp_pm_config_esp32s3_t pm_config = {
+        .max_freq_mhz = v_env.cpuMhzMax,
+        .min_freq_mhz = v_env.cpuMhzMin,
+        .light_sleep_enable = false
+    };
+    esp_pm_configure(&pm_config);
+    //now wait and alloc a framebuffer
+	 vTaskDelay(10);
 	 framebuffer_alloc();
-    vTaskDelay(100);
+    vTaskDelay(50);
     
    // if(framebuffer){
 		return ESP_OK;
@@ -441,7 +461,7 @@ static esp_err_t stage_3_sd_mount(void) {
 
 //we are following a create-consume architecture for this (my idea, not the llm)
 TaskHandle_t core1TaskHandle = NULL;
-TaskHandle_t core2TaskHandle = NULL;
+//moved core 2 task handle into the window enviroment but please trust me it exists
 
 void core1_createData(void* pv) {
 	esp_task_wdt_add(NULL); 
@@ -455,7 +475,12 @@ void core1_createData(void* pv) {
 WindowManager::getInstance().UpdateAll(false, true, true, true);
         esp_task_wdt_reset(); 
         // After drawing, swap so this frame becomes the FRONT buffer
-        framebuffer_swap();
+    
+framebuffer_swap();           // make what we just drew the new front buffer
+g_display_dirty = true;
+if (core2TaskHandle) {
+    xTaskNotifyGive(core2TaskHandle);
+}
         esp_task_wdt_reset(); 
         xTaskNotifyGive(core2TaskHandle);
         esp_task_wdt_reset(); 
@@ -464,16 +489,7 @@ WindowManager::getInstance().UpdateAll(false, true, true, true);
     }
 }
 
-void core2_push(void* pv) {
-	esp_task_wdt_add(NULL); 
-    while (1) {
-		esp_task_wdt_reset(); 
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        
-        // This now reads from framebuffer_front (stable frame)
-        display_framebuffer(true, false);
-    }
-}
+
 
 
 
@@ -526,6 +542,7 @@ ESP_LOGI(TAG, "WindowManager init-d");
         v_env.CurrentHIDTarget=(HIDTarget)HIDTarget::toTaskAndDebug; //for now we'll use debug too. this is position 7. see hid_t.h if this doesn't work right
 
     
+    
     // Create or get the instance first
 auto watchapp = appManager::instance().launch_app("WatchApp");  // This creates and starts it
 if (watchapp) {
@@ -552,10 +569,13 @@ esp_task_wdt_config_t wdt_config = {
 };
 esp_task_wdt_reconfigure(&wdt_config);
 
+
+g_display_mutex = xSemaphoreCreateMutex();//this is specifically for the core 2 display pusher, so we init it before the task is made itself and then use it
+
+
 //create new tasks for proscessing loop-needed for video
 xTaskCreatePinnedToCore(core1_createData, "core1", 8192, NULL, 5, &core1TaskHandle, 1);
-xTaskCreatePinnedToCore(core2_push,       "core2", 8192, NULL, 5, &core2TaskHandle, 0);
-
+launchTHESTUPIDMOTHERFUCKINGPEICEOFSHITDISPLAYPUSHTASKFUCKYOU();
 
 // Register MenuApp
 
@@ -565,6 +585,10 @@ REGISTER_APP(app_launcher_menu, "MenuApp", make_menu_config); //don't worry, we 
 
 
 vTaskDelete(NULL); //KILL YOURSELF, BOOTLOADER! 
+}
+
+
+
 
 //you need to kill yourself NOW,bootloader, your life is as useless as a summer ant.......
 /*
@@ -608,7 +632,7 @@ you serve ONE purpose
 
 
 
-}
+
 
 
 

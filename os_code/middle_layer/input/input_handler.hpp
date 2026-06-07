@@ -1,5 +1,3 @@
-
-
 #include <cstdint>
 #include <vector>
 #include <memory>
@@ -17,8 +15,8 @@
 
 // Forward declaration
 extern QueueHandle_t ProcInputQueTarget;
-//struct EnvConfig;
-//extern EnvConfig v_env;
+extern bool usb_hid_enabled;  // ← Changed from 'bool usb_hid_enabled;' to 'extern'
+
 // ===================================================================
 // Key definitions (keep yours)
 #define KEY_ENTER   0x23CE
@@ -38,7 +36,7 @@ enum class KeyAction : uint8_t {
     Repeat,          // ← Add this
     PositionDelta,
     Unknown
-};//NOT SURE why i didnt put twist in here
+};
 
 enum class HIDInputDeviceType : uint8_t {
     Button,
@@ -49,59 +47,58 @@ enum class HIDInputDeviceType : uint8_t {
     Unknown
 };
 
-
-
-
-struct __attribute__((packed)) full_PositionPointer{ //where is my position pointer? equivalent to mouse pointer
-int Xpos; int Ypos; int Zpos;
-bool Xdown; bool Ydown; bool Zdown; //selective for axial constraints. regular nav and clicks are only
-bool Xdim; bool Ydim; bool Zdim; //does it even have these dimensions for this device descriptor
-
-}; //stores this mouse pointer fot the mouse itself 
-
-
+struct __attribute__((packed)) full_PositionPointer{
+    int Xpos; int Ypos; int Zpos;
+    bool Xdown; bool Ydown; bool Zdown;
+    bool Xdim; bool Ydim; bool Zdim;
+};
 
 // ===================================================================
 // Input Event
 // ===================================================================
-// Input Event
 struct InputEvent {
     uint16_t           key = 0;
     KeyAction          action = KeyAction::Unknown;
     HIDInputDeviceType source_device_type = HIDInputDeviceType::Unknown;
     int32_t            delta = 0;
     uint32_t           timestamp = 0;
-    HIDTarget target;  // ← No default here - set explicitly when creating events
+    HIDTarget target;
 };
 
+// ===================================================================
+// USB HID Functions (defined in input_handler.cpp)
+// ===================================================================
+#ifdef __cplusplus
+extern "C" {
+#endif
 
+void boot_hid_usb(bool enable);
+void hid_send_key(uint8_t keycode, bool pressed);
+void hid_send_mouse(int8_t dx, int8_t dy, uint8_t buttons);
+bool is_usb_hid_enabled(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 // ===================================================================
 // Base Device
 class Device {
 public:
     virtual ~Device() = default;
-
-    virtual void update() = 0;                    // called every poll cycle
-    virtual void interact(Device& other) = 0;     // future extension
-
+    virtual void update() = 0;
+    virtual void interact(Device& other) = 0;
     virtual HIDInputDeviceType getType() const = 0;
     virtual const char* getName() const = 0;
-
-    // Common properties you can expand later
-    virtual uint32_t getUpdateIntervalMs() const { return 10; }  // default 100Hz
+    virtual uint32_t getUpdateIntervalMs() const { return 10; }
     virtual bool hasButton() const { return false; }
 };
 
-
-
-
-
-//a simple button device. cry harder about indection, fuck off. 
+// ButtonDevice class
 class ButtonDevice : public Device {
 public:
     struct Properties {
-        uint16_t press_key;    // key to send on press
+        uint16_t press_key;
         bool send_on_press = true;
         bool send_on_release = false;
     };
@@ -122,34 +119,21 @@ private:
     static void pressCallback(void* user_ctx, bool pressed);
 };
 
-
-
-
-
-
-
-
-
-// ===================================================================
-// KnobDevice - one-axis scroller with optional key binding
+// KnobDevice class
 class KnobDevice : public Device {
 public:
     struct Properties {
-        uint16_t cw_key  = KEY_DOWN;   // what "clockwise" sends as Tap
-        uint16_t ccw_key = KEY_UP;     // what "counter-clockwise" sends
-     
+        uint16_t cw_key  = KEY_DOWN;
+        uint16_t ccw_key = KEY_UP;
         float    sensitivity = 1.0f;
-        bool     send_delta_instead_of_keys = false;  // if true, use PositionDelta
+        bool     send_delta_instead_of_keys = false;
     };
 
     Properties props;
 
 private:
-ky040_handle_t ky_handle = nullptr;
-
-    // Declare static callbacks ONLY ONCE
+    ky040_handle_t ky_handle = nullptr;
     static void twistCallback(void* user_ctx, int delta);
-    //static void buttonCallback(void* user_ctx, bool pressed);
 
 public:
     esp_err_t initialize(const ky040_config_t* cfg);
@@ -160,14 +144,10 @@ public:
 
     HIDInputDeviceType getType() const override { return HIDInputDeviceType::Knob; }
     const char* getName() const override { return "Knob"; }
-    bool hasButton() const override { return true; }   // KY-040 has switch
-    
-
-
+    bool hasButton() const override { return true; }
 };
 
-// ===================================================================
-// DeviceManager
+// DeviceManager class
 class DeviceManager {
 private:
     std::vector<std::unique_ptr<Device>> devices;
@@ -175,12 +155,11 @@ private:
 public:
     void addDevice(std::unique_ptr<Device> device);
     void updateAll();
-    // In DeviceManager class
     void removeDevice(const char* name);
     void listDevices();
 
     size_t getDeviceCount() const { return devices.size(); }
     const std::vector<std::unique_ptr<Device>>& getDevices() const { return devices; }
 };
-// Global DeviceManager - everyone can use it
+
 extern DeviceManager gDeviceManager;

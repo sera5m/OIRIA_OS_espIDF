@@ -42,6 +42,13 @@
 //and idf also stands for isralie defense force, who are genocidal rapists and whatnot, it's a fun reminder 
 static const char *TAG = "MWenv"; 
 
+//extern the task management declarations
+TaskHandle_t core2TaskHandle = NULL;
+
+ volatile bool g_display_dirty=0;           // set by WindowManager
+ volatile uint32_t g_last_display_time=0;
+ SemaphoreHandle_t g_display_mutex=NULL;  
+
 toolbarconfig g_defaultToolbarConfig = {
     .tb_overlay = false,
     .tb_update_hz = 2,
@@ -506,8 +513,33 @@ void Window::DrawCanvas() {
 }
 ////=================================
 
+Window::~Window() {
+    ESP_LOGI(TAG, "Window '%s' destructor called", Currentcfg.name);
 
+    // === Critical: Clean up heavy resources first ===
+    ClearText();                    // clears content + cachedChunks + isTokenized
 
+    // Reset tokenized state explicitly
+    isTokenized = false;
+    if (last_content.capacity() > 0) last_content.clear();  // if you added last_content
+
+    // Canvas
+    if (m_canvas) {
+        m_canvas->ClearShapes();
+        RemoveCanvas();  // or just let shared_ptr die
+    }
+
+    // Background tile (PSRAM)
+    if (bgTile) {
+        bgTile.reset();  // explicit, though shared_ptr would handle it
+    }
+
+    // Mark as dead so WindowManager can prune it safely
+    IsWindowShown = false;
+    dirty = false;
+
+    ESP_LOGI(TAG, "Window '%s' fully cleaned up", Currentcfg.name);
+}
 
 void Window::setupBackgroundTile() {
     if (!bgTile) {
@@ -774,6 +806,7 @@ uint16_t safe_parse_color(std::string_view str, uint16_t default_val = 0xFFFF) {
 stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& input) 
 {
     stdpsram::Vector<TextChunk> chunks;
+    
     if (input.empty()) {
         return chunks;
     }
@@ -790,6 +823,9 @@ stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& input)
     };
 
     size_t i = 0;
+
+    chunks.reserve(std::max<size_t>(8, input.length() / 16)); //reserve chunks of the size so we don't have to reserve this later causing assignment issues
+
     while (i < s.length()) {
         if (s[i] != '<' || i + 1 >= s.length() || s[i + 1] != '|') {
             text_buffer += s[i];
@@ -1015,9 +1051,11 @@ if (last_x != wi_sizing.Xpos || last_y != wi_sizing.Ypos) {
         fb_rect(false, 1, physX, physY, physW, physH, 0x0000, win_internal_color_border);
     }
 
-    // === 4. TEXT & CONTENT (unchanged from your working version) ===
-    if (!isTokenized) {
+    
+    // === 4. TEXT & CONTENT
+    if (!isTokenized || content != last_content) {
         cachedChunks = tokenize(content);
+        last_content = content;        // cheap move if possible
         isTokenized = true;
     }
 
@@ -1218,6 +1256,7 @@ cachedChunks
 render cached chunks every frame
 */
 
+
 // WindowManager constructor - initialize members
 WindowManager::WindowManager() 
     : m_toolbarConfig(g_defaultToolbarConfig)
@@ -1227,6 +1266,7 @@ WindowManager::WindowManager()
 }
 
 WindowManager::~WindowManager() {
+
 }
 
 // Add after your existing WindowManager functions in MWenv.cpp
@@ -1564,6 +1604,7 @@ void WindowManager::DrawToolBar() {
 void WindowManager::RepositionAllWindows() {
    // fb_clear(0x0000);  // ✅ Clear screen after repositioning
     if (!m_toolbarConfig.showToolbar) return;
+    if (fs_state.fullscreen_win) return;  // not today son
     if (windows_repositioned) return;  // Only reposition once
     
     uint16_t offset = GetToolbarOffset();
@@ -1785,38 +1826,41 @@ void WindowManager::DebugPrintWindowDOM() const {
 }
 
 
-// Update UpdateAll to handle toolbar
 // Update UpdateAll to handle toolbar with cooperative yielding
-void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWindows, bool draw_toolbar_ontop) 
+void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWindows, bool draw_toolbar_ontop)
 {
     static uint32_t last_update_ms = 0;
     uint32_t now_ms = esp_timer_get_time() / 1000;
-    const uint32_t min_frame_interval_ms = 22;
+
+    const uint32_t min_frame_interval_ms = 33;   // ~30 FPS target
 
     if (!force && (now_ms - last_update_ms) < min_frame_interval_ms) {
         return;
     }
+
     last_update_ms = now_ms;
 
+    bool did_any_drawing = false;
+
     // === CRITICAL: Skip repositioning if we are in fullscreen mode ===
-
     bool is_fullscreen_active = (fs_state.fullscreen_win != nullptr);
-
     if (repositionWindows && !windows_repositioned && !is_fullscreen_active) {
         RepositionAllWindows();
         tb_dirty = true;
+        did_any_drawing = true;
     }
 
     // Remove dead windows
     for (auto it = windows.begin(); it != windows.end(); ) {
         if (!*it || !(*it)->IsWindowShown) {
             it = windows.erase(it);
+            did_any_drawing = true;
             continue;
         }
         ++it;
     }
 
-    // Sort by layer (higher number = drawn later = on top)
+    // Sort by layer
     std::sort(windows.begin(), windows.end(),
         [](const std::shared_ptr<Window>& a, const std::shared_ptr<Window>& b) {
             if (!a) return false;
@@ -1828,6 +1872,7 @@ void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWin
     if (!draw_toolbar_ontop && ToolbarUpdate && m_toolbarConfig.showToolbar) {
         DrawToolBar();
         vTaskDelay(pdMS_TO_TICKS(1));
+        did_any_drawing = true;
     }
 
     // Draw windows
@@ -1836,10 +1881,15 @@ void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWin
         if (!win) continue;
 
         if (force) win->enable_refresh_override = true;
-        
+
         esp_task_wdt_reset();
         win->WinDraw();
         esp_task_wdt_reset();
+
+        if (win->dirty) {
+            did_any_drawing = true;
+            win->dirty = false;        // reset here after drawing
+        }
 
         window_count++;
         if ((window_count & 0x03) == 0) {
@@ -1851,5 +1901,71 @@ void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWin
     if (draw_toolbar_ontop && ToolbarUpdate && m_toolbarConfig.showToolbar) {
         DrawToolBar();
         vTaskDelay(pdMS_TO_TICKS(1));
+        did_any_drawing = true;
     }
+
+    // === Notify display task only when needed ===
+    if (did_any_drawing || force || tb_dirty) {
+        g_display_dirty = true;
+        if (core2TaskHandle) {
+            xTaskNotifyGive(core2TaskHandle);
+        }
+    }
+
+    tb_dirty = false;   // reset toolbar dirty flag
+}
+
+
+
+
+
+
+
+
+
+
+
+
+//WARNING: THIS FUNCTION HAS SIGNIFICANT HISTORY OF CAUSING WDT TIMEOUT FAILURES! THIS IS HEAVY! IF YOU ARE USING REALLY IMPORTANT STUFF WE MIGHT WANT TO USE HEADLESS MODE!
+void core2_push(void* pv) {
+    esp_task_wdt_add(NULL);
+    esp_task_wdt_config_t wdt_config = {
+    .timeout_ms = 8000,                          // 8 seconds in milliseconds
+    .idle_core_mask = (1 << portNUM_PROCESSORS) - 1, // Subscribes all CPU idle tasks
+    .trigger_panic = true                        // Reset the chip if it times out
+    };
+
+// Apply the new watchdog timeout settings
+esp_task_wdt_reconfigure(&wdt_config); //i could make this longer but who cares 
+
+    const uint32_t target_frame_interval_ms = 33;  // ~30 FPS
+
+    while (1) {
+        // Wait for notification OR timeout (so we can enforce FPS)
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
+
+        uint32_t now = esp_timer_get_time() / 1000;
+
+        if (!g_display_dirty && (now - g_last_display_time < target_frame_interval_ms)) {
+            continue;   // nothing to do + respect FPS
+        }
+
+        if (xSemaphoreTake(g_display_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            esp_task_wdt_reset();
+
+            display_framebuffer(true, false);   // or false, false for full if needed
+
+            g_last_display_time = now;
+            g_display_dirty = false;
+
+            xSemaphoreGive(g_display_mutex);
+        }
+
+        esp_task_wdt_reset();
+        vTaskDelay(pdMS_TO_TICKS(1));   // always yield a bit
+    }
+}
+
+void launchTHESTUPIDMOTHERFUCKINGPEICEOFSHITDISPLAYPUSHTASKFUCKYOU(){
+xTaskCreatePinnedToCore(core2_push,       "core2", 8192, NULL, 5, &core2TaskHandle, 0);
 }

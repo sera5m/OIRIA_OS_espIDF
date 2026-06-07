@@ -85,6 +85,7 @@ const char* get_app_name() const { return cfg_.name; } //getter because we love 
     // Lifecycle methods (override in derived classes)
     virtual void tick_app(uint32_t delta_ms) = 0;          // called periodically
     virtual void receive_event_input(const void* event) = 0; // input event
+    virtual void force_tick(){} //
     virtual void suspend() = 0;                            // suspend operation
     virtual void force_close() = 0;                        // immediate termination
 
@@ -94,6 +95,7 @@ const char* get_app_name() const { return cfg_.name; } //getter because we love 
     virtual void on_pause() {}
     virtual void on_resume(){}
     virtual void on_draw(){}
+
 
 
     //methods for focusing and input condition swap

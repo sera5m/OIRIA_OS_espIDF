@@ -28,8 +28,9 @@ EnvConfig v_env = { //vars_env
     // =========================
     // CPU CONTROL
     // =========================
-    .cpuMhz = 240,
-    .cpuMhzLimit = 240,
+    .cpuMhzTarget = 240,
+    .cpuMhzMin = 160,
+    .cpuMhzMax=240, //hardware max 240
     .enableCpuScaling = true,
     .overclockUnlocked = false,
     .cpuLoadPercent = 0,

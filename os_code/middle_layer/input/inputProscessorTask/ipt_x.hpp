@@ -7,9 +7,12 @@
 #include "os_code/middle_layer/input/input_handler.hpp"
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/middle_layer/input/hid_t.h"
+#include "tusb.h"
+#include "class/hid/hid.h"
+
 // Start the unified input processing task
 void startInputTask();
 
 // NO queue here - using ProcInputQueTarget from main
-// NO callbacks here - those are in input_handler you fucktard,
+// NO callbacks here - those are in input_handler you fucktard dev
 // do NOT move input hand ler into here holy fuck this set me back three days of work

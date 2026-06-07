@@ -60,8 +60,14 @@ struct PosTag {
 
 struct HighlighterTag {uint16_t color; bool enabled;};
 
+//load external linkages to the actual window proscess. 
+extern volatile bool g_display_dirty;           // set by WindowManager
+extern volatile uint32_t g_last_display_time;
+extern SemaphoreHandle_t g_display_mutex;  
 
 
+//id rather not share the state of the task this runs, but OH WELL huh? the task is on the bottom
+extern TaskHandle_t core2TaskHandle;
 //uint16_t background_color=0x1212;
 
 
@@ -106,14 +112,23 @@ using ChunkContent = std::variant<
         ChunkContent content = std::monostate{};
     
         TextChunk() = default;
+    
         explicit TextChunk(stdpsram::String txt)
             : kind(TagType::PlainText), content(std::move(txt)) {}
-        explicit TextChunk(TagType t)
-            : kind(t), content(std::monostate{}) {}
+    
+        explicit TextChunk(TagType t) : kind(t) {}
         TextChunk(TagType t, ColorTag c)       : kind(t), content(c) {}
         TextChunk(TagType t, SizeTag s)        : kind(t), content(s) {}
         TextChunk(TagType t, PosTag p)         : kind(t), content(p) {}
         TextChunk(TagType t, HighlighterTag h) : kind(t), content(h) {}
+    
+        // Let compiler generate correct Rule-of-5 instead of manual because it crashes
+        TextChunk(const TextChunk&) = default;
+        TextChunk(TextChunk&&) noexcept = default;
+        TextChunk& operator=(const TextChunk&) = default;
+        TextChunk& operator=(TextChunk&&) noexcept = default;
+    
+        ~TextChunk() = default;   // eliminated manual reset!
     };
 /* ---------------- update mode ---------------- */
 
@@ -400,6 +415,8 @@ void set_size(uint16_t width, uint16_t height);
         void ClearText();
         void LocalToScreen(int lx, int ly, int& sx, int& sy);
         stdpsram::String content;
+        stdpsram::String last_content;   // for change detection. i really, REALLY hate this because it's not efficient. 
+        
         stdpsram::Vector<TextChunk> cachedChunks;
         
         // Members you are using
@@ -466,6 +483,8 @@ void DrawCanvas();  // Call this in WinDraw()
     
 bool isTokenized = false;
 
+
+
 struct TextState {
     uint16_t color = 0xFFFF;
     int      size  = 1;
@@ -490,6 +509,8 @@ uint16_t currentPhysY = 0;
     stdpsram::Vector<TextChunk> tokenize(const stdpsram::String& s);
     // Optionally keep a std::string wrapper if needed
     stdpsram::Vector<TextChunk> tokenize(const std::string& s);
+
+    ~Window();
 };
 
 
@@ -608,5 +629,12 @@ uint16_t currentPhysY = 0;
               uint64_t last_toolbar_update;
 
         };
+
+
+
+void launchTHESTUPIDMOTHERFUCKINGPEICEOFSHITDISPLAYPUSHTASKFUCKYOU();
+
+
+
 
 #endif

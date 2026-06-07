@@ -53,8 +53,9 @@ typedef struct {
     // =========================
     // CPU CONTROL
     // =========================
-    uint16_t cpuMhz;
-    uint16_t cpuMhzLimit;
+    uint16_t cpuMhzTarget;
+    uint16_t cpuMhzMin;
+    uint16_t cpuMhzMax;
     bool enableCpuScaling;    // dynamic frequency scaling
     bool overclockUnlocked;   // allow unsafe freq ranges
     uint8_t cpuLoadPercent;   // OPTIONAL: current utilization snapshot

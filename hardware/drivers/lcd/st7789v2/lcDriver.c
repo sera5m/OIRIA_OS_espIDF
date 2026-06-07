@@ -12,8 +12,9 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include "os_code/core/rShell/enviroment/env_vars.h"
+#include "esp_task_wdt.h"
 #ifndef M_PI
-#define M_PI 3.14159265358979323846
+#define M_PI 3.141592653589 //JPL uses exactly 15 decimal places of pi. fuck i need more than 12 for?
 #endif
 
 #define TAG "ST7789"
@@ -83,13 +84,18 @@ static inline void mark_all_dirty(bool dirty)
 
 static inline void fill_row32(uint16_t* dst, int width, uint16_t color)
 {
+    if (width <= 0) return;
+
     uint32_t c32 = ((uint32_t)color << 16) | color;
     uint32_t* d32 = (uint32_t*)dst;
     int words = width / 2;
-    for (int i = 0; i < words; i++)
+
+    for (int i = 0; i < words; i++) {
         d32[i] = c32;
-    if (width & 1)
+    }
+    if (width & 1) {
         dst[width - 1] = color;
+    }
 }
 
 // ===================================================================
@@ -312,23 +318,33 @@ void lcd_refreshScreen(void)
     lcd_refresh_screen();
 }
 
-void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode)
-{
+void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode) {
     if (!framebuffer_front) return;
-    
-    xSemaphoreTake(fb_mutex, portMAX_DELAY);
-    
-    // Use the FRONT buffer for display (stable, complete frame)
+
+    if (xSemaphoreTake(fb_mutex, pdMS_TO_TICKS(150)) != pdTRUE) {
+        ESP_LOGW("DISPLAY", "Mutex timeout");
+        return;
+    }
+
     uint16_t *display_buffer = framebuffer_front;
-    
     const uint32_t row_bytes = SCREEN_W * 2;
-    
+
     if (!only_delta) {
+        // Full refresh
         for (int y = 0; y < SCREEN_H; y += SAFE_ROWS_PER_CHUNK) {
             int rows = SAFE_ROWS_PER_CHUNK;
             if (y + rows > SCREEN_H) rows = SCREEN_H - y;
+
             lcd_set_window(0, y, SCREEN_W - 1, y + rows - 1);
             lcd_data_bulk(&display_buffer[y * SCREEN_W], rows * row_bytes);
+
+            // Yield more frequently
+            if ((y % (SAFE_ROWS_PER_CHUNK * 3)) == 0) {
+                xSemaphoreGive(fb_mutex);
+                vTaskDelay(pdMS_TO_TICKS(2));
+                esp_task_wdt_reset();
+                xSemaphoreTake(fb_mutex, portMAX_DELAY);
+            }
         }
         mark_all_dirty(false);
     } else {
@@ -339,27 +355,33 @@ void lcd_fb_display_framebuffer(bool only_delta, bool cope_mode)
                 y++;
                 continue;
             }
-            
+
             int y_start = y;
-            while (y < SCREEN_H && 
+            while (y < SCREEN_H &&
                    (changed_rows_bitmask[y/8] & (1u << (y%8))) &&
                    (y - y_start < SAFE_ROWS_PER_CHUNK)) {
                 y++;
             }
-            
+
             int rows = y - y_start;
             lcd_set_window(0, y_start, SCREEN_W - 1, y_start + rows - 1);
             lcd_data_bulk(&display_buffer[y_start * SCREEN_W], rows * row_bytes);
-            
+
             // Clear dirty bits
             for (int i = y_start; i < y; i++) {
                 changed_rows_bitmask[i/8] &= ~(1u << (i%8));
             }
+
+            if (rows > 8) {
+                vTaskDelay(pdMS_TO_TICKS(1));
+                esp_task_wdt_reset();
+            }
         }
     }
-    
+
     xSemaphoreGive(fb_mutex);
-}
+}//OKAY I RAN this through grok, and i really, really hope that fixes it. 
+//oh ai bad!! ai bad!!! ai is gambling!!! yeah?! well i have nothing left, nothing left but gambling
 
 uint16_t fpsLimiterTarget = 30;
 
@@ -368,47 +390,56 @@ uint16_t fpsLimiterTarget = 30;
 // ===================================================================
 
 void fb_rect(bool isfilled, uint16_t borderThickness,
-             int x, int y, int w, int h,
-             uint16_t color, uint16_t secondarycolor)
+    int x, int y, int w, int h,
+    uint16_t color, uint16_t secondarycolor)
 {
-    if (x < 0) { w += x; x = 0; }
-    if (y < 0) { h += y; y = 0; }
-    if (x + w > SCREEN_W) w = SCREEN_W - x;
-    if (y + h > SCREEN_H) h = SCREEN_H - y;
-    if (w <= 0 || h <= 0) return;
+if (x < 0) { w += x; x = 0; }
+if (y < 0) { h += y; y = 0; }
+if (x + w > SCREEN_W) w = SCREEN_W - x;
+if (y + h > SCREEN_H) h = SCREEN_H - y;
+if (w <= 0 || h <= 0) return;
 
-    if (borderThickness * 2 > w) borderThickness = w / 2;
-    if (borderThickness * 2 > h) borderThickness = h / 2;
+if (borderThickness * 2 > w) borderThickness = w / 2;
+if (borderThickness * 2 > h) borderThickness = h / 2;
 
-    // Border
-    if (borderThickness > 0) {
-        for (int py = y; py < y + borderThickness; py++)
-            fill_row32(&framebuffer[py * SCREEN_W + x], w, secondarycolor);
-        for (int py = y + h - borderThickness; py < y + h; py++)
-            fill_row32(&framebuffer[py * SCREEN_W + x], w, secondarycolor);
+// Border
+if (borderThickness > 0) {
+for (int py = y; py < y + borderThickness; py++) {
+   fill_row32(&framebuffer[py * SCREEN_W + x], w, secondarycolor);
+   if ((py & 0x7) == 0) esp_task_wdt_reset();  // yield every 8 lines
+}
+// ... same for bottom border ...
+for (int py = y + h - borderThickness; py < y + h; py++) {
+   fill_row32(&framebuffer[py * SCREEN_W + x], w, secondarycolor);
+   if ((py & 0x7) == 0) esp_task_wdt_reset();
+}
 
-        for (int py = y + borderThickness; py < y + h - borderThickness; py++) {
-            uint16_t* row = &framebuffer[py * SCREEN_W];
-            for (int i = 0; i < borderThickness; i++) {
-                row[x + i] = secondarycolor;
-                row[x + w - borderThickness + i] = secondarycolor;
-            }
-        }
-    }
+// left/right sides (simplified)
+for (int py = y + borderThickness; py < y + h - borderThickness; py++) {
+   uint16_t* row = &framebuffer[py * SCREEN_W];
+   for (int i = 0; i < borderThickness; i++) {
+       row[x + i] = secondarycolor;
+       row[x + w - borderThickness + i] = secondarycolor;
+   }
+   if ((py & 0xF) == 0) esp_task_wdt_reset();
+}
+}
 
-    // Fill
-    if (isfilled) {
-        int fx = x + borderThickness;
-        int fy = y + borderThickness;
-        int fw = w - borderThickness * 2;
-        int fh = h - borderThickness * 2;
-        if (fw > 0 && fh > 0) {
-            for (int py = fy; py < fy + fh; py++)
-                fill_row32(&framebuffer[py * SCREEN_W + fx], fw, color);
-        }
-    }
+// Fill
+if (isfilled) {
+int fx = x + borderThickness;
+int fy = y + borderThickness;
+int fw = w - borderThickness * 2;
+int fh = h - borderThickness * 2;
+if (fw > 0 && fh > 0) {
+   for (int py = fy; py < fy + fh; py++) {
+       fill_row32(&framebuffer[py * SCREEN_W + fx], fw, color);
+       if ((py & 0x7) == 0) esp_task_wdt_reset();   // ← This prevents WDT
+   }
+}
+}
 
-    mark_rows_dirty(y, y + h - 1);
+mark_rows_dirty(y, y + h - 1);
 }
 
 void fb_rect_border(bool isfilled, uint16_t borderThickness,
