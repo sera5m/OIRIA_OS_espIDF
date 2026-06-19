@@ -12,6 +12,9 @@
 #include "class/hid/hid.h"
 #include "device/usbd_pvt.h"
 static const char* TAG = "InputHandler";
+#include "os_code/applications/toolkit/RemoteKeyboard/keymap.hpp"
+
+
 
 extern QueueHandle_t ProcInputQueTarget;
 DeviceManager gDeviceManager;
@@ -26,6 +29,19 @@ static const uint8_t hid_report_descriptor[] = {
 
 // Define it ONCE (not extern, not static)
 bool usb_hid_enabled = false;
+
+
+static TaskHandle_t s_input_task_handle = NULL;
+
+// Function to be called from encoder ISR
+void IRAM_ATTR encoder_isr_notify(void *ctx) {
+    TaskHandle_t task = s_input_task_handle;
+    if (task) {
+        BaseType_t higherPriorityTaskWoken = pdFALSE;
+        vTaskNotifyGiveFromISR(task, &higherPriorityTaskWoken);
+        portYIELD_FROM_ISR(higherPriorityTaskWoken);
+    }
+}
 
 // ====================== USB HID SUPPORT ======================
 
@@ -90,6 +106,57 @@ void hid_send_mouse(int8_t dx, int8_t dy, uint8_t buttons)
     }
 //}
 
+uint8_t get_hid_keycode(uint16_t custom_key, uint8_t* modifiers) {
+    *modifiers = 0;
+    switch (custom_key) {
+        case KEY_UP:    return HID_KEY_ARROW_UP;
+        case KEY_DOWN:  return HID_KEY_ARROW_DOWN;
+        case KEY_LEFT:  return HID_KEY_ARROW_LEFT;
+        case KEY_RIGHT: return HID_KEY_ARROW_RIGHT;
+        case KEY_ENTER: return HID_KEY_ENTER;
+        case KEY_BACK:  return HID_KEY_ESCAPE;   // or HID_KEY_BACKSPACE
+        default:        return 0;
+    }
+}
+
+void hid_send_key_with_modifiers(uint8_t keycode, uint8_t modifiers, bool pressed)
+{
+    if (!usb_hid_enabled || !tud_hid_ready()) return;
+
+    uint8_t report[8] = {0};
+
+    if (pressed) {
+        report[0] = modifiers;        // Modifier byte
+        report[2] = keycode;          // First key slot
+    }
+
+    tud_hid_report(0, report, 8);     // Keyboard report
+}
+
+void RouteInput_HidTarget(InputEvent i_ev)
+{
+    if (!usb_hid_enabled || !tud_hid_ready()) return;
+
+    if (i_ev.action == KeyAction::PositionDelta) {
+        hid_send_mouse(0, i_ev.delta * 3, 0);
+        return;
+    }
+
+    uint8_t modifiers = 0;
+    uint8_t hid_code = get_hid_keycode(i_ev.key, &modifiers);
+
+    if (hid_code == 0) return;
+
+    bool pressed = (i_ev.action == KeyAction::Tap || i_ev.action == KeyAction::Press);
+    hid_send_key_with_modifiers(hid_code, modifiers, pressed);
+}
+
+
+
+
+
+
+
 // ===================================================================
 // ButtonDevice
 // ===================================================================
@@ -141,8 +208,16 @@ void ButtonDevice::interact(Device& other) { /* not used */ }
 // ===================================================================
 // KnobDevice
 // ===================================================================
-esp_err_t KnobDevice::initialize(const ky040_config_t* cfg)
-{
+
+void register_input_task_for_notifications(TaskHandle_t task) {
+    s_input_task_handle = task;
+}
+
+
+esp_err_t KnobDevice::initialize(const ky040_config_t* cfg){
+
+    
+
     if (ky_handle) {
         ky040_del(ky_handle);
         ky_handle = nullptr;
@@ -152,6 +227,13 @@ esp_err_t KnobDevice::initialize(const ky040_config_t* cfg)
     ky040_config_t local = *cfg;
     local.on_twist = twistCallback;
     local.user_ctx = this;
+
+    //interrupt allow mode requires filling additional fields automatically
+    if (cfg->use_interrupt) {
+        local.use_interrupt = true;
+        local.on_pcnt_interrupt = encoder_isr_notify;
+    }
+
 
     esp_err_t ret = ky040_new(&local, &ky_handle);
     if (ret == ESP_OK) {
@@ -202,6 +284,31 @@ void KnobDevice::interact(Device& other) {}
 // ===================================================================
 // DeviceManager
 // ===================================================================
+
+
+
+
+
+// Add these implementations to input_handler.cpp
+
+void DeviceManager::updateEncoder() {
+    for (auto& dev : devices) {
+        if (dev->getType() == HIDInputDeviceType::Knob) {
+            dev->update();
+        }
+    }
+}
+
+void DeviceManager::updateButtons() {
+    for (auto& dev : devices) {
+        if (dev->getType() == HIDInputDeviceType::Button) {
+            dev->update();
+        }
+    }
+}
+
+
+
 void DeviceManager::addDevice(std::unique_ptr<Device> device)
 {
     if (!device) {

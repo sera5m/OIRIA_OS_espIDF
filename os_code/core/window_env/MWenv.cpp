@@ -1928,6 +1928,7 @@ void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWin
 
 //WARNING: THIS FUNCTION HAS SIGNIFICANT HISTORY OF CAUSING WDT TIMEOUT FAILURES! THIS IS HEAVY! IF YOU ARE USING REALLY IMPORTANT STUFF WE MIGHT WANT TO USE HEADLESS MODE!
 void core2_push(void* pv) {
+
     esp_task_wdt_add(NULL);
     esp_task_wdt_config_t wdt_config = {
     .timeout_ms = 8000,                          // 8 seconds in milliseconds
@@ -1967,5 +1968,5 @@ esp_task_wdt_reconfigure(&wdt_config); //i could make this longer but who cares
 }
 
 void launchTHESTUPIDMOTHERFUCKINGPEICEOFSHITDISPLAYPUSHTASKFUCKYOU(){
-xTaskCreatePinnedToCore(core2_push,       "core2", 8192, NULL, 5, &core2TaskHandle, 0);
+xTaskCreatePinnedToCore(core2_push, "core2", 8192, NULL, 5, &core2TaskHandle, 0);
 }

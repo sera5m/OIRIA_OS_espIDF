@@ -29,7 +29,7 @@
 #include "os_code/core/rShell/s_hell.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "code_stuff/helperfunctions.hpp"
-
+#include "esp_task_wdt.h" 
 #include "os_code/applications/menu/app_menu.hpp"
 #include "os_code/core/rShell/defaultAppList.hpp" 
 
@@ -81,7 +81,7 @@ void app_launcher_menu::on_start()
 
     // Disable toolbar + reset positioning fights
     WindowManager::getInstance().SetToolbarActive(false);
-    
+    esp_task_wdt_add(NULL); //add owning task
 
     WindowCfg cfg{
         .Posx = 0,

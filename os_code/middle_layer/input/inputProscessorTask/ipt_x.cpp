@@ -4,8 +4,9 @@
 #include "os_code/middle_layer/input/input_handler.hpp"
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "tusb.h"
-//#include "class/hid/hid.h"
-
+#include "os_code/middle_layer/input/hid_t.h"
+#include "esp_task_wdt.h" 
+#include "os_code/applications/toolkit/RemoteKeyboard/keymap.hpp"
 static const char* TAG = "InputTask";
 
 // External queue
@@ -15,8 +16,7 @@ extern QueueHandle_t ProcInputQueTarget;
 extern bool usb_hid_enabled;
 
 // Forward declarations
-static void dispatch_event_to_focused_app(const InputEvent& ev);
-static void handle_debug_output(const InputEvent& ev);
+
 
 
 
@@ -45,6 +45,7 @@ static void handle_debug_output(const InputEvent& ev)
             break;
     }
 }
+
 static void handle_usb_hid(const InputEvent& ev)
 {
     if (!usb_hid_enabled) return;   // Note: this is declared in input_handler.cpp
@@ -68,47 +69,53 @@ static void handle_usb_hid(const InputEvent& ev)
 
 
 
-void RouteInput_HidTarget(InputEvent i_ev){
-    switch (i_ev.key) {
-        case KEY_UP:    hid_send_key(HID_KEY_ARROW_UP, i_ev.action == KeyAction::Tap); break;
-        case KEY_DOWN:  hid_send_key(HID_KEY_ARROW_DOWN, i_ev.action == KeyAction::Tap); break;
-        case KEY_LEFT:  hid_send_key(HID_KEY_ARROW_LEFT, i_ev.action == KeyAction::Tap); break;
-        case KEY_RIGHT: hid_send_key(HID_KEY_ARROW_RIGHT, i_ev.action == KeyAction::Tap); break;
-        case KEY_ENTER: hid_send_key(HID_KEY_ENTER, i_ev.action == KeyAction::Tap); break;
-        case KEY_BACK:  hid_send_key(HID_KEY_END, i_ev.action == KeyAction::Tap); break;
-        default:
-            if (i_ev.action == KeyAction::PositionDelta) {
-                hid_send_mouse(0, i_ev.delta * 3, 0);
-            }
-            break;
-    }
-}
-
-
 
 // -------------------------------------------------------------------
 // Main Input Task
 // -------------------------------------------------------------------
-static void input_task(void* pvParameters) {
+static void input_task(void* pvParameters) 
+{
     ESP_LOGI(TAG, "================Input task started=============");
 
-    // Wait for the queue to be created by main
+    // Wait for the queue
     while (!ProcInputQueTarget) {
         ESP_LOGW(TAG, "Waiting for ProcInputQueTarget...");
         vTaskDelay(pdMS_TO_TICKS(80));
+        esp_task_wdt_reset();
     }
 
+    register_input_task_for_notifications(xTaskGetCurrentTaskHandle());
+
     InputEvent ev;
-    TickType_t last_wake = xTaskGetTickCount();
-    const TickType_t poll_interval = pdMS_TO_TICKS(8);  // 8ms = 125Hz
+    const TickType_t button_poll_interval = pdMS_TO_TICKS(33);
 
+    // Subscribe to watchdog
+    ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
+    
+        
+    
     while (true) {
-        // 1. Poll all hardware devices
-        gDeviceManager.updateAll();
+        // === ALWAYS reset at the start of the loop ===
+        esp_task_wdt_reset();
+        
+        uint32_t notified = ulTaskNotifyTake(pdTRUE, button_poll_interval);
 
-        // 2. Process all pending input events
+        if (notified) {
+            gDeviceManager.updateEncoder();
+        }
+        
+        gDeviceManager.updateButtons();
+        gDeviceManager.updateEncoder(); //we do this for now to save time in developement, we'll later need to have the device manager tick every device present, prioritizing high frequency devices. 
+        // Process queue (may be empty)
+        bool processed_any = false;
         while (xQueueReceive(ProcInputQueTarget, &ev, 0) == pdTRUE) {
+            processed_any = true;
             ESP_LOGI(TAG, "Event key=0x%04X target=%d", ev.key, (int)ev.target);
+
+
+           // task = xTaskGetCurrentTaskHandle();    high_water = uxTaskGetStackHighWaterMark(task);
+           // ESP_LOGI("STACK", "%s: High water mark = %u words (%u bytes free)", task_name, high_water, high_water * 4);
+
 
             switch (ev.target) {
                 case HIDTarget::actAsUsbHID:
@@ -134,18 +141,14 @@ static void input_task(void* pvParameters) {
             }
         }
 
-        // 3. Smart delay: if we're late, skip waiting
-        TickType_t now = xTaskGetTickCount();
-        TickType_t time_since_last_wake = now - last_wake;
-        
-        if (time_since_last_wake >= poll_interval) {
-            // We're behind schedule - don't delay, just update last_wake
-            last_wake = now;
-            // Continue to next iteration immediately
-        } else {
-            // Wait until next scheduled wake time
-            vTaskDelayUntil(&last_wake, poll_interval);
+        // Extra safety: reset after potentially heavy queue processing
+        if (processed_any) {
+            esp_task_wdt_reset();
         }
+        
+        // Optional: very light yield if nothing happened
+        // (helps when the task is spinning too fast)
+         vTaskDelay(pdMS_TO_TICKS(1)); // only if needed
     }
 }
 
@@ -155,7 +158,7 @@ static void input_task(void* pvParameters) {
 void startInputTask()
 {
     ESP_LOGI(TAG, "Creating input task...");
-    BaseType_t result = xTaskCreatePinnedToCore(input_task, "input_task", 6144, nullptr, 1, nullptr, 0);
+    BaseType_t result = xTaskCreatePinnedToCore(input_task, "input_task", 8192, nullptr, 1, nullptr, 0);
 
     if (result != pdPASS) {
         ESP_LOGE(TAG, "Failed to create input task!");

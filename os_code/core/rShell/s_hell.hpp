@@ -16,6 +16,20 @@
 #include <unordered_map>
 #include <string>
 
+//shell addons
+#include "os_code/core/notification_sys/rs_notif_dispatcher.h"
+
+
+//assistance functrion========================
+void print_stack_usage(const char* task_name);
+
+
+//=============================================
+
+
+
+
+
 // Registration macro - must be used at file scope (outside any function)
 #define REGISTER_APP(CLASS, NAME, CONFIG_BUILDER) \
     static bool _registered_##CLASS = []() { \

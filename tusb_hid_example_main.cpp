@@ -69,6 +69,10 @@
 #include  "os_code/applications/fileviewwer/MS_file_viewwer.hpp"
 #include "os_code/applications/watch/MS_watchapp.hpp"
 #include  "os_code/applications/menu/app_menu.hpp"
+#include "os_code/core/notification_sys/rs_notif_dispatcher.h"
+//#include "ulp_component/ulp/ulp_main.h"
+#include "ulp_riscv.h"
+
 
 
 // Known devices (fill in your full list)
@@ -90,6 +94,21 @@ DeviceManager deviceManager;
 QueueHandle_t ProcInputQueTarget = nullptr;
 
 static const char* TAG = "main";
+void load_ulp(void) {
+    extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
+    extern const uint8_t ulp_main_bin_end[]   asm("_binary_ulp_main_bin_end");
+
+    size_t bin_size = ulp_main_bin_end - ulp_main_bin_start;
+
+    esp_err_t ret = ulp_riscv_load_binary(ulp_main_bin_start, bin_size);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "✅ ULP RISC-V loaded successfully!");
+        ulp_set_wakeup_period(0, 5ULL * 60 * 1000000ULL); // 5 minutes
+        ulp_riscv_run();
+    } else {
+        ESP_LOGE(TAG, "❌ ULP load failed: %s", esp_err_to_name(ret));
+    }
+}
 
 //the window manager too
 
@@ -164,13 +183,17 @@ startInputTask();
     boot_stage2andaHalf();
     stage_3_spi_init();
     stage_3_sd_mount();
+    
+    
+        // ====================== ULP ======================
+        notification_system_init();
+   // start_notification_task();
+
+    // ====================== ULP RISC-V ======================
+
+load_ulp();
+    
     bootloader_final_app();   // sd_ok was false anyway
-    
-    
-    
-    
-    
-    
     
     
     
@@ -182,65 +205,75 @@ startInputTask();
 
 static esp_err_t stage_1_encoders()
 {
-    // ========== LEFT ENCODER (no button in driver) ==========
+    ESP_LOGI("ENCODERS", "Initializing encoders and buttons...");
+
+    // ========== LEFT ENCODER ==========
     auto left_knob = std::make_unique<KnobDevice>();
-    left_knob->props.cw_key  = KEY_DOWN;
+    left_knob->props.cw_key = KEY_DOWN;
     left_knob->props.ccw_key = KEY_UP;
 
     ky040_config_t cfg_left = {
-        .clk_pin = ENCODER0_CLK_PIN,
-        .dt_pin  = ENCODER0_DT_PIN,
-        .detents_per_rev = 20,
-        .on_twist = nullptr,
-        .user_ctx = left_knob.get()
+        .clk_pin           = ENCODER0_CLK_PIN,
+        .dt_pin            = ENCODER0_DT_PIN,
+        .detents_per_rev   = 20,
+        .on_twist          = nullptr,                    // KnobDevice sets its own callback
+        .user_ctx          = left_knob.get(),
+        .use_interrupt     = 0,
+        .on_pcnt_interrupt = encoder_isr_notify          // ← THIS is the correct one
     };
+
     left_knob->initialize(&cfg_left);
     gDeviceManager.addDevice(std::move(left_knob));
 
-    // LEFT BUTTON (separate device)
+    // LEFT BUTTON
     auto left_btn = std::make_unique<ButtonDevice>();
     left_btn->props.press_key = KEY_ENTER;
+
     button_config_t btn_cfg_left = {
-        .pin = ENCODER0_SW_PIN,
-        .active_low = true,
-        .debounce_ms = 50,
-        .on_press = nullptr,
-        .on_release = nullptr,
-        .user_ctx = left_btn.get()
+        .pin          = ENCODER0_SW_PIN,
+        .active_low   = true,
+        .debounce_ms  = 50,
+        .on_press     = nullptr,
+        .on_release   = nullptr,
+        .user_ctx     = left_btn.get()
     };
     left_btn->initialize(&btn_cfg_left);
     gDeviceManager.addDevice(std::move(left_btn));
 
     // ========== RIGHT ENCODER ==========
     auto right_knob = std::make_unique<KnobDevice>();
-    right_knob->props.cw_key  = KEY_RIGHT;
+    right_knob->props.cw_key = KEY_RIGHT;
     right_knob->props.ccw_key = KEY_LEFT;
 
-    ky040_config_t cfg_right = {
-        .clk_pin = ENCODER1_CLK_PIN,
-        .dt_pin  = ENCODER1_DT_PIN,
-        .detents_per_rev = 20,
-        .on_twist = nullptr,
-        .user_ctx = right_knob.get()
+    ky040_config_t cfg_right = {                          // ← fixed variable name
+        .clk_pin           = ENCODER1_CLK_PIN,
+        .dt_pin            = ENCODER1_DT_PIN,
+        .detents_per_rev   = 20,
+        .on_twist          = nullptr,
+        .user_ctx          = right_knob.get(),
+        .use_interrupt     = 0,
+        .on_pcnt_interrupt = encoder_isr_notify           // ← correct callback
     };
+
     right_knob->initialize(&cfg_right);
     gDeviceManager.addDevice(std::move(right_knob));
 
-    // RIGHT BUTTON (separate device)
+    // RIGHT BUTTON
     auto right_btn = std::make_unique<ButtonDevice>();
     right_btn->props.press_key = KEY_BACK;
+
     button_config_t btn_cfg_right = {
-        .pin = ENCODER1_SW_PIN,
-        .active_low = true,
-        .debounce_ms = 50,
-        .on_press = nullptr,
-        .on_release = nullptr,
-        .user_ctx = right_btn.get()
+        .pin          = ENCODER1_SW_PIN,
+        .active_low   = true,
+        .debounce_ms  = 50,
+        .on_press     = nullptr,
+        .on_release   = nullptr,
+        .user_ctx     = right_btn.get()
     };
     right_btn->initialize(&btn_cfg_right);
     gDeviceManager.addDevice(std::move(right_btn));
 
-    ESP_LOGI("ENCODERS", "Encoders and buttons registered separately");
+    ESP_LOGI("ENCODERS", "Encoders and buttons registered successfully");
     return ESP_OK;
 }
 
@@ -463,6 +496,9 @@ static esp_err_t stage_3_sd_mount(void) {
 TaskHandle_t core1TaskHandle = NULL;
 //moved core 2 task handle into the window enviroment but please trust me it exists
 
+
+
+
 void core1_createData(void* pv) {
 	esp_task_wdt_add(NULL); 
     while (1) {
@@ -476,11 +512,11 @@ WindowManager::getInstance().UpdateAll(false, true, true, true);
         esp_task_wdt_reset(); 
         // After drawing, swap so this frame becomes the FRONT buffer
     
-framebuffer_swap();           // make what we just drew the new front buffer
-g_display_dirty = true;
-if (core2TaskHandle) {
+	framebuffer_swap();           // make what we just drew the new front buffer
+	g_display_dirty = true;
+		if (core2TaskHandle) {
     xTaskNotifyGive(core2TaskHandle);
-}
+		}
         esp_task_wdt_reset(); 
         xTaskNotifyGive(core2TaskHandle);
         esp_task_wdt_reset(); 
@@ -503,6 +539,10 @@ REGISTER_APP(MyWatchApp, "WatchApp", make_watch_config);
 
 //handles some boot stuff and will also update sensors (not input, it's got it's own task)
 static void bootloader_final_app() {
+	
+	
+
+	
 	//added delays to stop weird timing from causing crashes
 	vTaskDelay(50);
     screen_set_driver(&onboard_screen_driver);

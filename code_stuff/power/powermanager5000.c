@@ -2,7 +2,9 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
-
+//location of this file to use in includes:
+// code_stuff/power/powermanager5000.c
+//unsure if the ulp will see this because ulp is in workspace/ulp not workspace/tusb_hid/main where everything else is
 /* ---------------- Config ---------------- */
 static const bool useStaticDefinesForPowermanager = true; // switch between bitmask vs dynamic
 

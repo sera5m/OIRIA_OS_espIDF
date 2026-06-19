@@ -1,9 +1,10 @@
+#pragma once
 #include <cstdint>
 #include <vector>
 #include <memory>
 #include <string>
 
-#pragma once
+
 #include "freertos/FreeRTOS.h"   // Keep FreeRTOS early
 #include "freertos/queue.h"
 
@@ -12,7 +13,8 @@
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "hardware/drivers/generic/button_driver.hpp"
 #include "os_code/middle_layer/input/hid_t.h"
-
+#include "tusb.h"
+//#include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
 // Forward declaration
 extern QueueHandle_t ProcInputQueTarget;
 extern bool usb_hid_enabled;  // ← Changed from 'bool usb_hid_enabled;' to 'extern'
@@ -65,6 +67,12 @@ struct InputEvent {
     HIDTarget target;
 };
 
+
+
+
+
+
+
 // ===================================================================
 // USB HID Functions (defined in input_handler.cpp)
 // ===================================================================
@@ -77,10 +85,19 @@ void hid_send_key(uint8_t keycode, bool pressed);
 void hid_send_mouse(int8_t dx, int8_t dy, uint8_t buttons);
 bool is_usb_hid_enabled(void);
 
+
+
+
+//========================device specific fuckshit===================
+// Forward declaration for ISR callback used by encoders
+//void encoder_isr_notify(void* ctx);
+void IRAM_ATTR encoder_isr_notify(void* ctx);
+
 #ifdef __cplusplus
 }
 #endif
 
+void hid_send_key_with_modifiers(uint8_t keycode, uint8_t modifiers, bool pressed); 
 // ===================================================================
 // Base Device
 class Device {
@@ -119,6 +136,7 @@ private:
     static void pressCallback(void* user_ctx, bool pressed);
 };
 
+void register_input_task_for_notifications(TaskHandle_t task);
 // KnobDevice class
 class KnobDevice : public Device {
 public:
@@ -149,17 +167,23 @@ public:
 
 // DeviceManager class
 class DeviceManager {
-private:
-    std::vector<std::unique_ptr<Device>> devices;
+    private:
+        std::vector<std::unique_ptr<Device>> devices;
+    
+    public:
+        void addDevice(std::unique_ptr<Device> device);
+        void updateAll();           // Updates ALL devices (legacy, if needed)
+        void updateEncoder();       // Updates only encoder/knob devices
+        void updateButtons();       // Updates only button devices
+        void removeDevice(const char* name);
+        void listDevices();
+    
+        size_t getDeviceCount() const { return devices.size(); }
+        const std::vector<std::unique_ptr<Device>>& getDevices() const { return devices; }
+    };
 
-public:
-    void addDevice(std::unique_ptr<Device> device);
-    void updateAll();
-    void removeDevice(const char* name);
-    void listDevices();
 
-    size_t getDeviceCount() const { return devices.size(); }
-    const std::vector<std::unique_ptr<Device>>& getDevices() const { return devices; }
-};
+
+
 
 extern DeviceManager gDeviceManager;

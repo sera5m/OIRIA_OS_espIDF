@@ -1,109 +1,47 @@
 #include "MS_watchapp.hpp"
-#include "esp_log.h"
-#include <stdint.h>
-#include "esp_timer.h"
-#include "hardware/drivers/lcd/fonts/font_basic_types.h"
-#include <string>
-#include <memory>
-#include <algorithm>
-#include <variant>
-#include "code_stuff/types.h"
-#include <math.h>
-#include "hardware/wiring/wiring.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "driver/gpio.h"
-#include "driver/spi_master.h"
-#include "driver/spi_common.h"
-#include "esp_heap_caps.h"
-#include "esp_psram.h"
-#include "rom/cache.h"
-#include <string.h>
-#include "hardware/drivers/abstraction_layers/al_scr.h"
-#include "hardware/drivers/lcd/fonts/font_avr_classics.h"
-#include "hardware/drivers/lcd/st7789v2/lcDriver.h"
-#include "os_code/core/window_env/wenv_basicThemes.h"
-#include <vector>
-#include "../../../hardware/drivers/psram_std/psram_std.hpp"
-#include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
-#include "os_code/core/rShell/enviroment/env_vars.h"
-#include "os_code/core/rShell/s_hell.hpp"
-#include "os_code/core/window_env/MWenv.hpp"
 #include "code_stuff/helperfunctions.hpp"
+#include "os_code/middle_layer/input/hid_t.h"
+#include "os_code/core/notification_sys/rs_notif_dispatcher.h"
+
+
 
 static const char* TAG = "MyWatchApp";
-WatchMode CurrentWatchMode=WatchMode::WM_MAIN;
-// ===================================================================
-// Fast helpers (no snprintf)
-// ===================================================================
-inline char* write_small_int(char* p, int value)
-{
-    if (value == 0) {
-        *p++ = '0';
-        return p;
-    }
-    if (value >= 100) {
-        *p++ = '0' + (value / 100);
-        value %= 100;
-    }
-    if (value >= 10) {
-        *p++ = '0' + (value / 10);
-        value %= 10;
-    }
-    *p++ = '0' + value;
-    return p;
+
+extern const char* months[];   // assume this exists globally
+
+char time_str[256] = {0};
+
+
+MyWatchApp::MyWatchApp(const ApplicationConfig& cfg) : AppBase(cfg) {
+    appTickRateHZ = 20;
 }
 
-char time_str[128];
- //this is stupid but i'll just alloc it here. gotta figure out how to get the alloc on runtime
-// ===================================================================
-
-MyWatchApp::MyWatchApp(const ApplicationConfig& cfg)
-    : AppBase(cfg)
-{
-    appTickRateHZ = 5;  // it's a clock. how often do you need to see the miliseconds. come on.
-}
-
-void MyWatchApp::on_start()
-{
-    ESP_LOGI(TAG, "WatchApp started – creating window");
+void MyWatchApp::on_start() {
+    ESP_LOGI(TAG, "WatchApp started");
 
     watch_window = std::make_shared<Window>(
         WindowCfg{
-            .Posx = static_cast<uint16_t>(0),
-            .Posy = static_cast<uint16_t>(0),
-            .Layer = 0,
-            .renderPriority = 0,
+            .Posx = 0, .Posy = 0,
+            .Layer = 0, .renderPriority = 0,
             .win_width = static_cast<uint16_t>(v_env.clamped_screen_dim_w),
-            .win_height = static_cast<uint16_t>((v_env.clamped_screen_dim_h / 2)),
+            .win_height = static_cast<uint16_t>(v_env.clamped_screen_dim_h),
             .win_rotation = 1,
-            .AutoAlignment = false,
-            .WrapText = true,
-            .borderless = false,
-            .ShowNameAtTopOfWindow = false,
+            .AutoAlignment = false, .WrapText = true,
+            .borderless = false, .ShowNameAtTopOfWindow = false,
             .TextSizeMult = 1,
-            .name = {0},
-            .optionsbitmask = 0,
-            .BorderColor = 0x12FF,
-            .BgColor = 0xAA00,
-            .Bg_secondaryColor = 0xFF34,
-            .WinTextColor = 0xFFFF,
+            .BorderColor = 0x12FF, .BgColor = 0xAA00,
+            .Bg_secondaryColor = 0xFF34, .WinTextColor = 0xFFFF,
             .backgroundType = BgFillType::waves,
             .UpdateRate = 1.0f
-        },
-        "time"
+        }, "Watch"
     );
-    
+
     WindowManager::getInstance().registerWindow(watch_window);
     bind_main_window(watch_window);
-    ESP_LOGI(TAG, "watch screen Window registered");
-    ESP_LOGI(TAG, "attemtping watch screen draw.....");
-    on_draw();  // initial draw
+    on_draw();
 }
 
-void MyWatchApp::on_stop()
-{
-    ESP_LOGI(TAG, "WatchApp stopped - full cleanup");
+void MyWatchApp::on_stop() {
     if (watch_window) {
         WindowManager::getInstance().unregisterWindow(watch_window);
         watch_window.reset();
@@ -113,137 +51,169 @@ void MyWatchApp::on_stop()
 void MyWatchApp::on_pause()  { ESP_LOGI(TAG, "WatchApp paused"); }
 void MyWatchApp::on_resume() { ESP_LOGI(TAG, "WatchApp resumed"); }
 
+void MyWatchApp::next_mode() {
+    current_mode_index = (current_mode_index + 1) % static_cast<int>(WM_COUNT);
+    CurrentWatchMode = static_cast<WatchMode>(current_mode_index);
+    on_draw();
+}
 void MyWatchApp::on_draw() {
     if (!watch_window) return;
-    
-    static int last_second = -1;
-    int current_second = v_env.displayTime.ss;
-    
-    if (current_second != last_second) {
-        int month_idx = v_env.displayTime.month - 1;
-        if (month_idx < 0) month_idx = 0;
-        if (month_idx > 11) month_idx = 11;
-        
-        snprintf(time_str, sizeof(time_str), 
-                 "<|size=5|><|color=0xAD0F|>%02d:%02d<|size=2|>:%02d<|n|><|n|><|size=2|>%s %d, %d", 
-                 v_env.displayTime.hh, 
-                 v_env.displayTime.mm, 
-                 v_env.displayTime.ss,
-                 months[month_idx],
-                 v_env.displayTime.day,
-                 v_env.displayTime.year);
-        
-        ESP_LOGI(TAG, "Time string: %s", time_str);  // Debug
-        
-        watch_window->SetText(time_str);
-        watch_window->dirty = true;
-        last_second = current_second;
+
+    switch (CurrentWatchMode) {
+        case WM_MAIN:       draw_main(); break;
+        case WM_STOPWATCH:  draw_stopwatch(); break;
+        case WM_ALARMS:     draw_alarms(); break;
+        case WM_TIMER:      draw_timers(); break;
+        case WM_NTP_SYNCH:  draw_ntp_sync(); break;
+        case WM_SET_TIME:   draw_set_time(); break;
+        default:            draw_main(); break;
     }
+    watch_window->dirty = true;
+}
+void MyWatchApp::prev_mode() {
+    current_mode_index = (current_mode_index + static_cast<int>(WM_COUNT) - 1) % static_cast<int>(WM_COUNT);
+    CurrentWatchMode = static_cast<WatchMode>(current_mode_index);
+    on_draw();
 }
 
-void MyWatchApp::tick_app(uint32_t delta_ms)
-{
-    static int call_count = 0;
-    ESP_LOGI(TAG, "tick_app called #%d, delta_ms=%lu", ++call_count, delta_ms);  // ← ADD THIS
-    
-    static uint32_t accumulator = 0;
-    accumulator += delta_ms;
+void MyWatchApp::draw_main() {
+    int month_idx = std::max(0, std::min(11, v_env.displayTime.month - 1));
+    snprintf(time_str, 256,
+             "<|size=6|><|color=0xAD0F|>%02d:%02d:%02d<|n|><|size=2|>%s %d, %d",
+             v_env.displayTime.hh, v_env.displayTime.mm, v_env.displayTime.ss,
+             months[month_idx], v_env.displayTime.day, v_env.displayTime.year);
+    watch_window->SetText(time_str);
+}
 
-    if (accumulator >= 500) {
-        ESP_LOGI(TAG, "Calling on_draw from tick_app");  // ← ADD THIS
+void MyWatchApp::draw_stopwatch() {
+    uint32_t total_sec = stopwatch_ms / 1000;
+    uint32_t min = total_sec / 60;
+    uint32_t sec = total_sec % 60;
+    uint32_t ms  = (stopwatch_ms % 1000) / 10;
+
+    snprintf(time_str, 256,
+             "<|size=5|><|color=0x00FF00|>STOPWATCH<|n|>%02lu:%02lu.%02lu<|n|>"
+             "<|size=2|>ENTER = %s", min, sec, ms,
+             stopwatch_running ? "STOP" : "START");
+    watch_window->SetText(time_str);
+}
+
+void MyWatchApp::draw_alarms() {
+    std::string txt = "<|size=3|>ALARMS<|n|>";
+    for (size_t i = 0; i < alarms.size() && i < 3; ++i) {
+        if (!alarms[i].enabled) continue;
+        char line[64];
+        snprintf(line, sizeof(line), "%02d:%02d<|n|>", alarms[i].hh, alarms[i].mm);
+        txt += line;
+    }
+    watch_window->SetText(txt.c_str());
+}
+
+void MyWatchApp::draw_timers() {
+    std::string txt = "<|size=3|>TIMERS<|n|>";
+    for (size_t i = 0; i < timers.size(); ++i) {
+        uint32_t rem = timers[i].remaining_ms / 1000;
+        uint32_t h = rem / 3600;
+        uint32_t m = (rem % 3600) / 60;
+        uint32_t s = rem % 60;
+        char line[64];
+        snprintf(line, sizeof(line), "%s %02lu:%02lu:%02lu<|n|>",
+                 timers[i].running ? "[RUN]" : "[STOP]", h, m, s);
+        txt += line;
+    }
+    watch_window->SetText(txt.c_str());
+}
+
+void MyWatchApp::draw_ntp_sync() {
+    watch_window->SetText("<|size=4|>NTP SYNCH<|n|>Placeholder");
+}
+
+void MyWatchApp::draw_set_time() {
+    watch_window->SetText("<|size=4|>SET TIME<|n|>Placeholder");
+}
+
+void MyWatchApp::tick_app(uint32_t delta_ms) {
+    if (stopwatch_running) {
+        stopwatch_ms += delta_ms;
+    }
+
+    for (auto& t : timers) {
+        if (t.running && t.remaining_ms > delta_ms) {
+            t.remaining_ms -= delta_ms;
+        } else if (t.running) {
+            t.remaining_ms = 0;
+            t.running = false;
+           // h_alert_dispatch(30, true, 100, true);
+        }
+    }
+
+    static uint32_t accum = 0;
+    accum += delta_ms;
+    if (accum >= 200) {
         on_draw();
-        accumulator = 0;
+        accum = 0;
     }
 }
 
+void MyWatchApp::handle_enter() {
+    switch (CurrentWatchMode) {
+        case WM_STOPWATCH:
+            stopwatch_running = !stopwatch_running;
+            break;
 
+        case WM_TIMER:
+            if (selected_timer < (int)timers.size()) {
+                auto& t = timers[selected_timer];
+                t.running = !t.running;
+                if (t.running && t.remaining_ms == 0) {
+                    t.remaining_ms = 3600000; // 1 hour default
+                }
+            }
+            break;
 
+        default:
+            break;
+    }
+    on_draw();
+}
 
-
-
-
-
-
-
-
-void MyWatchApp::watchapp_back(){  // This is a FREE function (not a class member)
+void MyWatchApp::handle_back_in_mode() {
     if (CurrentWatchMode == WM_MAIN) {
         appManager::instance().close_current_and_open("MenuApp");
     } else {
         CurrentWatchMode = WM_MAIN;
-        on_draw();  
+        current_mode_index = 0;
+        on_draw();
     }
 }
 
-
-void MyWatchApp::receive_event_input(const void* event)
-{
+void MyWatchApp::receive_event_input(const void* event) {
     if (!event) return;
     
     const InputEvent* ev = static_cast<const InputEvent*>(event);
-    
-    ESP_LOGI(TAG, "Watch received input: key=0x%04X, action=%d", ev->key, (int)ev->action);
-    
+
     switch (ev->action) {
         case KeyAction::Tap:
-            ESP_LOGI(TAG, "Key tap: 0x%04X", ev->key);
             switch (ev->key) {
-                case KEY_UP:
-                    ESP_LOGI(TAG, "UP pressed");
-                    break;
-                case KEY_DOWN:
-                    ESP_LOGI(TAG, "DOWN pressed");
-                    break;
-                case KEY_LEFT:
-                    ESP_LOGI(TAG, "LEFT pressed");
-                    break;
-                case KEY_RIGHT:
-                    ESP_LOGI(TAG, "RIGHT pressed");
-                    break;
-                case KEY_ENTER:
-                    ESP_LOGI(TAG, "ENTER pressed - switch to stopwatch?");
-                    CurrentWatchMode = WM_STOPWATCH;
-                    on_draw();
-                    break;
-                case KEY_BACK:
-                    ESP_LOGI(TAG, "BACK pressed");
-                    watchapp_back();
-                    break;
+                case KEY_LEFT:  prev_mode(); break;
+                case KEY_RIGHT: next_mode(); break;
+                case KEY_ENTER: handle_enter(); break;
+                case KEY_BACK:  handle_back_in_mode(); break;
             }
             break;
-            
-        case KeyAction::PositionDelta:
-            ESP_LOGI(TAG, "Knob delta: %+d", ev->delta);
-            // Use knob for something - maybe brightness, volume, or scrolling
-            if (ev->delta > 0) {
-                // Rotated clockwise
-            } else if (ev->delta < 0) {
-                // Rotated counter-clockwise
-            }
-            break;
-            
+
         case KeyAction::Hold:
-            ESP_LOGI(TAG, "Key hold: 0x%04X", ev->key);
-            break;
-            
-        default:
-            ESP_LOGW(TAG, "Unknown action: %d", (int)ev->action);
+        case KeyAction::Release:
+        case KeyAction::Repeat:
+        case KeyAction::Unknown:
+        case KeyAction::PositionDelta:
+            // ignored for now
             break;
     }
 }
 
-
-//appManager::swap_task
-
-void MyWatchApp::suspend()
-{
-    ESP_LOGI(TAG, "WatchApp suspending");
-    on_pause();
-}
-
-void MyWatchApp::force_close()
-{
-    ESP_LOGI(TAG, "WatchApp force close");
+void MyWatchApp::suspend()  { on_pause(); }
+void MyWatchApp::force_close() {
     on_stop();
     stop_task();
 }

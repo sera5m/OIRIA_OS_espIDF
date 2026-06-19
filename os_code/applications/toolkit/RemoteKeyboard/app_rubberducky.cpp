@@ -3,7 +3,26 @@
 #include "esp_log.h"
 #include "os_code/middle_layer/input/input_handler.hpp"
 
+
+#include "tk_rd.hpp"
+#include "esp_log.h"
+#include "os_code/middle_layer/input/input_handler.hpp"
+#include "os_code/middle_layer/input/keymap.hpp"
+
 static const char* TAG = "RubberDuckyApp";
+
+RubberDuckyApp::RubberDuckyApp() {
+    m_parser = std::make_unique<RubberDucky::DuckyParser>();
+    
+    m_parser->setOnKeySend([](uint8_t keycode, uint8_t modifiers, bool pressed) {
+        hid_send_key_with_modifiers(keycode, modifiers, pressed);
+    });
+    
+    m_parser->setOnDelay([](uint32_t ms) {
+        ESP_LOGD(TAG, "Delay %lu ms", ms);
+    });
+}
+
 
 RubberDuckyApp::RubberDuckyApp() {
     m_parser = std::make_unique<RubberDucky::DuckyParser>();
@@ -71,3 +90,17 @@ void RubberDuckyApp::on_input(const InputEvent& ev) {
             break;
     }
 }
+
+// In RubberDuckyApp::RubberDuckyApp()
+m_parser->setOnKeySend([](uint8_t keycode, uint8_t modifiers, bool pressed) {
+    hid_send_key_with_modifiers(keycode, modifiers, pressed);
+});
+
+Recommendation: Use the central get_hid_keycode() everywhere now.
+Would you like me to:
+
+Finish the full updated kb_rd.cpp with better parsing?
+Add SD card file listing for .duck files?
+Add a background execution task so the UI doesn't freeze during long scripts?
+
+Let me know what you want next and I'll deliver the complete updated files.

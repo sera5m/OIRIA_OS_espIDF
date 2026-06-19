@@ -30,28 +30,28 @@
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/core/rShell/s_hell.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
+#include "tusb.h"
+#include "os_code/middle_layer/input/hid_t.h"
+#include "os_code/core/notification_sys/rs_notif_dispatcher.h"
 
 
 
-typedef enum{WM_MAIN,
-     WM_STOPWATCH,
-     WM_ALARMS,
-     WM_TIMER,
-     WM_NTP_SYNCH,
-      WM_SET_TIME,
-     WM_SET_TIMEZONE,
-     WM_COUNT
-    }WatchMode;
-//back in 2025ish when i was originally working on this i had a mode thing for a menu,it was messy so i'll just add a menu app instead of this nonsense
+// Forward declaration
+extern char time_str[256];   // Fixed size declaration
+extern const char* months[];
 
-// Helper function to convert numbers to string with 2-digit formatting
-inline std::string tostr(int value) {
-    char buffer[3];
-    snprintf(buffer, sizeof(buffer), "%02d", value);
-    return std::string(buffer);
-}
+extern void h_alert_dispatch(uint16_t duration_s, bool run_even_when_sleep, uint8_t loudness, bool useBuzzer);
 
-extern char time_str[];
+typedef enum {
+    WM_MAIN,
+    WM_STOPWATCH,
+    WM_ALARMS,
+    WM_TIMER,
+    WM_NTP_SYNCH,
+    WM_SET_TIME,
+    WM_SET_TIMEZONE,
+    WM_COUNT
+} WatchMode;
 
 class MyWatchApp : public AppBase {
 public:
@@ -68,12 +68,46 @@ public:
     void on_resume() override;
     void on_draw() override;
 
-    //custom locals
     void watchapp_back();
+
 private:
     std::shared_ptr<Window> watch_window;
-};
 
+    WatchMode CurrentWatchMode = WM_MAIN;
+    int current_mode_index = 0;
+
+    // Stopwatch
+    uint32_t stopwatch_ms = 0;
+    bool stopwatch_running = false;
+
+    // Timers
+    struct Timer {
+        uint32_t remaining_ms = 0;
+        bool running = false;
+    };
+    std::vector<Timer> timers{3};  // 3 default timers
+    int selected_timer = 0;
+    bool timer_edit_mode = false;
+
+    // Alarms (basic)
+    struct Alarm {
+        uint8_t hh = 8, mm = 0;
+        bool enabled = true;
+    };
+    std::vector<Alarm> alarms{4};
+
+    void next_mode();
+    void prev_mode();
+    void handle_enter();
+    void handle_back_in_mode();
+
+    void draw_main();
+    void draw_stopwatch();
+    void draw_alarms();
+    void draw_timers();
+    void draw_ntp_sync();
+    void draw_set_time();
+};
 
 static ApplicationConfig make_watch_config() {
     ApplicationConfig cfg;

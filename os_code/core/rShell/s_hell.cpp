@@ -6,12 +6,27 @@
 #include "os_code/middle_layer/input/input_devs_agg.hpp"
 #include "os_code/middle_layer/input/input_handler.hpp"
 #include <functional>
-
+#include "esp_task_wdt.h" 
 #include "os_code/core/rShell/s_hell.hpp"
 #include "esp_log.h"
 #include <cstring>
+#include "os_code/core/notification_sys/rs_notif_dispatcher.h"
 
 static const char* TAG = "AppFramework";
+
+
+
+//this function so we can see the fuck going on here
+void print_stack_usage(const char* task_name) {
+    TaskHandle_t task = xTaskGetCurrentTaskHandle();
+    UBaseType_t high_water = uxTaskGetStackHighWaterMark(task);
+    ESP_LOGI("STACK", "%s: High water mark = %u words (%u bytes free)", 
+             task_name, high_water, high_water * 4);
+}
+
+
+
+
 
 // -------------------------------------------------------------------
 // Dummy implementations of the API functions (replace with your actual system calls)
@@ -129,6 +144,7 @@ appManager::appManager()
     : ref_wm(WindowManager::getInstance()) //now with perminant binding for the silly
 {
     ESP_LOGW(TAG, "started application manager task");
+    notification_system_init();
 }
 
 // destructor
@@ -295,4 +311,16 @@ bool appManager::is_app_running(const std::string& name) {
     return get_app(name) != nullptr;
 }
 
+static void notification_task(void* pv) {
+    ESP_LOGI("NOTIF_TASK", "Notification background task started");
+    
+    while (true) {
+        notification_process();
+        vTaskDelay(pdMS_TO_TICKS(60 * 1000));  // Check every minute
+    }
+}
 
+// Call this from main after boot
+void start_notification_task() {
+    xTaskCreate(notification_task, "notif_task", 4096, NULL, 2, NULL);
+}
