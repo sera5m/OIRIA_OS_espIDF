@@ -102,11 +102,11 @@ void load_ulp(void) {
 
     esp_err_t ret = ulp_riscv_load_binary(ulp_main_bin_start, bin_size);
     if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "✅ ULP RISC-V loaded successfully!");
-        ulp_set_wakeup_period(0, 5ULL * 60 * 1000000ULL); // 5 minutes
+        ESP_LOGI(TAG, "ULP RISC-V loaded successfully");
+        ulp_set_wakeup_period(0, 5ULL * 60 * 1000000ULL);
         ulp_riscv_run();
     } else {
-        ESP_LOGE(TAG, "❌ ULP load failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "ULP load failed: %s", esp_err_to_name(ret));
     }
 }
 

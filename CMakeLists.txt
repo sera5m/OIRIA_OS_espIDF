@@ -76,7 +76,7 @@ PRIV_REQUIRES
 # ====================== ULP RISC-V (ESP32-S3) ======================
 #the block for this is in the other thingy, go check under ulp/
 # Add this
-list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/ulp_component")
+#list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/ulp_component")
 
 target_compile_options(${COMPONENT_LIB} PRIVATE 
     -Wno-unused 
