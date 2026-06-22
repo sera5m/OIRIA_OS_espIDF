@@ -38,6 +38,12 @@ idf_component_register(
         # Notification system
         "os_code/core/notification_sys/rs_notif_dispatcher.c"
 
+"sss/shared_state.c"
+
+		#"workspace\tusb_hid\ulp_component\ulp
+		#"ulp_component/ulp/shared_state.h"
+		#"ulp_shit/shared_state.h"
+		
     INCLUDE_DIRS
         "."
         "code_stuff"
@@ -56,6 +62,11 @@ idf_component_register(
         "hardware/wiring"
         "hardware/drivers/psram_std"
         "os_code/core/notification_sys"
+        
+        #external managed components
+    
+    "os_code/core/notification_sys"
+    "sss"
 
 PRIV_REQUIRES
         nvs_flash
@@ -71,17 +82,16 @@ PRIV_REQUIRES
         esp_timer
         esp_driver_i2c
         ulp
+        ulp_component
 )
 
-# ====================== ULP RISC-V (ESP32-S3) ======================
-#the block for this is in the other thingy, go check under ulp/
-# Add this
-#list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/ulp_component")
 
 target_compile_options(${COMPONENT_LIB} PRIVATE 
     -Wno-unused 
-    -fexceptions 
+    -fexceptions #oops, gotta keep that bianary small
     -Wno-missing-field-initializers 
     -Wno-error=missing-field-initializers 
     -Wno-format-truncation
+    
 )
+

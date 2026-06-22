@@ -2,6 +2,7 @@
 #include "intercore_message.hpp"
 #include "esp_log.h"
 #include <string.h>
+#include "ulp_riscv.h"
 
 RTC_DATA_ATTR IntercoreMessage intercore_queue[MAX_INTERCORE_MSGS];
 RTC_DATA_ATTR uint8_t intercore_queue_count = 0;

@@ -70,8 +70,12 @@
 #include "os_code/applications/watch/MS_watchapp.hpp"
 #include  "os_code/applications/menu/app_menu.hpp"
 #include "os_code/core/notification_sys/rs_notif_dispatcher.h"
-//#include "ulp_component/ulp/ulp_main.h"
 #include "ulp_riscv.h"
+//#include "ulp_riscv/ulp_riscv.h"
+#include "shared_state.h"   // from the ulp_component
+
+//extern RTC_DATA_ATTR SharedState shared_state;
+
 
 
 
@@ -94,22 +98,40 @@ DeviceManager deviceManager;
 QueueHandle_t ProcInputQueTarget = nullptr;
 
 static const char* TAG = "main";
-void load_ulp(void) {
-    extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
-    extern const uint8_t ulp_main_bin_end[]   asm("_binary_ulp_main_bin_end");
 
-    size_t bin_size = ulp_main_bin_end - ulp_main_bin_start;
+// Remove this old line completely:
+// extern RTC_DATA_ATTR SharedState shared_state;
 
-    esp_err_t ret = ulp_riscv_load_binary(ulp_main_bin_start, bin_size);
-    if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "ULP RISC-V loaded successfully");
-        ulp_set_wakeup_period(0, 5ULL * 60 * 1000000ULL);
-        ulp_riscv_run();
-    } else {
-        ESP_LOGE(TAG, "ULP load failed: %s", esp_err_to_name(ret));
+// Replace the old main_snotiync_from_ulp with:
+void main_sync_from_ulp() {
+    if (ulp_wake_main_now) {
+        main_handle_ulp_wakeup();
     }
 }
 
+// Updated load_ulp()
+void load_ulp(void)
+{
+    extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
+    extern const uint8_t ulp_main_bin_end[]   asm("_binary_ulp_main_bin_end");
+
+    esp_err_t ret = ulp_riscv_load_binary(ulp_main_bin_start,
+                    ulp_main_bin_end - ulp_main_bin_start);
+
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "ULP load failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    ulp_init_shared();
+    ulp_sync_from_main();
+
+    ulp_set_wakeup_period(0, 5ULL * 60ULL * 1000000ULL);
+    ret = ulp_riscv_run();
+    ESP_ERROR_CHECK(ret);
+
+    ESP_LOGI(TAG, "✅ ULP RISC-V started successfully");
+}
 //the window manager too
 
 

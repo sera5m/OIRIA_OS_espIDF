@@ -1,52 +1,78 @@
 #include "rs_notif_dispatcher.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "shared_state.h"   // This now properly declares ULP variables
+#include <string.h>         // For memset, strncpy
 
 static const char* TAG = "NOTIF";
 
-RTC_DATA_ATTR SharedState shared_state;
-SharedState* shared = &shared_state;
+#define MAX_NOTIFICATIONS 8
+static Notification notifs[MAX_NOTIFICATIONS];
+static uint8_t notif_count = 0;
 
 void notification_system_init(void) {
-    memset(shared, 0, sizeof(SharedState));
-    ESP_LOGI(TAG, "Notification system ready (RTC)");
+    notif_count = 0;
+    memset(notifs, 0, sizeof(notifs));
+    ulp_init_shared();                    // Initialize ULP interface
+    ESP_LOGI(TAG, "Notification system ready (using local + ULP)");
 }
 
-bool notification_post(const char* title, const char* msg, uint16_t duration_s,
-                       bool immediate, bool run_even_sleep, uint8_t loudness, bool buzzer) {
-    if (shared->notif_count >= MAX_NOTIFICATIONS) return false;
 
-    Notification* n = &shared->notifs[shared->notif_count++];
-    n->id = shared->next_id++;
+
+
+bool notification_post(const char* title, const char* msg, uint8_t duration_s,
+                       bool immediate, bool run_even_sleep, uint8_t loudness, bool buzzer) {
+    
+    if (notif_count >= MAX_NOTIFICATIONS) return false;
+
+    Notification* n = &notifs[notif_count++];
+    n->id = notif_count;  // simple ID
     n->duration_s = duration_s ? duration_s : 30;
     n->loudness = loudness;
     n->use_buzzer = buzzer;
-    n->run_even_sleep = run_even_sleep;
+    n->run_even_when_sleep = run_even_sleep;
     n->immediate = immediate;
-    n->minutes_delay = immediate ? 0 : 5;
     n->timestamp = (uint32_t)(esp_timer_get_time() / 1000000ULL);
 
     strncpy(n->title, title ? title : "Alert", sizeof(n->title)-1);
     strncpy(n->message, msg ? msg : "", sizeof(n->message)-1);
 
     ESP_LOGI(TAG, "Posted: %s", n->title);
+
+    if (immediate) {
+        // TODO: call your alert handler here
+    }
+
     return true;
 }
 
 void notification_process(void) {
-    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000000ULL);
-    for (int i = 0; i < shared->notif_count; ) {
-        Notification* n = &shared->notifs[i];
-        if (n->immediate || ((now - n->timestamp) / 60 >= n->minutes_delay)) {
-            //h_alert_dispatch(n->duration_s, n->run_even_sleep, n->loudness, n->use_buzzer);
-            shared->notifs[i] = shared->notifs[--shared->notif_count];
-        } else i++;
+    // Process immediate notifications, etc.
+    // For now just a stub
+}
+
+void ulp_add_alarm_from_main(uint8_t hour, uint8_t minute, uint8_t days, bool enabled, bool vibrate, bool repeat_daily) {
+    Alarm a = {hour, minute, days, enabled, vibrate, repeat_daily};
+    ulp_add_alarm(&a);
+}
+
+void ulp_add_timer_from_main(uint32_t seconds, uint8_t id) {
+    Timer t = {seconds, true, false, id};
+    ulp_add_timer(&t);
+}
+/*
+void main_sync_from_ulp(void) {
+    if (shared_state.wake_main_now) {
+        shared_state.wake_main_now = false;
+        for (int i = 0; i < shared_state.notif_count; i++) {
+            if (shared_state.notifs[i].immediate) {
+                // h_alert_dispatch(....);
+            }
+        }
     }
 }
 
-void ulp_sync_to_main(void) { /* stub */ }
-void main_sync_to_ulp(void) { /* stub */ }
-
-// Simple stubs
-void alarm_post(uint8_t h, uint8_t m, uint8_t days, bool en) { /* TODO */ }
-void timer_post(uint32_t s, bool r) { /* TODO */ }
+void main_sync_to_ulp(void) {
+    // TODO: sync alarms/timers from main structures to shared_state
+}
+*/
