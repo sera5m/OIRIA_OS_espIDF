@@ -108,6 +108,8 @@ static const char* TAG = "main";
 
 // After other init
 esp_err_t load_ulp(void) {
+	
+	
     extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
     extern const uint8_t ulp_main_bin_end[]   asm("_binary_ulp_main_bin_end");
 
@@ -117,9 +119,12 @@ esp_err_t load_ulp(void) {
     ulp_set_wakeup_period(0, 60 * 1000 * 1000);  // every 60 seconds (1 minute)
     ESP_ERROR_CHECK(ulp_riscv_run());
 
-    ulp_init_shared();
+    shared_state_init();
     return ESP_OK;
 }
+
+
+
 /* //Updated load_ulp()
 void load_ulp(void)
 {
@@ -312,8 +317,8 @@ static esp_err_t stage_1_encoders()
 
 
 
-static esp_err_t stage_2_i2c_scan(void)
-{
+static esp_err_t stage_2_i2c_scan(void){
+	
     constexpr gpio_num_t SCL = GPIO_NUM_8;
     constexpr gpio_num_t SDA = GPIO_NUM_9;
 
@@ -433,7 +438,7 @@ static esp_err_t stage_2_i2c_scan(void)
 
 static esp_err_t boot_stage2andaHalf(void){
 	//set cpu speed
-	esp_pm_config_esp32s3_t pm_config = {
+	esp_pm_config_t  pm_config = {
         .max_freq_mhz = v_env.cpuMhzMax,
         .min_freq_mhz = v_env.cpuMhzMin,
         .light_sleep_enable = false

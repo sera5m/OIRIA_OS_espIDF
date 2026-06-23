@@ -2,18 +2,19 @@
 #include "ulp_riscv.h"
 #include "esp_attr.h"
 #include <stdbool.h>
-RTC_DATA_ATTR uint8_t ulp_hour = 0;
-RTC_DATA_ATTR uint8_t ulp_minute = 0;
-RTC_DATA_ATTR bool ulp_wake_main_now = false;
+
+RTC_DATA_ATTR uint8_t hour = 0;        // Was ulp_hour
+RTC_DATA_ATTR uint8_t minute = 0;      // Was ulp_minute
+RTC_DATA_ATTR bool wake_main_now = false; // Was ulp_wake_main_now
 
 void ulp_entry(void) {
-    ulp_minute++;
-    if (ulp_minute >= 60) {
-        ulp_minute = 0;
-        ulp_hour = (ulp_hour + 1) % 24;
+    minute++;
+    if (minute >= 60) {
+        minute = 0;
+        hour = (hour + 1) % 24;
     }
-    if (ulp_minute % 5 == 0) {   // every 5 "minutes" for testing
-        ulp_wake_main_now = true;
+    if (minute % 5 == 0) {
+        wake_main_now = true;
     }
 }
 

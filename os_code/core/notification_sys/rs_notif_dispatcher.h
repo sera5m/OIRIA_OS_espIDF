@@ -74,7 +74,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_attr.h"
-
+#include "ulp_riscv.h"
 // Keep your Notification type (notifications stay on main CPU for now)
 typedef struct {
     uint32_t id;
