@@ -67,6 +67,10 @@ idf_component_register(
     
     "os_code/core/notification_sys"
     "sss"
+    
+    REQUIRES
+     ulp
+    
 
 PRIV_REQUIRES
         nvs_flash
@@ -82,7 +86,6 @@ PRIV_REQUIRES
         esp_timer
         esp_driver_i2c
         ulp
-        ulp_component
 )
 
 
@@ -95,3 +98,20 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
     
 )
 
+
+
+# ==================== ULP ====================
+set(ulp_app_name ulp_main)
+set(ulp_sources "ulp/ulp_main.c")
+set(ulp_exp_dep_srcs 
+    "tusb_hid_example_main.cpp" 
+    "sss/shared_state.h" 
+    "sss/shared_state.c"
+    "ulp/ulp_main.h"
+)
+
+ulp_embed_binary(${ulp_app_name} "${ulp_sources}" "${ulp_exp_dep_srcs}")
+
+
+#may fuck it up or not idk ngl
+#target_link_libraries(${COMPONENT_LIB} ulp_main)

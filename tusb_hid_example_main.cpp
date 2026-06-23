@@ -72,7 +72,7 @@
 #include "os_code/core/notification_sys/rs_notif_dispatcher.h"
 #include "ulp_riscv.h"
 //#include "ulp_riscv/ulp_riscv.h"
-#include "shared_state.h"   // from the ulp_component
+#include "sss/shared_state.h"   // from the ulp_component
 
 //extern RTC_DATA_ATTR SharedState shared_state;
 
@@ -103,13 +103,24 @@ static const char* TAG = "main";
 // extern RTC_DATA_ATTR SharedState shared_state;
 
 // Replace the old main_snotiync_from_ulp with:
-void main_sync_from_ulp() {
-    if (ulp_wake_main_now) {
-        main_handle_ulp_wakeup();
-    }
-}
 
-// Updated load_ulp()
+
+
+// After other init
+esp_err_t load_ulp(void) {
+    extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
+    extern const uint8_t ulp_main_bin_end[]   asm("_binary_ulp_main_bin_end");
+
+    ESP_ERROR_CHECK(ulp_riscv_load_binary(ulp_main_bin_start,
+        (ulp_main_bin_end - ulp_main_bin_start) / sizeof(uint32_t)));
+
+    ulp_set_wakeup_period(0, 60 * 1000 * 1000);  // every 60 seconds (1 minute)
+    ESP_ERROR_CHECK(ulp_riscv_run());
+
+    ulp_init_shared();
+    return ESP_OK;
+}
+/* //Updated load_ulp()
 void load_ulp(void)
 {
     extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
@@ -131,7 +142,7 @@ void load_ulp(void)
     ESP_ERROR_CHECK(ret);
 
     ESP_LOGI(TAG, "✅ ULP RISC-V started successfully");
-}
+}*/
 //the window manager too
 
 

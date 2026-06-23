@@ -51,15 +51,7 @@ void notification_process(void) {
     // For now just a stub
 }
 
-void ulp_add_alarm_from_main(uint8_t hour, uint8_t minute, uint8_t days, bool enabled, bool vibrate, bool repeat_daily) {
-    Alarm a = {hour, minute, days, enabled, vibrate, repeat_daily};
-    ulp_add_alarm(&a);
-}
 
-void ulp_add_timer_from_main(uint32_t seconds, uint8_t id) {
-    Timer t = {seconds, true, false, id};
-    ulp_add_timer(&t);
-}
 /*
 void main_sync_from_ulp(void) {
     if (shared_state.wake_main_now) {
@@ -76,3 +68,10 @@ void main_sync_to_ulp(void) {
     // TODO: sync alarms/timers from main structures to shared_state
 }
 */
+void ulp_add_alarm_from_main(uint8_t hour, uint8_t minute, uint8_t days, bool enabled, bool vibrate, bool repeat_daily) {
+    ulp_add_alarm(hour, minute);   // simple version
+}
+
+void ulp_add_timer_from_main(uint32_t seconds, uint8_t id) {
+    ESP_LOGI("NOTIF", "Timer %d sec (stub)", seconds);
+}
