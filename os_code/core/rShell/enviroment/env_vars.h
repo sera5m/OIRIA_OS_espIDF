@@ -43,6 +43,7 @@ extern const char* months[];
 
 
 typedef struct {
+    
     // =========================
     // SYSTEM / TEMPERATURE
     // =========================
@@ -64,8 +65,12 @@ typedef struct {
     // DISPLAY
     // =========================
     uint8_t brightness;       // backlight level
-    uint8_t fpsTarget;        // render cap
-    bool displayEnabled;
+    uint16_t fpsTarget;        // render cap
+    uint16_t framethrottle_target;
+    
+    bool headless; //don't bother with the screen
+    bool UseFrameThrottle;
+
     uint16_t  screen_dim_w;
     uint16_t screen_dim_h; 
 
@@ -120,8 +125,10 @@ typedef struct {
 extern EnvConfig v_env; //current configuration
 //note to self add a defaults for hot reload
 
-
+uint16_t GetFrameRateTarget(); 
 void update_display_time(s_displayTime *t);
+
+
 
 typedef enum {
     DATA_NONE = 0,
@@ -145,6 +152,61 @@ typedef struct {
     } data;
 
 } ArbitraryUserData;
+
+//helpful conversions
+// Helpful conversions
+
+inline float Targetfps_to_ms()
+{
+    const uint16_t fps = (v_env.UseFrameThrottle)
+        ? v_env.framethrottle_target
+        : v_env.fpsTarget;
+
+    return (fps != 0)
+        ? (1000.0f / (float)fps)
+        : 0.0f;
+}
+
+inline uint16_t Targetfps_to_i_ms()
+{
+    const uint16_t fps = (v_env.UseFrameThrottle)
+        ? v_env.framethrottle_target
+        : v_env.fpsTarget;
+
+    return (fps != 0)
+        ? (uint16_t)((1000u + (fps / 2u)) / fps)
+        : (uint16_t)0;
+}
+
+// timing.h
+
+static inline float fps_to_ms(uint16_t fps)
+{
+    return (fps != 0)
+        ? (1000.0f / (float)fps)
+        : 0.0f;
+}
+
+static inline uint16_t f_ms_to_fps(float ms)
+{
+    return (ms > 0.0f)
+        ? (uint16_t)(1000.0f / ms)
+        : (uint16_t)0;
+}
+
+static inline uint16_t i_ms_to_fps(uint16_t ms)
+{
+    return (ms != 0)
+        ? (uint16_t)(1000.0f / (float)ms)
+        : (uint16_t)0;
+}
+
+
+
+
+
+
+
 
 
 #ifdef __cplusplus

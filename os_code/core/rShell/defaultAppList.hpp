@@ -96,6 +96,7 @@ public:
         return nullptr;
     }
     
+    
     // Open/launch an app by name
     bool open_app(const std::string& name) {
         auto app = appManager::instance().get_app(name);

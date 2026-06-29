@@ -1,3 +1,10 @@
 https://www.reddit.com/r/esp32/comments/1rfi1s5/finally_turned_this_into_a_gamepad/
 
 this person turned it into a gamepad stick twist thingy which was cool, so i liked it and wanna do this
+
+
+
+
+https://cborbook.com/part_1/practical_introduction_to_cbor.html
+cbor replaces json internally, which is something i was gonna make anyway lolol
+gotta add storage support for this so we can save cbor files 

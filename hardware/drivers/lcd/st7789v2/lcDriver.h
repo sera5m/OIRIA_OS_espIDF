@@ -82,6 +82,7 @@ extern spi_device_handle_t spi_lcd;
 extern uint16_t *framebuffer;        // Already exists - keep it
 extern uint16_t *framebuffer_front;  // For display task
 extern uint16_t *framebuffer_back;   // For drawing task
+extern bool framebuffer_allocd; //is it allocated
 
 void framebuffer_swap(void);         // New function
 extern volatile bool buffer_swap_pending;
@@ -90,6 +91,7 @@ void framebuffer_swap(void);  // Atomically swap front/back
 
 // --------------------- INIT ---------------------
 void framebuffer_alloc(void);
+bool framebuffer_delete(void);
 void fb_clear(uint16_t color);
 // lcDriver.h - should have these
 void lcd_init_simple(void);

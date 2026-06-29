@@ -39,6 +39,8 @@
 //get this from psram string and whatnot
 // forward declarations
 #include "hardware/drivers/lcd/st7789v2/t_shapes.h"
+#include <atomic>
+
 class Window;
 class Canvas;
 struct CanvasCfg;
@@ -128,7 +130,13 @@ using ChunkContent = std::variant<
         TextChunk& operator=(const TextChunk&) = default;
         TextChunk& operator=(TextChunk&&) noexcept = default;
     
-        ~TextChunk() = default;   // eliminated manual reset!
+        ~TextChunk() {
+        // Force clear string if present
+        if (auto* str = std::get_if<stdpsram::String>(&content)) {
+            str->~basic_string();  // explicit
+        }
+        content = std::monostate{};
+    }
     };
 /* ---------------- update mode ---------------- */
 
@@ -365,6 +373,10 @@ public:
     void SetParentWindow(Window* window) { m_parentWindow = window; }
     
 private:
+
+    std::atomic<bool> drawing_halted {false}; 
+      // inside applications, we need to immediately halt operations to delete, and applications own windows, which don't have proper cleanup till now
+
     explicit Canvas(const CanvasCfg& cfg);
     
     s_bounds_16u ClampBoundsToParent(s_bounds_16u bounds, s_bounds_16u parentBounds);
@@ -388,8 +400,10 @@ private:
 void clearScreenEveryXCalls(uint16_t x);
 
 class Window : public std::enable_shared_from_this<Window> {
-    public:
 
+    public:
+    void HaltDrawing();
+    void ResumeDrawing();
     //why the fuck did i not have this
 void set_position(uint16_t x, uint16_t y, bool interpolate = false);
 void set_layer(uint8_t layer);
@@ -474,6 +488,8 @@ void DrawCanvas();  // Call this in WinDraw()
         bool enable_refresh_override=0; //by default no need to enable, but ok if you want
 
     private:
+
+    std::atomic<bool> drawing_halted{false};   // ← ADD THIS
     std::shared_ptr<Canvas> m_canvas;
     bool TenthTick=0; //true every OTHER update
 

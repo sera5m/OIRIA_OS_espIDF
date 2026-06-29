@@ -37,7 +37,7 @@ idf_component_register(
 
         # Notification system
         "os_code/core/notification_sys/rs_notif_dispatcher.c"
-
+"Fboot/bootfunctions.cpp"
 "sss/shared_state.c"
 
 		#"workspace\tusb_hid\ulp_component\ulp
@@ -62,7 +62,7 @@ idf_component_register(
         "hardware/wiring"
         "hardware/drivers/psram_std"
         "os_code/core/notification_sys"
-        
+        "Fboot"
         #external managed components
     
     "os_code/core/notification_sys"

@@ -137,6 +137,7 @@ void app_launcher_menu::on_pause()  { ESP_LOGI(TAG, "app_launcher_menu paused");
 void app_launcher_menu::on_resume() { ESP_LOGI(TAG, "app_launcher_menu resumed"); }
 
 void app_launcher_menu::on_draw() {
+    if (should_stop_) return; //if we need to stop this we have to tell it to fuck off
     if (!menu_window) return;
     
     std::string menu_text = "<|size=2|><|color=0xFFFF|>";
@@ -236,17 +237,16 @@ void app_launcher_menu::receive_event_input(const void* event)
                     selected_index = 0;
                     needs_redraw = true;
                 } else if (!item.app_name.empty()) {
-                    force_close();
-                    AppRegistry::instance().open_app(item.app_name);
+                    appManager::instance().close_current_and_open(item.app_name);
+                    
                     return;
                 }
                 break;
             }
                 
             case KEY_BACK:
-                force_close();
-                AppRegistry::instance().open_app("WatchApp");
-                return;
+            appManager::instance().close_current_and_open("WatchApp");
+              return;
         }
     }
 

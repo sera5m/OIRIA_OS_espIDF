@@ -89,6 +89,14 @@ class AppBase : public std::enable_shared_from_this<AppBase> {
 public:
 
 
+void request_stop() { should_stop_ = true; }
+virtual void on_before_close() {
+    if (window_) {
+        window_->HaltDrawing();
+    }
+}
+
+
 void bind_main_window(std::shared_ptr<Window> win);
 std::shared_ptr<Window> get_main_window() const { return window_; }  // renamed for clarity
 
@@ -131,6 +139,7 @@ const char* get_app_name() const { return cfg_.name; } //getter because we love 
     int appTickRateHZ; //tick rate of the app in hz
 
 protected:
+std::atomic<bool> should_stop_{false};
     ApplicationConfig cfg_;
     std::shared_ptr<Window> window_;   // smart pointer to the app's main window
     TaskHandle_t task_handle_ = nullptr;
@@ -175,7 +184,7 @@ public:
     void close_current_and_open(const std::string& name);
     
     // Legacy swap methods
-    void swap_task(std::shared_ptr<AppBase> close, std::shared_ptr<AppBase> open);
+    //void swap_task(std::shared_ptr<AppBase> close, std::shared_ptr<AppBase> open);
     void close_this_and_open_menu(std::shared_ptr<AppBase> self);
     std::shared_ptr<AppBase> get_app(const std::string& name);
     bool is_app_running(const std::string& name);

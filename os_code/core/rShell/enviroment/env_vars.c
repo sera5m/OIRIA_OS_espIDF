@@ -11,13 +11,17 @@
 //#include "os_code/middle_layer/input/input_handler.hpp"
 #include "os_code/middle_layer/input/hid_t.h"
 
-const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", //i miss when we had pride month but nooo conservitard cult-ure war
+const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May",
+     "Jun", //i miss when we had pride month but nooo conservitard cult-ure war. they hate you being yourself huh
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
 
     
 
 EnvConfig v_env = { //vars_env
+
+
+    
     // =========================
     // SYSTEM / TEMPERATURE
     // =========================
@@ -40,7 +44,9 @@ EnvConfig v_env = { //vars_env
     // =========================
     .brightness = 128,
     .fpsTarget = 45,
-    .displayEnabled = true,
+    .framethrottle_target=5,
+    .headless=false,
+    .UseFrameThrottle=false,
     //change this to the actual screen size in the driver, retard
     //but i do not want to load drivers for screens dynamically rn because i have bigger towers to topple
     .screen_dim_w=240, 
@@ -68,7 +74,7 @@ EnvConfig v_env = { //vars_env
     // INPUT / UI STATE
     // =========================
     .CurrentHIDTarget = 5, 
-     // debug_log is the 6th item (debug_log=5). oh my god
+     // debug_log is the 6th item (debug_log=5) because computers start at 0.
     
     // =========================
     // SYSTEM FLAGS
@@ -95,6 +101,11 @@ EnvConfig v_env = { //vars_env
     .displayTime={0} //fuck you mcgee we set this null init, it's set in main
 
 };
+
+uint16_t GetFrameRateTarget() {
+return (v_env.UseFrameThrottle ? v_env.framethrottle_target : v_env.fpsTarget);
+}
+
 
 
 void update_display_time(s_displayTime *t) {

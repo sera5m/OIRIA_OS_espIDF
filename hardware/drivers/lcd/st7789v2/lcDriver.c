@@ -31,6 +31,8 @@ uint16_t *framebuffer = NULL;
 uint16_t *framebuffer_front = NULL;
 uint16_t *framebuffer_back = NULL;
 
+bool framebuffer_allocd=false;
+
 // Dirty row tracking
 #define CHANGED_ROWS_BYTES ((SCREEN_H + 7)/8)
 static uint8_t changed_rows_bitmask[CHANGED_ROWS_BYTES];
@@ -104,8 +106,9 @@ static inline void fill_row32(uint16_t* dst, int width, uint16_t color)
 
 void framebuffer_alloc(void)
 {
-    static bool allocated = false;
-    if (allocated) return;
+    //static bool framebuffer_allocd = false;//initially to prevent double alloc, but now variable is used in multiple fns
+
+    if (framebuffer_allocd) return;
 
     size_t sz = SCREEN_W * SCREEN_H * sizeof(uint16_t);
     
@@ -130,8 +133,8 @@ void framebuffer_alloc(void)
     // Set framebuffer to point to BACK buffer (drawing buffer)
     framebuffer = framebuffer_back;
     
-    allocated = true;
-    ESP_LOGI(TAG, "Double framebuffers allocated (%zu KB total)", (sz * 2) / 1024);
+    framebuffer_allocd = true;
+    ESP_LOGI(TAG, "Double framebuffers framebuffer_allocd (%zu KB total)", (sz * 2) / 1024);
 }
 
 void framebuffer_swap(void)
@@ -149,6 +152,41 @@ void framebuffer_swap(void)
     framebuffer = framebuffer_back;
     
     xSemaphoreGive(fb_mutex);
+}
+
+
+
+bool framebuffer_delete(void)
+{
+    if (framebuffer_allocd){
+        free(framebuffer_front);
+        free(framebuffer_back);
+
+        framebuffer_front = NULL;
+        framebuffer_back = NULL;
+
+        framebuffer_allocd = false;
+
+        return true;
+    }else{
+
+        if((framebuffer_back == NULL)&&(framebuffer_front == NULL)){ //
+            ESP_LOGI(TAG, "framebuffer is already deleted.");
+            return false;
+        }else{
+            if(framebuffer_back != NULL){free(framebuffer_front);}
+            if(framebuffer_back != NULL){free(framebuffer_back);}
+              
+
+        framebuffer_front = NULL; framebuffer_back = NULL;
+
+        framebuffer_allocd = false;
+        return true;
+        //should free up memory if it's fucked up, that way we auto retry at least once
+        }//this feels like a bad idea
+        
+    
+    }
 }
 
 void fb_clear(uint16_t color)

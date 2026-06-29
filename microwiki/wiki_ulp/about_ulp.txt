@@ -1,0 +1,199 @@
+# Shared State API Guide
+
+## API Overview
+
+| Property | Value |
+|----------|-------|
+| **API Name** | Shared State (SSS) |
+| **API Type** | C translation layer / wrapper library |
+| **What it does** | Provides a struct-based interface to access ULP (Ultra Low Power) RTC memory variables from the main CPU, abstracting away the complexity of ULP memory management |
+| **Files** | `shared_state.h`, `shared_state.c` |
+| **Location** | `/main/sss/` |
+| **Linked to** | ULP binary (`ulp_main.bin`), generated `ulp_main.h`, RTC memory |
+
+---
+
+## Relevant Variables
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `shared_state` | `SharedState` struct | Global struct containing all RTC/ULP variables |
+| `shared_state.hour` | `uint8_t` | Current hour (0-23) from ULP |
+| `shared_state.minute` | `uint8_t` | Current minute (0-59) from ULP |
+| `shared_state.wake_main_now` | `bool` | Flag set by ULP to wake main CPU |
+| `shared_state.alarm_*` | Various | Alarm settings (hour, minute, days, enabled, vibrate, repeat_daily, active) |
+
+---
+
+## Functions and Usage
+
+### Initialization (Call ONCE in `app_main()`)
+
+```c
+esp_err_t shared_state_init(void);
+```
+**When to call:** Right after `load_ulp()` in `app_main()`
+**What it does:** Initializes the shared state system, reads initial ULP values
+**Returns:** `ESP_OK` on success, `ESP_ERR_NOT_FOUND` if ULP symbols not found
+
+### Reading from ULP (Call before reading shared_state)
+
+```c
+esp_err_t shared_state_read(void);
+```
+**When to call:** Whenever you need fresh values from ULP
+**What it does:** Copies ULP RTC memory → `shared_state` struct
+**Returns:** `ESP_OK` or `ESP_ERR_INVALID_STATE` if not initialized
+
+### Writing to ULP (Call after modifying shared_state)
+
+```c
+esp_err_t shared_state_write(void);
+```
+**When to call:** After modifying any `shared_state` field you want ULP to see
+**What it does:** Copies `shared_state` struct → ULP RTC memory
+**Returns:** `ESP_OK` or `ESP_ERR_INVALID_STATE` if not initialized
+
+### Wake Management
+
+```c
+bool shared_state_should_wake(void);
+```
+**What it does:** Reads ULP state and returns `true` if wake flag is set
+
+```c
+void shared_state_clear_wake(void);
+```
+**What it does:** Clears the wake flag and writes back to ULP
+
+### Alarm Functions
+
+```c
+void shared_state_set_alarm(uint8_t hour, uint8_t minute, uint8_t days, 
+                            bool enabled, bool vibrate, bool repeat_daily);
+```
+**What it does:** Sets an alarm in RTC memory
+
+```c
+bool shared_state_check_alarm(void);
+```
+**What it does:** Checks if alarm conditions are met
+
+### Debug
+
+```c
+void shared_state_dump(void);
+```
+**What it does:** Prints current shared state to console
+
+---
+
+## Usage in Main Code
+
+### Standard Pattern
+
+```c
+// 1. In app_main() - ONCE at startup
+load_ulp();                    // Start ULP
+shared_state_init();            // Initialize shared state
+
+// 2. Later in tasks/loops - Read ULP state
+shared_state_read();
+if (shared_state.wake_main_now) {
+    // Handle wake event
+    shared_state_clear_wake();
+}
+
+// 3. Modify and write back
+shared_state.hour = 12;
+shared_state_write();
+
+// Or use the helper functions
+if (shared_state_should_wake()) {
+    // handle wake
+    shared_state_clear_wake();
+}
+```
+
+### With Macros (Optional)
+
+```c
+// Auto-sync macros
+#define RTC_READ(var) do { shared_state_read(); var = shared_state.var; } while(0)
+#define RTC_WRITE(var, val) do { shared_state.var = val; shared_state_write(); } while(0)
+
+// Usage
+uint8_t hour;
+RTC_READ(hour);  // Reads into local variable
+RTC_WRITE(minute, 42);  // Sets minute to 42 and writes to ULP
+```
+
+---
+
+## Functions Called in `app_main()`
+
+| Function | Where to Call |
+|----------|---------------|
+| `shared_state_init()` | **REQUIRED** - Right after `load_ulp()` in `app_main()` |
+
+## Functions Called After `app_main()`
+
+| Function | When to Use |
+|----------|-------------|
+| `shared_state_read()` | Whenever you need current ULP values |
+| `shared_state_write()` | After modifying ULP values |
+| `shared_state_should_wake()` | In main loop/tasks to check for wake events |
+| `shared_state_clear_wake()` | After handling a wake event |
+
+## Functions Used Later
+
+| Function | Use Case |
+|----------|----------|
+| `shared_state_set_alarm()` | Setting alarms from main code |
+| `shared_state_check_alarm()` | In main loop to check alarm conditions |
+| `shared_state_dump()` | Debugging |
+
+---
+
+## Weirdness While Asleep
+
+| Issue | Behavior |
+|-------|----------|
+| **Data persists** | RTC memory keeps values during deep sleep |
+| **ULP runs independently** | ULP updates its own variables while main CPU sleeps |
+| **Race conditions** | ULP and main CPU can both write to RTC memory - always `read()` before modifying |
+| **Power cycles** | RTC memory resets on power loss (not on reset) |
+| **Access timing** | ULP writes occur at fixed intervals; main CPU may read stale data if not synced |
+
+---
+
+## Known Errors
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `undefined reference to ulp_ulp_*` | Variable prefix mismatch | Remove `ulp_` prefix from ULP source variable names |
+| `undefined reference to ulp_riscv_get_symbol` | Wrong API usage | Use direct variable access via generated header |
+| `Failed to locate ULP symbols` | ULP not loaded or wrong variable names | Check `ulp_main.c` variable names and recompile |
+| `shared_state_init()` returns `ESP_ERR_NOT_FOUND` | ULP binary not embedded | Ensure `ulp_embed_binary()` in CMakeLists.txt |
+| Conflicting macro definitions | Wrong header includes | Use only `#include "ulp_main.h"` (generated), NOT `ulp_riscv.h` |
+
+---
+
+## Quick Reference - Typical Main Code
+
+```c
+// In app_main()
+load_ulp();                     // Start ULP RISC-V
+shared_state_init();            // Init shared state
+
+// In your main loop
+shared_state_read();            // Get fresh data
+if (shared_state.wake_main_now) {
+    ESP_LOGI(TAG, "ULP woke me at %02d:%02d", 
+             shared_state.hour, shared_state.minute);
+    shared_state_clear_wake();  // Clear flag
+}
+
+// Set an alarm
+shared_state_set_alarm(8, 30, 0x7F, true, true, true);
+```

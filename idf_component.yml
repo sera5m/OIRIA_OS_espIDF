@@ -1,4 +1,6 @@
 ## IDF Component Manager Manifest File
 dependencies:
-  espressif/esp_tinyusb: "^1.1"
-  idf: "^5.0"
+  espressif/esp_tinyusb: ^1.1
+  idf: ^5.0
+  bitbank2/jpegdec: ^1.6.2
+  espressif/cbor: '*'

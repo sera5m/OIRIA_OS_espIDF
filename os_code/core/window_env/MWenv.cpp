@@ -38,6 +38,11 @@
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "hardware/drivers/lcd/st7789v2/t_shapes.h"
 #include "esp_task_wdt.h" 
+
+#include <atomic>
+
+
+
 //unrelated but i hate how every time ihave to type idf.py build flash monitor to check if the code works every time i make my 253st change of the day
 //and idf also stands for isralie defense force, who are genocidal rapists and whatnot, it's a fun reminder 
 static const char *TAG = "MWenv"; 
@@ -946,17 +951,30 @@ void Window::get_physical_bounds(int& out_x, int& out_y, int& out_w, int& out_h)
 //whatever the fresh hell it may be
 //okay now try again to push it
     
+void Window::HaltDrawing() {
+    drawing_halted = true;
+    dirty = false;
+    ESP_LOGW(TAG, "Window '%s' drawing halted", Currentcfg.name);
+}
+
+void Window::ResumeDrawing() {
+    drawing_halted = false;
+    dirty = true;
+}
+
+
 
 void Window::WinDraw() {
 	
-	
+	if (drawing_halted || !IsWindowShown) return;
 
     
-    if (!IsWindowShown) return;
+    
     
     //  ensure any position changes actually fuckin propogate
 static uint16_t last_x = 0xFFFF;
 static uint16_t last_y = 0xFFFF;
+
 if (last_x != wi_sizing.Xpos || last_y != wi_sizing.Ypos) {
     ESP_LOGI(TAG, "Window '%s' position changed from (%d,%d) to (%d,%d)", 
              Currentcfg.name, last_x, last_y, wi_sizing.Xpos, wi_sizing.Ypos);
@@ -1053,9 +1071,9 @@ if (last_x != wi_sizing.Xpos || last_y != wi_sizing.Ypos) {
 
     
     // === 4. TEXT & CONTENT
-    if (!isTokenized || content != last_content) {
+    if (!isTokenized || content != last_content) { 
         cachedChunks = tokenize(content);
-        last_content = content;        // cheap move if possible
+        last_content = content;        // move if possible
         isTokenized = true;
     }
 
@@ -1233,8 +1251,9 @@ void Window::AppendText(const std::string& moreText) { //overloaded stdstr, conv
 }
 
 void Window::ClearText() {
+    cachedChunks.clear();     // cache then content then last
     content.clear();
-    cachedChunks.clear();
+    last_content.clear();
     isTokenized = false;
     dirty = true;
 }
@@ -1602,9 +1621,8 @@ void WindowManager::DrawToolBar() {
 
 
 void WindowManager::RepositionAllWindows() {
-   // fb_clear(0x0000);  // ✅ Clear screen after repositioning
     if (!m_toolbarConfig.showToolbar) return;
-    if (fs_state.fullscreen_win) return;  // not today son
+    if (fs_state.fullscreen_win) return;
     if (windows_repositioned) return;  // Only reposition once
     
     uint16_t offset = GetToolbarOffset();
@@ -1617,62 +1635,91 @@ void WindowManager::RepositionAllWindows() {
         win->get_physical_bounds(physX, physY, physW, physH);
         
         switch (m_toolbarConfig.tb_rot) {
-            case 0:  // top toolbar
+            case 0: { // top toolbar
                 if (physY < offset) {
-                    // Move window DOWN so its top is below toolbar
-                    // Need to convert physical movement back to logical movement
                     int delta = offset - physY;
-                    win->wi_sizing.Ypos += delta;
+                    // Check if moving would exceed the bottom of screen
+                    int newY = win->wi_sizing.Ypos + delta;
+                    int maxY = v_env.clamped_screen_dim_h - physH;
+                    if (newY > maxY) {
+                        newY = maxY;
+                    }
+                    win->wi_sizing.Ypos = newY;
                     win->dirty = true;
+                    moved = true;  // ← SET moved TO TRUE!
                     ESP_LOGI(TAG, "Window '%s' moved down by %d (physical Y %d → %d)", 
                              win->Currentcfg.name, delta, physY, physY + delta);
                 }
                 break;
+            }
                 
-            case 1:  // left toolbar
+            case 1: { // left toolbar
                 if (physX < offset) {
                     int delta = offset - physX;
-                    win->wi_sizing.Xpos += delta;
+                    // Check if moving would exceed the right edge of screen
+                    int newX = win->wi_sizing.Xpos + delta;
+                    int maxX = v_env.clamped_screen_dim_w - physW;
+                    if (newX > maxX) {
+                        newX = maxX;
+                    }
+                    win->wi_sizing.Xpos = newX;
                     win->dirty = true;
+                    moved = true;  // ← SET moved TO TRUE!
                     ESP_LOGI(TAG, "Window '%s' moved right by %d (physical X %d → %d)", 
                              win->Currentcfg.name, delta, physX, physX + delta);
                 }
                 break;
+            }
                 
-            case 2:  // bottom toolbar
-                {
-                    int max_phys_y = v_env.clamped_screen_dim_h - offset - physH;
-                    if (physY > max_phys_y) {
-                        int delta = physY - max_phys_y;
-                        win->wi_sizing.Ypos -= delta;
-                        win->dirty = true;
-                        ESP_LOGI(TAG, "Window '%s' moved up by %d", 
-                                 win->Currentcfg.name, delta);
+            case 2: { // bottom toolbar
+                int max_phys_y = v_env.clamped_screen_dim_h - offset - physH;
+                if (physY > max_phys_y) {
+                    int delta = physY - max_phys_y;
+                    // Check if moving would exceed the top of screen
+                    int newY = win->wi_sizing.Ypos - delta;
+                    if (newY < 0) {
+                        newY = 0;
                     }
+                    win->wi_sizing.Ypos = newY;
+                    win->dirty = true;
+                    moved = true;  // ← SET moved TO TRUE!
+                    ESP_LOGI(TAG, "Window '%s' moved up by %d", 
+                             win->Currentcfg.name, delta);
                 }
                 break;
+            }
                 
-            case 3:  // right toolbar
-                {
-                    int max_phys_x = v_env.clamped_screen_dim_w - offset - physW;
-                    if (physX > max_phys_x) {
-                        int delta = physX - max_phys_x;
-                        win->wi_sizing.Xpos -= delta;
-                        win->dirty = true;
-                        ESP_LOGI(TAG, "Window '%s' moved left by %d", 
-                                 win->Currentcfg.name, delta);
+            case 3: { // right toolbar
+                int max_phys_x = v_env.clamped_screen_dim_w - offset - physW;
+                if (physX > max_phys_x) {
+                    int delta = physX - max_phys_x;
+                    // Check if moving would exceed the left edge of screen
+                    int newX = win->wi_sizing.Xpos - delta;
+                    if (newX < 0) {
+                        newX = 0;
                     }
+                    win->wi_sizing.Xpos = newX;
+                    win->dirty = true;
+                    moved = true;  // ← SET moved TO TRUE!
+                    ESP_LOGI(TAG, "Window '%s' moved left by %d", 
+                             win->Currentcfg.name, delta);
                 }
                 break;
-        }
-        if (moved) {
-            windows_repositioned = true;
-            tb_dirty = true;
-            ESP_LOGI(TAG, "Toolbar repositioning completed");
-           // fb_clear(0x0000); //change to background color fixit
+            }
         }
     }
+    
+    // Moved this OUTSIDE the loop
+    if (moved) {
+        windows_repositioned = true;
+        tb_dirty = true;
+        ESP_LOGI(TAG, "Toolbar repositioning completed");
+        // fb_clear(0x0000); //change to background color fixit
+    }
 }
+
+
+
 
 // In cpp
 void WindowManager::SortWindowsByZOrder() {
@@ -1711,7 +1758,16 @@ void WindowManager::make_window_fullscreen(std::shared_ptr<Window> win)
     win->Initialcfg.borderless = true;
     win->Currentcfg.borderless = true;
     win->dirty = true;
+    // Stop all other windows from drawing
 
+for (auto& w : windows) {
+    if (w && w != win) {
+        w->HaltDrawing();
+    }
+}
+
+
+vTaskDelay(pdMS_TO_TICKS(30));
     // **Aggressive cleanup**
     PruneDeadWindows();
     windows_repositioned = true;
@@ -1927,34 +1983,77 @@ void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWin
 
 
 //WARNING: THIS FUNCTION HAS SIGNIFICANT HISTORY OF CAUSING WDT TIMEOUT FAILURES! THIS IS HEAVY! IF YOU ARE USING REALLY IMPORTANT STUFF WE MIGHT WANT TO USE HEADLESS MODE!
-void core2_push(void* pv) {
 
+//6/24/2026 attempted fix; was too heavy with interval timing pushing all the time
+void core2_push(void* pv)
+{
     esp_task_wdt_add(NULL);
+
     esp_task_wdt_config_t wdt_config = {
-    .timeout_ms = 8000,                          // 8 seconds in milliseconds
-    .idle_core_mask = (1 << portNUM_PROCESSORS) - 1, // Subscribes all CPU idle tasks
-    .trigger_panic = true                        // Reset the chip if it times out
+        .timeout_ms = 8000,
+        .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
+        .trigger_panic = true
     };
 
-// Apply the new watchdog timeout settings
-esp_task_wdt_reconfigure(&wdt_config); //i could make this longer but who cares 
+    esp_task_wdt_reconfigure(&wdt_config);
 
-    const uint32_t target_frame_interval_ms = 33;  // ~30 FPS
+    while (!(v_env.headless)){
+        //while 1 loop, but only if it has "head" display attatched. no sense if not, really
+    //this method waits for the core 1 task to say push instead of automatically doing so continuously
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-    while (1) {
-        // Wait for notification OR timeout (so we can enforce FPS)
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
+    if (xSemaphoreTake(g_display_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+    {
+        esp_task_wdt_reset();
+
+        display_framebuffer(true, false);
+
+        g_display_dirty = false;
+
+        xSemaphoreGive(g_display_mutex);
+    }
+
+    esp_task_wdt_reset();
+}
+    //old framegen type disabled for now
+    /*
+    while (1)
+    {
+        uint8_t target_fps = v_env.UseFrameThrottle
+            ? v_env.framethrottle_target
+            : v_env.fpsTarget;
+
+        if (target_fps == 0)
+            target_fps = 1; // avoid divide-by-zero
+
+        const uint32_t target_frame_interval_ms = 1000 / target_fps;
+
+        // Wait for notification OR timeout
+        ulTaskNotifyTake(
+            pdTRUE,
+            pdMS_TO_TICKS(target_frame_interval_ms)
+        );
 
         uint32_t now = esp_timer_get_time() / 1000;
 
-        if (!g_display_dirty && (now - g_last_display_time < target_frame_interval_ms)) {
-            continue;   // nothing to do + respect FPS
+        // Don't push faster than target FPS
+        if ((now - g_last_display_time) < target_frame_interval_ms)
+        {
+            vTaskDelay(pdMS_TO_TICKS(1));
+            continue;
         }
 
-        if (xSemaphoreTake(g_display_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        if (!g_display_dirty)
+        {
+            vTaskDelay(pdMS_TO_TICKS(1));
+            continue;
+        }
+
+        if (xSemaphoreTake(g_display_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+        {
             esp_task_wdt_reset();
 
-            display_framebuffer(true, false);   // or false, false for full if needed
+            display_framebuffer(true, false);
 
             g_last_display_time = now;
             g_display_dirty = false;
@@ -1963,8 +2062,9 @@ esp_task_wdt_reconfigure(&wdt_config); //i could make this longer but who cares
         }
 
         esp_task_wdt_reset();
-        vTaskDelay(pdMS_TO_TICKS(1));   // always yield a bit
-    }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }*/
+
 }
 
 void launchTHESTUPIDMOTHERFUCKINGPEICEOFSHITDISPLAYPUSHTASKFUCKYOU(){

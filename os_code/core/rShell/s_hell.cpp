@@ -106,6 +106,8 @@ void AppBase::start_task() {
 
 void AppBase::stop_task() {
     if (task_handle_ != nullptr) {
+        on_before_close();           // ← safe cleanup
+        vTaskDelay(pdMS_TO_TICKS(30)); // give drawing time to stop
         vTaskDelete(task_handle_);
         task_handle_ = nullptr;
         ESP_LOGI(TAG, "App task stopped");
@@ -128,10 +130,12 @@ void AppBase::run() {
     const uint32_t interval_ms = 1000 / appTickRateHZ;
     ESP_LOGI(TAG, "run() starting with interval %lu ms", interval_ms);
     
-    while (true) {
+    while (!should_stop_) {
         tick_app(interval_ms);
         vTaskDelay(pdMS_TO_TICKS(interval_ms));
     }
+    on_stop();
+    vTaskDelete(nullptr);
 }
 
 // -------------------------------------------------------------------
@@ -162,6 +166,8 @@ void appManager::register_app(const std::shared_ptr<AppBase>& app) {
     apps.push_back(app);
 }
 
+
+
 void appManager::draw_all() {
     for (auto& app : apps) {
         if (app) {
@@ -169,6 +175,8 @@ void appManager::draw_all() {
         }
     }
 }
+
+
 
 void appManager::DestroyAllApps() {
     for (const auto& app : apps) {
@@ -278,14 +286,17 @@ void appManager::swap_to_app(std::shared_ptr<AppBase> new_app) {
 void appManager::close_current_and_open(const std::string& name) {
     ESP_LOGI(TAG, "Closing current and opening: %s", name.c_str());
     
-    // Don't delete the old app yet, just stop it
     auto old_app = focused_app;
     
-    // Launch new app (creates, starts, focuses)
+    if (old_app) {
+        old_app->on_before_close();
+        vTaskDelay(pdMS_TO_TICKS(50));
+        old_app->stop_task();
+    }
+    
     auto new_app = launch_app(name);
     
     if (new_app && old_app && old_app != new_app) {
-        // Optionally remove old app from vector if you want it destroyed
         auto it = std::find(apps.begin(), apps.end(), old_app);
         if (it != apps.end()) {
             apps.erase(it);
