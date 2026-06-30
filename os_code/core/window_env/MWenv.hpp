@@ -130,13 +130,7 @@ using ChunkContent = std::variant<
         TextChunk& operator=(const TextChunk&) = default;
         TextChunk& operator=(TextChunk&&) noexcept = default;
     
-        ~TextChunk() {
-        // Force clear string if present
-        if (auto* str = std::get_if<stdpsram::String>(&content)) {
-            str->~basic_string();  // explicit
-        }
-        content = std::monostate{};
-    }
+        ~TextChunk()=default;
     };
 /* ---------------- update mode ---------------- */
 

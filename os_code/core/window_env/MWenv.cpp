@@ -1733,8 +1733,7 @@ void WindowManager::SortWindowsByZOrder() {
 
 // ====================== FULLSCREEN MANAGEMENT ======================
 
-void WindowManager::make_window_fullscreen(std::shared_ptr<Window> win)
-{
+void WindowManager::make_window_fullscreen(std::shared_ptr<Window> win){
     if (!win) return;
 
     ESP_LOGI(TAG, "=== FULLSCREEN LOCK ENGAGED for '%s' ===", win->Currentcfg.name);
@@ -1760,14 +1759,14 @@ void WindowManager::make_window_fullscreen(std::shared_ptr<Window> win)
     win->dirty = true;
     // Stop all other windows from drawing
 
-for (auto& w : windows) {
-    if (w && w != win) {
-        w->HaltDrawing();
+    for (auto& w : windows) {
+        if (w && w != win) w->HaltDrawing();
     }
-}
+    vTaskDelay(pdMS_TO_TICKS(50));   // was 30
 
 
-vTaskDelay(pdMS_TO_TICKS(30));
+
+
     // **Aggressive cleanup**
     PruneDeadWindows();
     windows_repositioned = true;
