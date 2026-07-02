@@ -53,9 +53,14 @@ struct Allocator {
             deallocate(p, 0);
             return nullptr;
         }
-        return static_cast<pointer>(
-            heap_caps_realloc(p, new_n * sizeof(T), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
-        );
+        
+        void* new_p = heap_caps_realloc(p, new_n * sizeof(T), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!new_p) {
+            // realloc failed, but original p is still valid
+            // We must NOT free p here - the caller still expects it to be valid
+            throw std::bad_alloc();  // Let caller handle the failure
+        }
+        return static_cast<pointer>(new_p);
     }
 
     friend bool operator==(const Allocator&, const Allocator&) noexcept { return true; }

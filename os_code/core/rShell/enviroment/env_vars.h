@@ -26,7 +26,23 @@ typedef uint8_t HIDTarget;  // C fallback (or don't use in C)
 extern "C" {
 #endif
 
+typedef enum {
+ram,psram,
+nvs,microsd,
+extStorageNonVol,
+SendExtDev   
+}e_type_storage;
 
+typedef enum Rshell_pipe_flowType{
+    null,direct, fan, merge, clone, c_fan, c_merge
+}
+//so we can controll flow nodes. no data transform here, just directions
+//null: don't flow,
+// direct is a->b,fan is a-> b, c,d etc and has copies, 
+//merge is a,b,c,d->E merge to one source
+//clone is copy from a-b, where copy is for those variants and doesn't remove from source unlike pipes
+
+void datastream_init_from_env(void); //hook to streams
 
 typedef struct __attribute__((packed)) {
     uint16_t year;
@@ -200,7 +216,6 @@ static inline uint16_t i_ms_to_fps(uint16_t ms)
         ? (uint16_t)(1000.0f / (float)ms)
         : (uint16_t)0;
 }
-
 
 
 

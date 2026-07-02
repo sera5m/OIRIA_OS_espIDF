@@ -103,7 +103,7 @@ static void input_task(void* pvParameters)
         if (notified) {
             gDeviceManager.updateEncoder();
         }
-        
+        //very bad i do not like
         gDeviceManager.updateButtons();
         gDeviceManager.updateEncoder(); //we do this for now to save time in developement, we'll later need to have the device manager tick every device present, prioritizing high frequency devices. 
         // Process queue (may be empty)
@@ -117,28 +117,71 @@ static void input_task(void* pvParameters)
            // ESP_LOGI("STACK", "%s: High water mark = %u words (%u bytes free)", task_name, high_water, high_water * 4);
 
 
-            switch (ev.target) {
-                case HIDTarget::actAsUsbHID:
-                    if (usb_hid_enabled) RouteInput_HidTarget(ev);
-                    break;
-                case HIDTarget::toTask_and_usbHid:
-                    if (usb_hid_enabled) RouteInput_HidTarget(ev);
-                    dispatch_event_to_focused_app(ev);
-                    break;
-                case HIDTarget::toTask:
-                    dispatch_event_to_focused_app(ev);
-                    break;
-                case HIDTarget::toTaskAndDebug:
-                    dispatch_event_to_focused_app(ev);
-                    handle_debug_output(ev);
-                    break;
-                case HIDTarget::debug_log:
-                    handle_debug_output(ev);
-                    break;
-                default:
-                    dispatch_event_to_focused_app(ev);
-                    break;
-            }
+           switch (ev.target) {
+            case HIDTarget::nothing:
+                // Intentionally do nothing.
+                break;
+        
+            case HIDTarget::actAsUsbHID:
+                if (usb_hid_enabled)
+                    RouteInput_HidTarget(ev);
+                break;
+        
+            case HIDTarget::wireless_hid:
+                // TODO: Route to wireless HID backend.
+                break;
+        
+            case HIDTarget::toTask:
+                dispatch_event_to_focused_app(ev);
+                break;
+        
+            case HIDTarget::toTask_and_usbHid:
+                if (usb_hid_enabled)
+                    RouteInput_HidTarget(ev);
+                dispatch_event_to_focused_app(ev);
+                break;
+        
+            case HIDTarget::debug_log:
+                handle_debug_output(ev);
+                break;
+        
+            case HIDTarget::everything:
+                if (usb_hid_enabled)
+                    RouteInput_HidTarget(ev);
+                // TODO: Route to wireless HID if applicable.
+                dispatch_event_to_focused_app(ev);
+                handle_debug_output(ev);
+                // TODO: Route to StreamCore if applicable.
+                break;
+        
+            case HIDTarget::toTaskAndDebug:
+                dispatch_event_to_focused_app(ev);
+                handle_debug_output(ev);
+                break;
+        
+            case HIDTarget::toTaskAndStreamcore:
+                dispatch_event_to_focused_app(ev);
+                DataStreamerPump::pushInputEvent(ev);
+                break;
+        
+            case HIDTarget::toStreamCore:
+            DataStreamerPump::pushInputEvent(ev);.
+                break;
+        
+            case HIDTarget::toStreamCoreAndDebug:
+            DataStreamerPump::pushInputEvent(ev);
+                handle_debug_output(ev);
+                break;
+        
+            case HIDTarget::count:
+                // Sentinel value; should never be used as a target.
+                break;
+        
+            default:
+                dispatch_event_to_focused_app(ev);
+                break;
+                     }//end break
+
         }
 
         // Extra safety: reset after potentially heavy queue processing

@@ -15,6 +15,17 @@
 static const char* TAG = "AppFramework";
 
 
+namespace psram {
+    // Simple ring buffer in PSRAM (~1-4KB)
+    struct EventRingBuffer {
+        static constexpr size_t CAP = 1024;  // events
+        DataItem* buffer[CAP];
+        size_t head = 0, tail = 0;
+        // add atomic or semaphore if needed
+    };
+    static EventRingBuffer* g_ring = nullptr;
+}
+
 
 //this function so we can see the fuck going on here
 void print_stack_usage(const char* task_name) {
@@ -335,3 +346,75 @@ static void notification_task(void* pv) {
 void start_notification_task() {
     xTaskCreate(notification_task, "notif_task", 4096, NULL, 2, NULL);
 }
+
+
+bool appManager::pipe_apps(std::shared_ptr<AppBase> from, std::shared_ptr<AppBase> to, Rshell_pipe_flowType flow) {
+    if (!from || !to) return false;
+    
+    ESP_LOGI(TAG, "Piping %s -> %s (flow=%d)", from->get_app_name(), to->get_app_name(), (int)flow);
+    
+    // For now: simple direct callback registration or shared ring
+    // Later: register as source/sink in streamer
+    return true;
+}
+
+bool establish_outlet(std::shared_ptr<AppBase> app, bool isRing){
+
+}
+
+//is this stream data or is it in grab chunks in a linked psram segment as a cache ring
+ bool Can_establish_inlet(std::shared_ptr<AppBase> app, bool isRing)
+     {
+         auto caps = app->get_capabilities();
+     
+         if ((caps & AppCapability::STREAM_IN_CAPABLE) != AppCapability::NONE)
+         {
+             // supports stream input
+         }
+     
+         if ((caps & AppCapability::ST_RING_CAPABLE) != AppCapability::NONE)
+         {
+             // supports ring buffers
+         }
+     
+         if ((caps & AppCapability::ST_PF_CAPABLE) != AppCapability::NONE)
+         {
+             // supports pumped flow
+         }
+     
+         if ((caps & AppCapability::ST_PREF_RT_IPC) != AppCapability::NONE)
+         {
+             // prefers RT IPC
+         }
+     
+         return true;
+     }
+    
+
+     establish_pool(std::size_t bytes, e_type_storage stype){
+        switch (type){
+
+            case ram:
+
+          break; 
+          
+          case psram:
+
+          break;
+
+          case nvs:
+
+          break;
+
+          case microsd:
+
+          break;
+
+          case default:
+          //deal with this later
+          break;
+            //extStorageNonVol,  SendExtDev 
+        }
+     }   
+
+    

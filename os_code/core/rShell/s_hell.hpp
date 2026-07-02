@@ -26,6 +26,9 @@ void print_stack_usage(const char* task_name);
 
 //=============================================
 
+namespace psram {
+    struct EventRingBuffer;  // defined in .cpp
+}
 
 
 
@@ -50,19 +53,43 @@ enum class AppCapability : uint32_t {
     MINIMIZABLE         = 1 << 0,   // can be minimized
     FULLSCREEN          = 1 << 1,   // supports full screen mode
     CONVERTIBLE_TO_TRAY = 1 << 2,   // can become a tray icon
+
     SLEEPABLE           = 1 << 3,   // can be put to sleep
     CAN_WAKE_DEVICE     = 1 << 4,   // can wake the device from sleep
+
     USES_WIRELESS       = 1 << 5,   // requires Wi‑Fi / BT
     USES_SD_CARD        = 1 << 6,   // accesses SD card
     RAW_GPIO_ACCESS     = 1 << 7,   // touches GPIO directly
+
     NEEDS_WINDOW        = 1 << 8,   // requires at least one window
     NEEDS_MULTI_WINDOW  = 1 << 9,    // needs more than one window
-    PINNED_TO_CORE      =   1<<10  //PIN TO CORE 1 (core 0 runs spi and wifi and hence should be avoided in 
-    //overload, but this adds some potential issues with threading
+
+    SINGLETHREADED      =   1<<10,  //PIN TO CORE (will need to be specified which one) 
+
+    STREAM_IN_CAPABLE   = 1<<11, //can take input data directly in
+    STREAM_OUT_CAPABLE = 1<<12, //it's an output for streams
+    ST_RING_CAPABLE = 1<<13, //CAN access fifo arbitrary data ring buffers
+    ST_PF_CAPABLE= 1<<14, //pumped style flow with notifies for lower laten. 
+    ST_PREF_RT_IPC= 1<<15 //prefers real time interproscess messaging instead of idle ring grabs
+
+   
 };
-//i think that is unused, i should use it
+inline AppCapability operator|(AppCapability a, AppCapability b)
+{
+    return static_cast<AppCapability>(
+        static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+}
+
+inline AppCapability operator&(AppCapability a, AppCapability b)
+{
+    return static_cast<AppCapability>(
+        static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+}
+//implementation in proscess
 // Bitmask type
 using AppCapabilities = uint32_t;
+
+
 
 struct ApplicationConfig {
     AppCapabilities capabilities;
@@ -123,9 +150,14 @@ const char* get_app_name() const { return cfg_.name; } //getter because we love 
     //methods for focusing and input condition swap
     virtual void on_focus_gained() {}
     virtual void on_focus_lost() {}
-
-    // Window access
+    // Streaming integration
+    virtual void on_stream_data(const DataItem* item) {}   // default no-op
+    virtual void publish(DataItem* item);                  // helper
     
+    // Pipe / sharing capabilities (already in your enum - good)
+    // Window access
+    virtual void on_pipe_establish();
+    virtual void on_pipe_destroyed();
     
     // Configuration queries
     AppCapabilities get_capabilities() const { return cfg_.capabilities; }
@@ -189,7 +221,31 @@ public:
     std::shared_ptr<AppBase> get_app(const std::string& name);
     bool is_app_running(const std::string& name);
 
+
+    // Pipe management
+bool pipe_apps(std::shared_ptr<AppBase> from, std::shared_ptr<AppBase> to, Rshell_pipe_flowType flow);
+bool pipe_to_streamcore(std::shared_ptr<AppBase> from);  // convenience
     
+
+    //functions for establishing outlets and inlet
+    bool can_establish_outlet(std::shared_ptr<AppBase> app, bool isRing);
+     //is this stream data or is it in grab chunks in a linked psram segment as a cache ring be it in ram or cache
+    bool can_establish_inlet(std::shared_ptr<AppBase> app,bool isRing);
+
+    //establish the connection
+    bool establish_outlet(std::shared_ptr<AppBase> app, bool isRing);
+    bool establish_inlet(std::shared_ptr<AppBase> app,bool isRing);
+
+    //std::unique_ptr<std::byte[]> establish_pool(std::size_t bytes); //return owning smart pointer
+    using PoolPtr = std::unique_ptr<std::byte[]>;
+
+    PoolPtr establish_pool(std::size_t bytes, e_type_storage stype);
+
+//how the fuck do i make pipes have a target that branches? with a... list of targets? but that would need to be mutable
+bool pipe_apps(std::shared_ptr<AppBase> input, std::shared_ptr<AppBase> output);
+bool pipe_apps(std::shared_ptr<AppBase> output/*i need to have the ability to have multiple targets!*/, Rshell_pipe_flowType flowtype);
+bool pipe_pools(PoolPtr input, PoolPtr out, bool copyInsteadOfMove);
+
     private:
            
         appManager();   // private constructor

@@ -8,3 +8,16 @@ this person turned it into a gamepad stick twist thingy which was cool, so i lik
 https://cborbook.com/part_1/practical_introduction_to_cbor.html
 cbor replaces json internally, which is something i was gonna make anyway lolol
 gotta add storage support for this so we can save cbor files 
+
+
+INPUT HANDLING AND STREAMING CORE
+
+
+revise input manager to check all input sources based on a list of connected devices which are made on hid device connect
+this should be constructed as is, not be some fuckass list that takes a long time to poll
+
+
+//future revision make this a listed array item via bitmasking so we can make any amount of combos
+
+i want to make data streamer core definitions be 
+able to extend streamcompatabilitytable with external pluggins and ext symbol linkings. gotta add ext table for it

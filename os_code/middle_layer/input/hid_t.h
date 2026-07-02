@@ -13,8 +13,13 @@ enum class HIDTarget : uint8_t {
     debug_log,
     everything,
     toTaskAndDebug,
+    toTaskAndStreamcore, //data streaming universal core
+    toStreamCore,
+    toStreamCoreAndDebug,
     count
 };
+
+//future revision make this a listed array item via bitmasking so we can make any amount of combos
 #else
 // C fallback – just a uint8_t type
 typedef uint8_t HIDTarget;
