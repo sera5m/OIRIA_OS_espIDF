@@ -7,8 +7,19 @@
 #include "os_code/middle_layer/input/hid_t.h"
 #include "esp_task_wdt.h" 
 #include "os_code/applications/toolkit/RemoteKeyboard/keymap.hpp"
-static const char* TAG = "InputTask";
 
+#include "os_code/core/rShell/streams/rshell_pool.hpp"
+#include "os_code/core/rShell/streams/rshell_pipe.hpp"		
+#include "os_code/core/rShell/streams/rshell_streamdefs.h"	
+#include "os_code/core/rShell/streams/rshell_pump.hpp"
+#include "esp_log.h"
+#include "esp_timer.h"
+#include "main/hardware/drivers/psram_std/psram_std.hpp"
+#include "d_sdc.h"
+#include "os_code/core/rShell/s_hell.hpp"
+
+
+static const char* TAG = "InputTask";
 // External queue
 extern QueueHandle_t ProcInputQueTarget;
 

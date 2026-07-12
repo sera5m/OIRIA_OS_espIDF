@@ -1,34 +1,33 @@
-// app_framework.h
 #pragma once
 
 #include <cstdint>
 #include <memory>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "os_code/core/rShell/enviroment/env_vars.h"
-#include "os_code/middle_layer/input/input_devs_agg.hpp"
-#include "os_code/middle_layer/input/input_handler.hpp"
-#include "os_code/core/window_env/MWenv.hpp" //for added linkage to window manager singleton
 #include <vector>
-#include <memory>
-
 #include <functional>
 #include <unordered_map>
 #include <string>
+#include <atomic>
 
-//shell addons
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+#include "os_code/core/rShell/enviroment/env_vars.h"
+#include "os_code/middle_layer/input/input_devs_agg.hpp"
+#include "os_code/middle_layer/input/input_handler.hpp"
+#include "os_code/core/window_env/MWenv.hpp"
 #include "os_code/core/notification_sys/rs_notif_dispatcher.h"
 
+// IMPORTANT: Include these BEFORE using their types
+#include "os_code/core/rShell/streams/rshell_pipe.hpp"   // Defines Rshell_pipe_flowType and RshellPipe
+#include "os_code/core/rShell/streams/rshell_pool.hpp" 
 
 //assistance functrion========================
 void print_stack_usage(const char* task_name);
 
-
+using PoolPtr = std::shared_ptr<DataPool>;
 //=============================================
 
-namespace psram {
-    struct EventRingBuffer;  // defined in .cpp
-}
+
 
 
 
@@ -150,12 +149,16 @@ const char* get_app_name() const { return cfg_.name; } //getter because we love 
     //methods for focusing and input condition swap
     virtual void on_focus_gained() {}
     virtual void on_focus_lost() {}
+
+
     // Streaming integration
     virtual void on_stream_data(const DataItem* item) {}   // default no-op
     virtual void publish(DataItem* item);                  // helper
     
     // Pipe / sharing capabilities (already in your enum - good)
     // Window access
+    virtual bool on_outlet_established(DataPool* pool) { return true; }
+    virtual bool on_inlet_established(DataPool* pool, Rshell_pipe_flowType flow) { return true; }
     virtual void on_pipe_establish();
     virtual void on_pipe_destroyed();
     
@@ -222,32 +225,43 @@ public:
     bool is_app_running(const std::string& name);
 
 
-    // Pipe management
-bool pipe_apps(std::shared_ptr<AppBase> from, std::shared_ptr<AppBase> to, Rshell_pipe_flowType flow);
-bool pipe_to_streamcore(std::shared_ptr<AppBase> from);  // convenience
-    
+    // === PIPE MANAGEMENT ===
+    bool create_pipe(std::shared_ptr<AppBase> source,
+                     const std::vector<PipeTarget>& targets,
+                     Rshell_pipe_flowType flow);
 
-    //functions for establishing outlets and inlet
-    bool can_establish_outlet(std::shared_ptr<AppBase> app, bool isRing);
-     //is this stream data or is it in grab chunks in a linked psram segment as a cache ring be it in ram or cache
-    bool can_establish_inlet(std::shared_ptr<AppBase> app,bool isRing);
+    bool pipe_to_apps(std::shared_ptr<AppBase> from,
+                      const std::vector<std::shared_ptr<AppBase>>& to_apps,
+                      Rshell_pipe_flowType flow);
 
-    //establish the connection
-    bool establish_outlet(std::shared_ptr<AppBase> app, bool isRing);
-    bool establish_inlet(std::shared_ptr<AppBase> app,bool isRing);
+    bool pipe_to_pools(std::shared_ptr<AppBase> from,
+                       const std::vector<DataPool*>& to_pools,
+                       Rshell_pipe_flowType flow);
 
-    //std::unique_ptr<std::byte[]> establish_pool(std::size_t bytes); //return owning smart pointer
-    using PoolPtr = std::unique_ptr<std::byte[]>;
+    bool pipe_to_targets(std::shared_ptr<AppBase> from,
+                         const std::vector<PipeTarget>& targets,
+                         Rshell_pipe_flowType flow);
 
-    PoolPtr establish_pool(std::size_t bytes, e_type_storage stype);
+    // Legacy single-target (keep for compatibility)
+    // Pipe / Pool management
+    bool pipe_apps(std::shared_ptr<AppBase> from, std::shared_ptr<AppBase> to, Rshell_pipe_flowType flow);
+
+    bool establish_outlet(std::shared_ptr<AppBase> app, size_t bytes, e_type_storage stype);
+    bool establish_inlet(std::shared_ptr<AppBase> app, DataPool* pool, Rshell_pipe_flowType flow);
+
+    using PoolPtr = std::shared_ptr<DataPool>;
+    PoolPtr establish_pool(size_t bytes, e_type_storage stype);
+
+    bool connect_pipe(std::shared_ptr<AppBase> source,
+        std::shared_ptr<AppBase> target,
+        bool use_psram_ring = false);
+
 
 //how the fuck do i make pipes have a target that branches? with a... list of targets? but that would need to be mutable
-bool pipe_apps(std::shared_ptr<AppBase> input, std::shared_ptr<AppBase> output);
-bool pipe_apps(std::shared_ptr<AppBase> output/*i need to have the ability to have multiple targets!*/, Rshell_pipe_flowType flowtype);
-bool pipe_pools(PoolPtr input, PoolPtr out, bool copyInsteadOfMove);
+ bool pipe_pools(PoolPtr input, PoolPtr out, bool copyInsteadOfMove);
 
-    private:
-           
+ private:
+ std::vector<std::unique_ptr<RshellPipe>> active_pipes;
         appManager();   // private constructor
         ~appManager();  // private destructor
     

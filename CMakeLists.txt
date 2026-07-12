@@ -40,9 +40,13 @@ idf_component_register(
 "Fboot/bootfunctions.cpp"
 "sss/shared_state.c"
 
-		#"workspace\tusb_hid\ulp_component\ulp
-		#"ulp_component/ulp/shared_state.h"
-		#"ulp_shit/shared_state.h"
+# here we god damn go again. 
+"os_code/core/rShell/streams/rshell_pool.cpp"
+"os_code/core/rShell/streams/rshell_pipe.cpp"		
+"os_code/core/rShell/streams/rshell_streamdefs.c"	
+"os_code/core/rShell/streams/rshell_pump.cpp"
+
+#"os_code/core/rShell/streams/rshell_filter.cpp"
 		
     INCLUDE_DIRS
         "."
@@ -68,8 +72,7 @@ idf_component_register(
     "os_code/core/notification_sys"
     "sss"
     
-    REQUIRES
-     ulp
+
     
 
 PRIV_REQUIRES
@@ -85,7 +88,10 @@ PRIV_REQUIRES
         esp_psram
         esp_timer
         esp_driver_i2c
-        ulp
+        
+    REQUIRES
+     ulp        
+       
 )
 
 

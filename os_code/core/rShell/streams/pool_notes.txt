@@ -1,0 +1,639 @@
+# DataPool - Memory Management System
+
+## Table of Contents
+- [Description](#description)
+- [Architecture](#architecture)
+- [Installation](#installation)
+- [Core Concepts](#core-concepts)
+- [Usage Guide](#usage-guide)
+  - [Creating a Pool](#creating-a-pool)
+  - [Access Control with Tokens](#access-control-with-tokens)
+  - [Ring Buffer Mode](#ring-buffer-mode)
+  - [Memory Operations](#memory-operations)
+- [Storage Types](#storage-types)
+- [Permission System](#permission-system)
+- [Examples](#examples)
+- [API Reference](#api-reference)
+- [Thread Safety](#thread-safety)
+- [Troubleshooting](#troubleshooting)
+
+---
+
+## Description
+
+**DataPool** is a software memory management system designed for ESP-IDF (ESP32-S3) that emulates memory segmentation similar to Linux's MMU. It provides:
+
+- **Single-writer, multiple-reader** access control
+- **PSRAM support** with automatic fallback to internal RAM
+- **Ring buffer mode** for IPC and streaming data
+- **RAII-based access tokens** for automatic resource management
+- **Memory permissions** (read-only, exclusive write, DMA capability)
+
+This system is designed for embedded environments where hardware memory protection is unavailable, providing software-level memory isolation and access control.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Application Layer                      │
+├─────────────────────────────────────────────────────────────┤
+│                     PoolAccessToken (RAII)                  │
+├─────────────────────────────────────────────────────────────┤
+│                         DataPool                            │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │                  Access Control                     │   │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐        │   │
+│  │  │ READ_ONLY│  │READ_WRITE│  │EXCLUSIVE │        │   │
+│  │  └──────────┘  └──────────┘  └──────────┘        │   │
+│  ├─────────────────────────────────────────────────────┤   │
+│  │                  Memory Buffer                      │   │
+│  │  ┌──────────────────────────────────────────┐      │   │
+│  │  │  RAM │ PSRAM │ NVS │ MicroSD │ External │      │   │
+│  │  └──────────────────────────────────────────┘      │   │
+│  ├─────────────────────────────────────────────────────┤   │
+│  │  Ring Buffer Mode (optional)                       │   │
+│  │  ┌──────────────────────────────────────────┐      │   │
+│  │  │  [head] → [data] → [data] → [tail]     │      │   │
+│  │  └──────────────────────────────────────────┘      │   │
+│  └─────────────────────────────────────────────────────┘   │
+├─────────────────────────────────────────────────────────────┤
+│                      ESP-IDF Heap Manager                   │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  MALLOC_CAP_SPIRAM │ MALLOC_CAP_8BIT │ MALLOC_CAP │   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Installation
+
+### 1. Include Headers
+
+```cpp
+#include "rshell_pool.hpp"
+#include "os_code/core/rShell/enviroment/env_vars.h"
+```
+
+### 2. CMakeLists.txt Configuration
+
+```cmake
+target_link_libraries(${PROJECT_NAME} PRIVATE
+    ${IDF_TARGET}_hal
+    esp_heap_caps
+)
+```
+
+### 3. Enable PSRAM in menuconfig
+
+```bash
+idf.py menuconfig
+```
+
+Navigate to:
+- `Component config → ESP PSRAM`
+- Enable `Support for external, SPI-connected RAM`
+- Set `SPIRAM use` to `Caps allocator`
+
+---
+
+## Core Concepts
+
+### Memory Pools
+A `DataPool` represents a contiguous block of memory with access control. Each pool has:
+- An **owner** (string identifier)
+- A **storage type** (RAM, PSRAM, etc.)
+- **Permissions** (read-only, exclusive write)
+- An **access state** (who's reading/writing)
+
+### Access Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `READ_ONLY` | Multiple simultaneous readers | Configuration data, shared constants |
+| `READ_WRITE` | Single writer, multiple readers | Shared buffers, IPC |
+| `EXCLUSIVE` | Single owner, no other access | Critical sections, hardware registers |
+
+### RAII Tokens
+`PoolAccessToken` automatically acquires access on construction and releases on destruction. This prevents:
+- Resource leaks
+- Deadlocks
+- Forgotten releases
+
+---
+
+## Usage Guide
+
+### Creating a Pool
+
+#### Unique Ownership (Single Owner)
+```cpp
+auto pool = DataPool::create(4096, STORAGE_PSRAM, "sensor_data");
+if (!pool) {
+    ESP_LOGE(TAG, "Failed to allocate pool");
+    return;
+}
+```
+
+#### Shared Ownership (Multiple Owners)
+```cpp
+auto pool = DataPool::create_shared(2048, STORAGE_RAM, "config_cache");
+// Can be copied to multiple components
+auto component1 = pool;
+auto component2 = pool;
+```
+
+#### With Custom Permissions
+```cpp
+MemoryPermission perms;
+perms.read_only = true;        // No writes allowed
+perms.cacheable = true;        // Enable caching
+perms.dma_capable = true;      // DMA access allowed
+
+auto pool = DataPool::create(1024, STORAGE_PSRAM, "dma_buffer", perms);
+```
+
+### Access Control with Tokens
+
+#### Writer Access
+```cpp
+auto pool = DataPool::create(4096, STORAGE_PSRAM, "shared_buffer");
+
+{
+    PoolAccessToken writer(pool.get(), "motor_controller", AccessMode::READ_WRITE);
+    
+    if (writer.is_valid()) {
+        std::byte* data = writer.data();
+        size_t size = writer.size();
+        
+        // Write motor position data
+        uint32_t position = 1234;
+        std::memcpy(data, &position, sizeof(position));
+    }
+    // Token destructor releases access automatically
+}
+```
+
+#### Multiple Readers
+```cpp
+// Reader 1
+{
+    PoolAccessToken reader1(pool.get(), "display", AccessMode::READ_ONLY);
+    if (reader1.is_valid()) {
+        const std::byte* data = reader1.data();
+        // Read sensor data
+        uint32_t value;
+        std::memcpy(&value, data, sizeof(value));
+    }
+}
+
+// Reader 2 - can read simultaneously
+{
+    PoolAccessToken reader2(pool.get(), "logger", AccessMode::READ_ONLY);
+    if (reader2.is_valid()) {
+        // Read same data
+    }
+}
+```
+
+#### Move Tokens (Transfer Ownership)
+```cpp
+PoolAccessToken create_token(DataPool* pool) {
+    PoolAccessToken token(pool, "creator", AccessMode::READ_WRITE);
+    return std::move(token);  // Moves, no copy
+}
+
+// Usage
+auto token = create_token(pool.get());
+if (token.is_valid()) {
+    // Use token...
+}
+```
+
+### Ring Buffer Mode
+
+Ring buffer mode enables FIFO operations on the pool's memory.
+
+#### Enabling Ring Mode
+```cpp
+auto pool = DataPool::create(2048, STORAGE_PSRAM, "event_queue");
+pool->set_ring_mode(true);
+```
+
+#### Push and Pop Operations
+```cpp
+// Producer
+struct Event {
+    uint32_t timestamp;
+    uint16_t sensor_value;
+    uint8_t type;
+};
+
+Event event = {esp_timer_get_time(), 42, 1};
+
+if (pool->push_ring(&event, sizeof(event))) {
+    ESP_LOGI(TAG, "Event pushed to ring");
+} else {
+    ESP_LOGW(TAG, "Ring buffer full");
+}
+
+// Consumer
+Event received;
+if (pool->pop_ring(&received, sizeof(received))) {
+    ESP_LOGI(TAG, "Received event: sensor=%d", received.sensor_value);
+} else {
+    ESP_LOGI(TAG, "Ring buffer empty");
+}
+```
+
+#### Check Available Data
+```cpp
+size_t available = pool->ring_available();
+if (available > 0) {
+    ESP_LOGI(TAG, "%zu bytes available in ring", available);
+}
+```
+
+### Memory Operations
+
+#### Zero-initialize Pool
+```cpp
+pool->zero();  // Fills entire pool with zeros
+```
+
+#### Copy Data
+```cpp
+std::byte source[100] = { /* data */ };
+
+// Copy from source to pool (offset 50)
+if (pool->copy_from(source, sizeof(source), 50)) {
+    ESP_LOGI(TAG, "Copy successful");
+}
+
+// Copy from pool to destination
+std::byte dest[100];
+if (pool->copy_to(dest, sizeof(dest), 50)) {
+    ESP_LOGI(TAG, "Copy to dest successful");
+}
+```
+
+#### Direct Access (with proper access control)
+```cpp
+PoolAccessToken token(pool.get(), "direct", AccessMode::READ_WRITE);
+if (token.is_valid()) {
+    std::byte* buffer = token.data();
+    size_t size = token.size();
+    
+    // Direct manipulation
+    buffer[0] = std::byte{0xAA};
+    buffer[1] = std::byte{0xBB};
+}
+```
+
+---
+
+## Storage Types
+
+| Type | Description | Allocation Method | Status |
+|------|-------------|-------------------|--------|
+| `STORAGE_RAM` | Internal DRAM | `malloc()` | ✅ Supported |
+| `STORAGE_PSRAM` | External PSRAM | `heap_caps_malloc(MALLOC_CAP_SPIRAM)` | ✅ Supported |
+| `STORAGE_NVS` | Non-volatile storage | NVS API | 🚧 Planned |
+| `STORAGE_MICROSD` | SD card | SD Card API | 🚧 Planned |
+| `STORAGE_EXT_NONVOL` | External non-volatile | Custom | 🚧 Planned |
+| `STORAGE_EXT_VOL` | External volatile | Custom | 🚧 Planned |
+| `STORAGE_SEND_EXTDEV` | External device | DMA/SPI/USB | 🚧 Planned |
+
+**Note:** Unsupported types fall back to RAM with a warning.
+
+---
+
+## Permission System
+
+### MemoryPermission Structure
+
+```cpp
+struct MemoryPermission {
+    bool read_only = false;        // Prevent writes
+    bool exclusive_write = false;  // Only exclusive write allowed
+    bool dma_capable = false;      // DMA access allowed
+    bool cacheable = true;         // Cache enabled
+};
+```
+
+### Permission Combinations
+
+| Scenario | Configuration |
+|----------|---------------|
+| **Read-only config** | `read_only = true` |
+| **Hardware buffer** | `dma_capable = true; cacheable = false;` |
+| **Critical section** | `exclusive_write = true` |
+| **Shared data** | Default (all false) |
+
+### Permission Enforcement
+
+```cpp
+MemoryPermission perms;
+perms.read_only = true;
+
+auto pool = DataPool::create(512, STORAGE_RAM, "config", perms);
+
+// This will FAIL (read-only)
+PoolAccessToken writer(pool.get(), "writer", AccessMode::READ_WRITE);
+if (!writer.is_valid()) {
+    ESP_LOGW(TAG, "Cannot write to read-only pool!");
+}
+```
+
+---
+
+## Examples
+
+### Example 1: Sensor Data Pipeline
+
+```cpp
+// Producer task
+void sensor_task(void* arg) {
+    auto pool = DataPool::create(256, STORAGE_PSRAM, "sensor_data");
+    
+    while (true) {
+        PoolAccessToken writer(pool.get(), "sensor", AccessMode::READ_WRITE);
+        if (writer.is_valid()) {
+            SensorData data = read_sensor();
+            std::memcpy(writer.data(), &data, sizeof(data));
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
+// Consumer task
+void display_task(void* arg) {
+    auto pool = /* Get reference to same pool */;
+    
+    while (true) {
+        PoolAccessToken reader(pool.get(), "display", AccessMode::READ_ONLY);
+        if (reader.is_valid()) {
+            SensorData data;
+            std::memcpy(&data, reader.data(), sizeof(data));
+            update_display(data);
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+```
+
+### Example 2: Event Queue with Ring Buffer
+
+```cpp
+// Event definition
+struct Event {
+    enum Type { BUTTON, TOUCH, GESTURE } type;
+    uint32_t value;
+    uint32_t timestamp;
+};
+
+// Setup
+auto event_queue = DataPool::create(1024, STORAGE_PSRAM, "events");
+event_queue->set_ring_mode(true);
+
+// Event producer
+void push_event(Event::Type type, uint32_t value) {
+    Event event{type, value, esp_timer_get_time()};
+    if (!event_queue->push_ring(&event, sizeof(event))) {
+        ESP_LOGW(TAG, "Event queue full, dropping event");
+    }
+}
+
+// Event consumer
+void process_events() {
+    Event event;
+    while (event_queue->pop_ring(&event, sizeof(event))) {
+        process_event(event);
+    }
+}
+```
+
+### Example 3: Shared Configuration with Permissions
+
+```cpp
+// Configure pool as read-only
+MemoryPermission perms;
+perms.read_only = true;
+
+auto config_pool = DataPool::create(512, STORAGE_RAM, "system_config", perms);
+
+// Initial setup (only done once)
+{
+    PoolAccessToken writer(config_pool.get(), "setup", AccessMode::READ_WRITE);
+    if (writer.is_valid()) {
+        ConfigData config = load_defaults();
+        std::memcpy(writer.data(), &config, sizeof(config));
+    }
+}
+
+// All other access is read-only
+{
+    PoolAccessToken reader(config_pool.get(), "component1", AccessMode::READ_ONLY);
+    if (reader.is_valid()) {
+        ConfigData config;
+        std::memcpy(&config, reader.data(), sizeof(config));
+        // Use config...
+    }
+}
+```
+
+---
+
+## API Reference
+
+### DataPool
+
+#### Factory Methods
+```cpp
+static UniquePoolPtr create(size_t bytes, e_type_storage storage_type, 
+                            const char* owner_name = "unknown",
+                            const MemoryPermission& perms = {});
+
+static SharedPoolPtr create_shared(size_t bytes, e_type_storage storage_type,
+                                   const char* owner_name = "unknown",
+                                   const MemoryPermission& perms = {});
+```
+
+#### Access Control
+```cpp
+bool acquire(const void* requester, AccessMode mode);
+void release(const void* requester);
+bool has_access(const void* requester) const;
+AccessMode current_access_mode() const;
+```
+
+#### Memory Access
+```cpp
+std::byte* data();
+const std::byte* data() const;
+size_t size() const;
+e_type_storage storage_type() const;
+const char* owner() const;
+const MemoryPermission& permissions() const;
+```
+
+#### Ring Buffer
+```cpp
+bool is_ring() const;
+void set_ring_mode(bool ring);
+bool push_ring(const void* data, size_t size);
+bool pop_ring(void* data, size_t size);
+size_t ring_available() const;
+```
+
+#### Utilities
+```cpp
+void zero();
+bool copy_from(const std::byte* src, size_t count, size_t offset = 0);
+bool copy_to(std::byte* dst, size_t count, size_t offset = 0) const;
+```
+
+### PoolAccessToken
+
+```cpp
+PoolAccessToken(DataPool* pool, const void* requester, AccessMode mode);
+~PoolAccessToken();
+bool is_valid() const;
+std::byte* data() const;
+size_t size() const;
+```
+
+---
+
+## Thread Safety
+
+### Mutex Protection
+- **Access control** operations are protected by `access_mutex_`
+- **Ring buffer** operations have their own mutex
+- **Reader count** is atomic for lock-free increments/decrements
+
+### Access Rules
+
+| Operation | Thread Safety | Notes |
+|-----------|--------------|-------|
+| `acquire()` | ✅ Thread-safe | Mutex-protected |
+| `release()` | ✅ Thread-safe | Mutex-protected |
+| `data()` | ⚠️ Depends on token | Access must be acquired first |
+| `push_ring()` | ✅ Thread-safe | Internal mutex |
+| `pop_ring()` | ✅ Thread-safe | Internal mutex |
+| Copy operations | ⚠️ Not thread-safe | Should be done under access control |
+
+### Best Practices
+
+```cpp
+// ✅ Good: Token handles locking
+{
+    PoolAccessToken token(pool.get(), "task", AccessMode::READ_ONLY);
+    if (token.is_valid()) {
+        // Safe reading
+    }
+}
+
+// ❌ Bad: Manual access without token
+std::byte* data = pool->data();  // No access control!
+std::memcpy(data, source, size); // Unsafe!
+```
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+#### 1. PSRAM Allocation Fails
+**Problem:** `heap_caps_malloc()` returns nullptr
+
+**Solution:**
+```cpp
+// Check PSRAM availability
+ESP_LOGI(TAG, "PSRAM free: %zu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+
+// Enable PSRAM in menuconfig
+// Ensure CONFIG_SPIRAM is enabled
+```
+
+#### 2. Access Denied
+**Problem:** `acquire()` returns false
+
+**Solution:**
+```cpp
+// Check current access mode
+AccessMode current = pool->current_access_mode();
+
+// Check if token is valid
+PoolAccessToken token(...);
+if (!token.is_valid()) {
+    ESP_LOGW(TAG, "Access denied - pool in use");
+}
+```
+
+#### 3. Ring Buffer Full
+**Problem:** `push_ring()` returns false
+
+**Solution:**
+```cpp
+// Increase pool size
+auto pool = DataPool::create(4096, STORAGE_PSRAM, "queue"); // 4KB
+
+// Or check available space
+size_t avail = pool->ring_available();
+if (avail < sizeof(Event)) {
+    // Process events before pushing new ones
+}
+```
+
+#### 4. Memory Leaks
+**Problem:** Memory not freed
+
+**Solution:**
+```cpp
+// Use RAII tokens
+{
+    PoolAccessToken token(...);  // Automatically released
+} // Token destructor releases access
+
+// Use smart pointers for pool
+auto pool = DataPool::create(...);  // unique_ptr
+// Automatically freed when out of scope
+```
+
+### Debugging Tips
+
+```cpp
+// Enable logging
+ESP_LOGI(TAG, "Pool: %s, Size: %zu, Type: %d", 
+         pool->owner(), pool->size(), pool->storage_type());
+
+// Check memory usage
+ESP_LOGI(TAG, "PSRAM: %zu used, %zu free",
+         get_psram_used(), get_psram_free());
+
+// Validate access
+if (pool->has_access("caller_id")) {
+    ESP_LOGI(TAG, "Has access");
+}
+```
+
+---
+
+## Notes
+
+- **PSRAM Limitations:** PSRAM is slower than internal RAM and cannot be used for DMA buffers
+- **Cache Performance:** Accessing large (>32KB) PSRAM regions may impact cache performance
+- **Thread Priorities:** Ensure tasks using the same pool have appropriate synchronization
+- **Memory Alignment:** Data structures should be properly aligned for target hardware
+
+---
+
+## See Also
+
+- [ESP-IDF PSRAM Documentation](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/external-ram.html)
+- [ESP-IDF Heap Allocation](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/mem_alloc.html)
+- [RAII Pattern in C++](https://en.cppreference.com/w/cpp/language/raii)

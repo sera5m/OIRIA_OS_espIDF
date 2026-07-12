@@ -7,7 +7,13 @@
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/middle_layer/input/hid_t.h"
 #include "tusb.h"
-
+#include "os_code/core/rShell/streams/rshell_pump.hpp"
+#include "esp_log.h"
+#include "esp_timer.h"
+#include "hardware/drivers/psram_std/psram_std.hpp"
+#include "hardware/drivers/sd_card/d_sdc.h"
+#include "s_hell.hpp"
+#include "os_code/core/rShell/streams/rshell_pipe.hpp"
 // Forward declaration of InputEvent to break circular include
 
 

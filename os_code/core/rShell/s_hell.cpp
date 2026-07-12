@@ -11,20 +11,9 @@
 #include "esp_log.h"
 #include <cstring>
 #include "os_code/core/notification_sys/rs_notif_dispatcher.h"
-
+#include "os_code/core/rShell/streams/rshell_pool.hpp"
 static const char* TAG = "AppFramework";
 
-
-namespace psram {
-    // Simple ring buffer in PSRAM (~1-4KB)
-    struct EventRingBuffer {
-        static constexpr size_t CAP = 1024;  // events
-        DataItem* buffer[CAP];
-        size_t head = 0, tail = 0;
-        // add atomic or semaphore if needed
-    };
-    static EventRingBuffer* g_ring = nullptr;
-}
 
 
 //this function so we can see the fuck going on here
@@ -86,7 +75,7 @@ void AppBase::start_task() {
 
     BaseType_t res;
 
-    if (has_capability(AppCapability::PINNED_TO_CORE)) {
+    if (has_capability(AppCapability::SINGLETHREADED)) {
         res = xTaskCreatePinnedToCore(
             task_func,
             cfg_.name,
@@ -160,6 +149,11 @@ appManager::appManager()
 {
     ESP_LOGW(TAG, "started application manager task");
     notification_system_init();
+
+
+
+
+    
 }
 
 // destructor
@@ -347,74 +341,76 @@ void start_notification_task() {
     xTaskCreate(notification_task, "notif_task", 4096, NULL, 2, NULL);
 }
 
+// ====================== PIPE CREATION WITH MULTIPLE TARGETS ======================
 
-bool appManager::pipe_apps(std::shared_ptr<AppBase> from, std::shared_ptr<AppBase> to, Rshell_pipe_flowType flow) {
-    if (!from || !to) return false;
-    
-    ESP_LOGI(TAG, "Piping %s -> %s (flow=%d)", from->get_app_name(), to->get_app_name(), (int)flow);
-    
-    // For now: simple direct callback registration or shared ring
-    // Later: register as source/sink in streamer
-    return true;
+bool appManager::create_pipe(std::shared_ptr<AppBase> source,
+    const std::vector<PipeTarget>& targets,
+    Rshell_pipe_flowType flow) {
+if (!source || targets.empty()) return false;
+
+auto pipe = std::make_unique<RshellPipe>();
+pipe->source_app = source.get();
+pipe->mode = flow;
+pipe->id = "pipe_" + std::to_string(active_pipes.size());
+
+for (const auto& t : targets) {
+pipe->add_target(t);
 }
 
-bool establish_outlet(std::shared_ptr<AppBase> app, bool isRing){
-
+active_pipes.push_back(std::move(pipe));
+ESP_LOGI(TAG, "Pipe created from %s to %zu targets", source->get_app_name(), targets.size());
+return true;
 }
 
-//is this stream data or is it in grab chunks in a linked psram segment as a cache ring
- bool Can_establish_inlet(std::shared_ptr<AppBase> app, bool isRing)
-     {
-         auto caps = app->get_capabilities();
-     
-         if ((caps & AppCapability::STREAM_IN_CAPABLE) != AppCapability::NONE)
-         {
-             // supports stream input
-         }
-     
-         if ((caps & AppCapability::ST_RING_CAPABLE) != AppCapability::NONE)
-         {
-             // supports ring buffers
-         }
-     
-         if ((caps & AppCapability::ST_PF_CAPABLE) != AppCapability::NONE)
-         {
-             // supports pumped flow
-         }
-     
-         if ((caps & AppCapability::ST_PREF_RT_IPC) != AppCapability::NONE)
-         {
-             // prefers RT IPC
-         }
-     
-         return true;
-     }
+bool appManager::pipe_to_apps(std::shared_ptr<AppBase> from,
+                              const std::vector<std::shared_ptr<AppBase>>& to_apps,
+                              Rshell_pipe_flowType flow) {
+    std::vector<PipeTarget> targets;
+    targets.reserve(to_apps.size());
     
-
-     establish_pool(std::size_t bytes, e_type_storage stype){
-        switch (type){
-
-            case ram:
-
-          break; 
-          
-          case psram:
-
-          break;
-
-          case nvs:
-
-          break;
-
-          case microsd:
-
-          break;
-
-          case default:
-          //deal with this later
-          break;
-            //extStorageNonVol,  SendExtDev 
+    for (const auto& app : to_apps) {
+        if (app) {
+            targets.push_back(PipeTarget::from_app(app.get()));
         }
-     }   
-
+    }
     
+    return create_pipe(from, targets, flow);
+}
+
+bool appManager::pipe_to_pools(std::shared_ptr<AppBase> from,
+                               const std::vector<DataPool*>& to_pools,
+                               Rshell_pipe_flowType flow) {
+    std::vector<PipeTarget> targets;
+    targets.reserve(to_pools.size());
+    
+    for (auto pool : to_pools) {
+        if (pool) {
+            targets.push_back(PipeTarget::from_pool(pool));
+        }
+    }
+    
+    return create_pipe(from, targets, flow);
+}
+
+bool appManager::pipe_to_targets(std::shared_ptr<AppBase> from,
+                                 const std::vector<PipeTarget>& targets,
+                                 Rshell_pipe_flowType flow) {
+    return create_pipe(from, targets, flow);
+}
+
+// Legacy single-target version (kept for compatibility)
+bool appManager::pipe_apps(std::shared_ptr<AppBase> from, std::shared_ptr<AppBase> to, Rshell_pipe_flowType flow) {
+    std::vector<PipeTarget> targets;
+    if (to) targets.push_back(PipeTarget::from_app(to.get()));
+    return create_pipe(from, targets, flow);
+}
+
+bool appManager::connect_pipe(std::shared_ptr<AppBase> source,
+    std::shared_ptr<AppBase> target,
+    bool use_psram_ring) {
+std::vector<PipeTarget> targets;
+if (target) {
+targets.push_back(PipeTarget::from_app(target.get()));
+}
+return create_pipe(source, targets, direct);  // or your preferred flow
+}
