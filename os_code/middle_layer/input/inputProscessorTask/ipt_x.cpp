@@ -1,6 +1,7 @@
 #include "ipt_x.hpp"
 #include "esp_log.h"
-#include "os_code/core/rShell/s_hell.hpp"
+#include "os_code/core/rShell/rshell_appFramework.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
 #include "os_code/middle_layer/input/input_handler.hpp"
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "tusb.h"
@@ -14,9 +15,10 @@
 #include "os_code/core/rShell/streams/rshell_pump.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "main/hardware/drivers/psram_std/psram_std.hpp"
-#include "d_sdc.h"
-#include "os_code/core/rShell/s_hell.hpp"
+#include "hardware/drivers/psram_std/psram_std.hpp"
+#include "hardware/drivers/sd_card/d_sdc.h"
+#include "os_code/core/rShell/rshell_appFramework.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
 
 
 static const char* TAG = "InputTask";
@@ -176,7 +178,7 @@ static void input_task(void* pvParameters)
                 break;
         
             case HIDTarget::toStreamCore:
-            DataStreamerPump::pushInputEvent(ev);.
+            DataStreamerPump::pushInputEvent(ev);
                 break;
         
             case HIDTarget::toStreamCoreAndDebug:

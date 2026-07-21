@@ -8,7 +8,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
-#include "os_code/core/rShell/s_hell.hpp"
+#include "os_code/core/rShell/rshell_appFramework.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
 
 
 #include "esp_log.h"

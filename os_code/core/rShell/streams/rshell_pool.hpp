@@ -10,9 +10,13 @@
 
 #include "rshell_streamdefs.h"
 
+
+
 // Forward declarations instead of full include
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "rshell_streamdefs.h"
+#include "hardware/drivers/sd_card/d_sdc.h"
+#include "os_code/core/rShell/streams/rshell_nv_pool.hpp"
 
 class AppBase;
 
@@ -29,7 +33,9 @@ enum class AccessMode {
     EXCLUSIVE
 };
 
+
 class DataPool;
+
 
 class PoolAccessToken {
 public:
@@ -39,6 +45,10 @@ public:
     PoolAccessToken& operator=(PoolAccessToken&& other) noexcept;
     PoolAccessToken(const PoolAccessToken&) = delete;
     PoolAccessToken& operator=(const PoolAccessToken&) = delete;
+
+    // Persistent NV Storage on microSD
+    bool save_to_rpool(const std::string& filepath);
+    bool load_from_rpool(const std::string& filepath);
 
     bool is_valid() const;
     std::byte* data() const;
@@ -92,6 +102,11 @@ public:
     void zero();
     bool copy_from(const std::byte* src, size_t count, size_t offset = 0);
     bool copy_to(std::byte* dst, size_t count, size_t offset = 0) const;
+
+
+    // Persistent NV Storage (.rpool)
+    bool save_to_rpool(const std::string& filepath);
+    bool load_from_rpool(const std::string& filepath);
 
 private:
     DataPool(size_t size, e_type_storage type, const char* owner, const MemoryPermission& perms);

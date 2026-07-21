@@ -3,9 +3,12 @@
 #include "rshell_pool.hpp"
 #include <esp_heap_caps.h>
 #include <esp_log.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
-
-#include "os_code/core/rShell/s_hell.hpp"
+#include "os_code/core/rShell/rshell_appFramework.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
 #include <cstddef>
 #include "os_code/core/rShell/enviroment/env_vars.h"
 //yes, this is intended to be something akin to how linux has a memory management unit that provides segments in memory for programs
@@ -13,7 +16,9 @@
 //to avoid memory issues, we have to have pools write from one source via ownership, or more than one at a time via mutex
 //read can occur from any program unless read is locked to one, which.... why would i do that outside of userspace protection explicitly
 #include "rshell_pool.hpp"
-
+#include "hardware/drivers/sd_card/d_sdc.h"
+#include "os_code/core/rShell/streams/rshell_nv_pool.hpp"
+//wo we can just get that going for hard storage
 //------------------------------------------------------------------------------
 // PoolAccessToken Implementation
 //------------------------------------------------------------------------------
@@ -21,8 +26,79 @@
 static const char* TAG = "DataPool";
 
 
+bool DataPool::save_to_rpool(const std::string& filepath) {
+    if (!buffer_ || size_ == 0) {
+        ESP_LOGE(TAG, "Cannot save empty pool");
+        return false;
+    }
 
+    rpool::Header hdr{};
+    hdr.sizeBytes = size_;
+    strncpy(hdr.ownerAppName, owner_, sizeof(hdr.ownerAppName)-1);
+    hdr.ownerPointer = 0;           // Runtime only
+    hdr.flags = 0;                  // Set as needed
 
+    std::string fullpath = "/sdcard/" + filepath + ".rpool";
+
+    int fd = open(fullpath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0) {
+        ESP_LOGE(TAG, "Failed to open %s for write", fullpath.c_str());
+        return false;
+    }
+
+    // Write header
+    write(fd, rpool::FILE_BEGIN, strlen(rpool::FILE_BEGIN));
+    write(fd, &hdr, sizeof(hdr));
+
+    // Write pool data
+    write(fd, buffer_, size_);
+
+    write(fd, rpool::FILE_END, strlen(rpool::FILE_END));
+
+    close(fd);
+    ESP_LOGI(TAG, "Saved pool to %s (size=%zu)", fullpath.c_str(), size_);
+    return true;
+}
+
+bool DataPool::load_from_rpool(const std::string& filepath) {
+    std::string fullpath = "/sdcard/" + filepath + ".rpool";
+
+    int fd = open(fullpath.c_str(), O_RDONLY);
+    if (fd < 0) {
+        ESP_LOGE(TAG, "Failed to open %s", fullpath.c_str());
+        return false;
+    }
+
+    char magic[12];
+    read(fd, magic, strlen(rpool::FILE_BEGIN));
+    if (strncmp(magic, rpool::FILE_BEGIN, strlen(rpool::FILE_BEGIN)) != 0) {
+        ESP_LOGE(TAG, "Invalid .rpool magic");
+        close(fd);
+        return false;
+    }
+
+    rpool::Header hdr{};
+    read(fd, &hdr, sizeof(hdr));
+
+    // Re-allocate if needed
+    if (buffer_) free_memory();
+    size_ = hdr.sizeBytes;
+    type_ = STORAGE_MICROSD;   // or STORAGE_PSRAM if you want
+    buffer_ = static_cast<std::byte*>(allocate_memory(size_, type_));
+
+    if (!buffer_) {
+        ESP_LOGE(TAG, "Failed to allocate for load");
+        close(fd);
+        return false;
+    }
+
+    // Read data
+    read(fd, buffer_, size_);
+
+    close(fd);
+    ESP_LOGI(TAG, "Loaded pool from %s (size=%zu)", fullpath.c_str(), size_);
+    return true;
+}
 
 
 PoolAccessToken::PoolAccessToken(DataPool* pool, const void* requester, AccessMode mode)

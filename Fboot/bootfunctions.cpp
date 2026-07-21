@@ -60,7 +60,8 @@
  #include "os_code/core/rShell/enviroment/env_vars.h"
  
  
- #include "os_code/core/rShell/s_hell.hpp"
+ #include "os_code/core/rShell/rshell_appFramework.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
  #include "os_code/applications/watch/MS_watchapp.hpp"
  
  #include "esp_task_wdt.h"

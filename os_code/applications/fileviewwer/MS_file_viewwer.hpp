@@ -28,9 +28,10 @@
 #include "../../../hardware/drivers/psram_std/psram_std.hpp"
 #include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
 #include "os_code/core/rShell/enviroment/env_vars.h"
-#include "os_code/core/rShell/s_hell.hpp"
+#include "os_code/core/rShell/rshell_appFramework.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
-
+#include "os_code/core/rShell/streams/rshell_nv_pool.hpp"
 //the file viewwer app draws from the file m nagement app. 
 //this was intended to take some inspiration from listary, using an indexed table, but we're so constrained on psram it's diabolical
 
@@ -64,24 +65,30 @@ typedef enum{
            }FV_U_Mode; //file viewwer app use mode
 
 
-class fv_app : public AppBase {
-public:
-    explicit fv_app(const ApplicationConfig& cfg);
+ class fv_app : public AppBase {
+           public:
+               explicit fv_app(const ApplicationConfig& cfg);
 
-    void tick_app(uint32_t delta_ms) override;
-    void receive_event_input(const void* event) override;
-    void suspend() override;
-    void force_close() override;
+               void tick_app(uint32_t delta_ms) override;
+               void receive_event_input(const void* event) override;
+               void on_draw() override;
 
-    void on_start() override;
-    void on_stop() override;
-    void on_pause() override;
-    void on_resume() override;
-    void on_draw() override;
+               void on_start() override;
+               void on_stop() override;
+               void on_pause() override;
+               void on_resume() override;
 
-    //customs per this app
-    
+           private:
+               std::shared_ptr<Window> fv_app_window;
 
-private:
-    std::shared_ptr<Window> fv_app_window;
-};
+               FV_APP_Mode current_mode = FV_MAIN;
+               FV_U_Mode use_mode = FVU_observing;
+
+               // Add your file state here
+               // std::string current_path;
+               // std::vector<FileEntry> current_dir;
+               std::shared_ptr<DataPool> current_pool;
+    std::string current_path;
+    bool load_rpool(const std::string& path);
+    bool save_rpool(const std::string& path);
+           };

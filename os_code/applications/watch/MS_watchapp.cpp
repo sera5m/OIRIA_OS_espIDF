@@ -1,8 +1,10 @@
 #include "MS_watchapp.hpp"
 #include "code_stuff/helperfunctions.hpp"
-#include "os_code/middle_layer/input/hid_t.h"
-#include "os_code/core/notification_sys/rs_notif_dispatcher.h"
+#include "os_code/middle_layer/input/hid_t.h"   
+#include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
 
+#include "os_code/core/notification_sys/rs_notif_dispatcher.h"
+#include "os_code/core/rShell/defaultAppList.hpp"
 
 
 static const char* TAG = "MyWatchApp";
@@ -18,7 +20,9 @@ MyWatchApp::MyWatchApp(const ApplicationConfig& cfg) : AppBase(cfg) {
 
 void MyWatchApp::on_start() {
     ESP_LOGI(TAG, "WatchApp started");
-
+    // Registration at file scope (runs before main)
+REGISTER_BUILTIN_APP(MyWatchApp, "WatchApp", "Watch", "Main watch face",
+AppCapability::FULLSCREEN | AppCapability::NEEDS_WINDOW, 8192, 5, 20);
     watch_window = std::make_shared<Window>(
         WindowCfg{
             .Posx = 0, .Posy = 0,
@@ -212,8 +216,3 @@ void MyWatchApp::receive_event_input(const void* event) {
     }
 }
 
-void MyWatchApp::suspend()  { on_pause(); }
-void MyWatchApp::force_close() {
-    on_stop();
-    stop_task();
-}

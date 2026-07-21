@@ -15,15 +15,21 @@
 
 class DataStreamerPump {
 public:
+
+
     static void start();
     static void stop();
     static bool register_pipe(RshellPipe* pipe);
     static bool pushInputEvent(const InputEvent& ev);
     static bool pushDataItem(DataItem* item);
 
+
+    static QueueHandle_t event_queue;
+    static std::vector<RshellPipe*> active_pipes;  // pipe piep epiepiepiepie what are we linked to targets
+
 private:
     static void pump_task(void* param);
-    static QueueHandle_t event_queue;
+
 };
 
 extern DataStreamerPump gDataStreamer;

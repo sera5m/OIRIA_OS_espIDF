@@ -54,7 +54,9 @@
 #include "os_code/core/rShell/enviroment/env_vars.h"
 
 
-#include "os_code/core/rShell/s_hell.hpp"
+#include "os_code/core/rShell/rshell_appFramework.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
+#include "os_code/core/rShell/defaultAppList.hpp"
 #include "os_code/applications/watch/MS_watchapp.hpp"
 
 #include "esp_task_wdt.h"
@@ -273,8 +275,9 @@ WindowManager::getInstance().UpdateAll(false, true, true, true);
 
 
 
-// Registration at file scope (runs before main)
-REGISTER_APP(MyWatchApp, "WatchApp", make_watch_config);
+REGISTER_BUILTIN_APP(MyWatchApp, "WatchApp", "Watch", "Main watch face",
+                     AppCapability::FULLSCREEN | AppCapability::NEEDS_WINDOW, 
+                     8192, 5, 20);
 
 
 //handles some boot stuff and will also update sensors (not input, it's got it's own task)
@@ -359,11 +362,10 @@ launchTHESTUPIDMOTHERFUCKINGPEICEOFSHITDISPLAYPUSHTASKFUCKYOU();
 
 // Register MenuApp
 
-REGISTER_APP(app_launcher_menu, "MenuApp", make_menu_config); //don't worry, we declared this in the menu app
-
-
-
-
+REGISTER_BUILTIN_APP(app_launcher_menu, "MenuApp", "App Launcher", "Launch other apps",
+                     AppCapability::FULLSCREEN | AppCapability::NEEDS_WINDOW, 
+                     8192, 5, 10);
+					 
 vTaskDelete(NULL); //KILL YOURSELF, BOOTLOADER! 
 }
 

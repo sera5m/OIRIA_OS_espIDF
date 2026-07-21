@@ -27,7 +27,7 @@
 #include "hardware/drivers/lcd/st7789v2/lcDriver.h"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "esp_timer.h"
-#include "os_code\core\window_env\wenv_basicThemes.h"
+#include "os_code/core/window_env/wenv_basicThemes.h"
 #include "hardware/drivers/lcd/fonts/font_avr_classics.h"
 #include <esp_heap_caps.h>
 
@@ -1799,15 +1799,21 @@ void WindowManager::restore_from_fullscreen()
 
     SetToolbarActive(fs_state.was_toolbar_active);
 
-    if (fs_state.fullscreen_win) {
-        fs_state.fullscreen_win->set_layer(0);
-        fs_state.fullscreen_win->dirty = true;
+    // Force full redraw after restore
+    for (auto& win : windows) {
+        if (win) {
+            win->dirty = true;
+            win->ResumeDrawing();
+        }
     }
+    g_display_dirty = true;
 
     fs_state.fullscreen_win.reset();
     windows_repositioned = false;   // re-enable normal behavior
     ResetRepositioning();
     RepositionAllWindows();
+
+
 }
 
 void WindowManager::ResetTheRepositioning() {

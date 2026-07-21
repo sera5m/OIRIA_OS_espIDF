@@ -29,7 +29,7 @@
 #include "hardware/drivers/lcd/fonts/font_avr_classics.h"
 #include "hardware/drivers/lcd/st7789v2/lcDriver.h"
 #include "hardware/drivers/lcd/fonts/font_avr_classics.h"
-#include "os_code\core\window_env\wenv_basicThemes.h"
+#include "os_code/core/window_env/wenv_basicThemes.h"
 #include <vector>
 
 #include "../../../hardware/drivers/psram_std/psram_std.hpp" //my custom work for psram stdd things

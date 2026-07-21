@@ -27,7 +27,8 @@
 #include "../../../hardware/drivers/psram_std/psram_std.hpp"
 #include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
 #include "os_code/core/rShell/enviroment/env_vars.h"
-#include "os_code/core/rShell/s_hell.hpp"
+#include "os_code/core/rShell/rshell_appFramework.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "code_stuff/helperfunctions.hpp"
 #include "esp_vfs_fat.h"
@@ -97,40 +98,31 @@ void File_Viewwer_App::on_stop()
 void File_Viewwer_App::on_pause()  { ESP_LOGI(TAG, "fileviewwerapp paused"); }
 void File_Viewwer_App::on_resume() { ESP_LOGI(TAG, "fileviewwerapp resumed"); }
 
-void File_Viewwer_App::on_draw() {
+void fv_app::on_draw() {
     if (!fv_app_window) return;
-    
-    static int last_second = -1;
-    int current_second = v_env.displayTime.ss;
-    
-      
-        
-        ESP_LOGI(TAG, "Time string: %s", time_str);  // Debug
-        
-       // fv_app_window->SetText(time_str);
-        fv_app_window->dirty = true;
-        last_second = current_second;
-    
+
+    std::string text = "<|size=4|>File Viewer<|n|>";
+    text += "Mode: " + std::to_string(static_cast<int>(current_mode));
+
+    fv_app_window->SetText(text.c_str());
+    fv_app_window->dirty = true;
 }
 
-void File_Viewwer_App::tick_app(uint32_t delta_ms)
-{
-    static int call_count = 0;
-    ESP_LOGI(TAG, "tick_app called #%d, delta_ms=%lu", ++call_count, delta_ms);  // ← ADD THIS
-    
-    static uint32_t accumulator = 0;
-    accumulator += delta_ms;
-
-    if (accumulator >= 500) {
-        ESP_LOGI(TAG, "Calling on_draw from tick_app");  // ← ADD THIS
+void fv_app::tick_app(uint32_t delta_ms) {
+    // Add your file browsing logic here
+    static uint32_t accum = 0;
+    accum += delta_ms;
+    if (accum >= 500) {
         on_draw();
-        accumulator = 0;
+        accum = 0;
     }
 }
 
-void File_Viewwer_App::receive_event_input(const void* event)
-{
-    ESP_LOGI(TAG, "fv received input event");
+void fv_app::receive_event_input(const void* event) {
+    if (!event) return;
+    // const InputEvent* ev = static_cast<const InputEvent*>(event);
+    // Handle navigation, open, etc.
+    ESP_LOGI(TAG, "File Viewer received input");
 }
 
 void File_Viewwer_App::suspend()
@@ -144,4 +136,23 @@ void File_Viewwer_App::force_close()
     ESP_LOGI(TAG, "fileviewwerapp force close");
     on_stop();
     stop_task();
+}
+
+bool fv_app::load_rpool(const std::string& path) {
+    // TODO: Use d_sdc to read file, parse header, create DataPool
+    ESP_LOGI(TAG, "Loading .rpool: %s", path.c_str());
+    // Parse <🗎🗎🗎START ... END🗎🗎🗎> later because i don't want to do that now
+    return true;
+}
+
+bool fv_app::save_rpool(const std::string& path) {
+    if (!current_pool) return false;
+
+    rpool::Header hdr{};
+    hdr.sizeBytes = current_pool->size();
+    strncpy(hdr.ownerAppName, get_app_name(), sizeof(hdr.ownerAppName)-1);
+
+    // Write header + pool data to SD
+    ESP_LOGI(TAG, "Saving .rpool: %s (size=%zu)", path.c_str(), hdr.sizeBytes);
+    return true;
 }

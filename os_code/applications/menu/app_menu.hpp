@@ -28,10 +28,13 @@
 #include "../../../hardware/drivers/psram_std/psram_std.hpp"
 #include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
 #include "os_code/core/rShell/enviroment/env_vars.h"
-#include "os_code/core/rShell/s_hell.hpp"
+#include "os_code/core/rShell/rshell_appFramework.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "os_code/core/rShell/defaultAppList.hpp" 
-
+#include "os_code/middle_layer/input/hid_t.h"   
+#include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
+#include "os_code/core/rShell/defaultAppList.hpp"
 
 struct MenuItem;
 //bool is_running_
@@ -40,21 +43,34 @@ class app_launcher_menu : public AppBase {
 public:
     explicit app_launcher_menu(const ApplicationConfig& cfg);
 
+    static std::shared_ptr<AppBase> create_instance() {
+        return std::make_shared<app_launcher_menu>(make_menu_config());
+    }
+   
+    //======
+
+    explicit app_launcher_menu(const ApplicationConfig& cfg);
+
+    // Static creator for registry
+    static std::shared_ptr<AppBase> create_instance() {
+        return std::make_shared<MyWatchApp>(make_watch_config());
+    }
+
     void tick_app(uint32_t delta_ms) override;
-    void force_tick() override;
     void receive_event_input(const void* event) override;
-    void suspend() override;
-    void force_close() override;
+    void on_draw() override;
 
     void on_start() override;
     void on_stop() override;
     void on_pause() override;
     void on_resume() override;
-    void on_draw() override;
+    void appmenu_launch_app(uint16_t index);
+
+//=========
 
 private:
     std::shared_ptr<Window> menu_window;
-    int selected_index = 0;
+    uint16_t selected_index = 0;
     std::vector<MenuItem>* current_menu;  // Pointer to active menu
 };
 

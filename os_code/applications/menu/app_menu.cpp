@@ -26,12 +26,16 @@
 #include "../../../hardware/drivers/psram_std/psram_std.hpp"
 #include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
 #include "os_code/core/rShell/enviroment/env_vars.h"
-#include "os_code/core/rShell/s_hell.hpp"
+#include "os_code/core/rShell/rshell_appFramework.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "code_stuff/helperfunctions.hpp"
 #include "esp_task_wdt.h" 
 #include "os_code/applications/menu/app_menu.hpp"
 #include "os_code/core/rShell/defaultAppList.hpp" 
+#include "os_code/middle_layer/input/hid_t.h"   
+#include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
+#include "os_code/core/rShell/defaultAppList.hpp"
 
 static const char* TAG = "app_launcher_menu";
 
@@ -186,7 +190,7 @@ void app_launcher_menu::tick_app(uint32_t delta_ms) {
         accumulator = 0;
     }
 }
-
+/*
 void app_launcher_menu::force_tick(){
     //if (!is_running_) return;   // safety
 
@@ -200,72 +204,77 @@ void app_launcher_menu::force_tick(){
     
     tick_app(delta);
     last_force_tick = current_time;
+}*/
+
+
+void app_launcher_menu::appmenu_launch_app(uint16_t index) {
+    if (index >= current_menu->size()) return;
+
+    const auto& item = (*current_menu)[index];
+
+    if (item.is_submenu) {
+        if (item.name == "Games") current_menu = &games_menu;
+        else if (item.name == "Utilities") current_menu = &utils_menu;
+        else if (item.name == "<- Back") current_menu = &main_menu;
+
+        selected_index = 0;
+    } else if (!item.app_name.empty()) {
+        appManager::instance().close_current_and_open(item.app_name);
+    }
 }
 
-void app_launcher_menu::receive_event_input(const void* event)
-{
+void app_launcher_menu::receive_event_input(const void* event) {
     if (!event) return;
-    
-    const InputEvent* ev = static_cast<const InputEvent*>(event);
-    
-    ESP_LOGI(TAG, "Menu received: key=0x%04X action=%d", ev->key, (int)ev->action);
 
+    const InputEvent* ev = static_cast<const InputEvent*>(event);
     bool needs_redraw = false;
 
     if (ev->action == KeyAction::Tap) {
         switch (ev->key) {
             case KEY_UP:
-                selected_index = (selected_index - 1 + current_menu->size()) % current_menu->size();
+                selected_index = (selected_index + current_menu->size() - 1) % current_menu->size();
                 needs_redraw = true;
                 break;
-                
+
             case KEY_DOWN:
                 selected_index = (selected_index + 1) % current_menu->size();
                 needs_redraw = true;
                 break;
-                
-            case KEY_ENTER: {
-                if (selected_index < 0 || selected_index >= current_menu->size()) break;
-                
-                const auto& item = (*current_menu)[selected_index];
-                
-                if (item.is_submenu) {
-                    if (item.name == "Games") current_menu = &games_menu;
-                    else if (item.name == "Utilities") current_menu = &utils_menu;
-                    else if (item.name == "<- Back") current_menu = &main_menu;
-                    
+
+            case KEY_ENTER:
+                appmenu_launch_app(selected_index);
+                needs_redraw = true;
+                break;
+
+            case KEY_BACK:
+                if (current_menu != &main_menu) {
+                    current_menu = &main_menu;
                     selected_index = 0;
                     needs_redraw = true;
-                } else if (!item.app_name.empty()) {
-                    appManager::instance().close_current_and_open(item.app_name);
-                    
-                    return;
+                } else {
+                    appManager::instance().close_current_and_open("WatchApp");
                 }
                 break;
-            }
-                
-            case KEY_BACK:
-            appManager::instance().close_current_and_open("WatchApp");
-              return;
         }
     }
 
     if (needs_redraw) {
-        menu_window->dirty = true;
-        app_launcher_menu::force_tick();          // ← This forces immediate tick + redraw
+        on_draw();
     }
 }
 
-void app_launcher_menu::suspend()  { ESP_LOGI(TAG, "menu suspending"); }
 
-void app_launcher_menu::force_close()
-{
-    ESP_LOGI(TAG, "force close");
-    on_stop();
-    stop_task();
+
+
+
+static ApplicationConfig make_app_launcher_menu_config() {
+    ApplicationConfig cfg;
+    cfg.capabilities = static_cast<uint32_t>(AppCapability::FULLSCREEN) |
+                       static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
+    cfg.stack_size_bytes = 8192;
+    cfg.priority = 5;
+    cfg.name = "MenuApp";
+    cfg.tick_rate_hz = 10;
+    return cfg;
 }
-// Register
-REGISTER_BUILTIN_APP(app_launcher_menu, "MenuApp", "App Launcher", "Launch other apps",
-    static_cast<uint32_t>(AppCapability::FULLSCREEN) | 
-    static_cast<uint32_t>(AppCapability::NEEDS_WINDOW),
-    8192, 5, 10);
+

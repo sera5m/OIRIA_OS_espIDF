@@ -1,7 +1,7 @@
 #include "rshell_streamdefs.h"
 #include <string.h>
 #include "esp_log.h"
-
+#include "esp_timer.h"
 static const char* TAG = "StreamDefs";
 
 static const StreamCompatEntry g_stream_compat_map[] = {

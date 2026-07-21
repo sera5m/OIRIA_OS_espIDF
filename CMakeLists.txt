@@ -29,22 +29,32 @@ idf_component_register(
         # OS core
         "os_code/core/rShell/enviroment/env_vars.c"
         "os_code/core/window_env/MWenv.cpp"
-        "os_code/core/rShell/s_hell.cpp"
+       
 
-        # Applications
-        "os_code/applications/watch/MS_watchapp.cpp"
-        "os_code/applications/menu/app_menu.cpp"
+# rshell core 
+  "os_code/core/rShell/rshell_appFramework.cpp" 
+         "os_code/core/rShell/rshell_appmanager.cpp"
+         
+      "os_code/core/rShell/defaultAppList.cpp" #needed for app framework   
+         
+       #rshell ipc and storage
+"os_code/core/rShell/streams/rshell_pool.cpp"
+"os_code/core/rShell/streams/rshell_pipe.cpp"		
+"os_code/core/rShell/streams/rshell_streamdefs.c"	
+"os_code/core/rShell/streams/rshell_pump.cpp"
 
         # Notification system
         "os_code/core/notification_sys/rs_notif_dispatcher.c"
 "Fboot/bootfunctions.cpp"
 "sss/shared_state.c"
 
-# here we god damn go again. 
-"os_code/core/rShell/streams/rshell_pool.cpp"
-"os_code/core/rShell/streams/rshell_pipe.cpp"		
-"os_code/core/rShell/streams/rshell_streamdefs.c"	
-"os_code/core/rShell/streams/rshell_pump.cpp"
+        # Applications
+        "os_code/applications/watch/MS_watchapp.cpp"
+        "os_code/applications/menu/app_menu.cpp"
+
+
+
+
 
 #"os_code/core/rShell/streams/rshell_filter.cpp"
 		
@@ -72,6 +82,7 @@ idf_component_register(
     "os_code/core/notification_sys"
     "sss"
     
+    
 
     
 
@@ -91,7 +102,9 @@ PRIV_REQUIRES
         
     REQUIRES
      ulp        
-       
+     esp_driver_pcnt
+    esp_timer
+    freertos
 )
 
 
@@ -101,7 +114,7 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
     -Wno-missing-field-initializers 
     -Wno-error=missing-field-initializers 
     -Wno-format-truncation
-    
+    -Wno-error=reorder #SHUT THE FUCK UP
 )
 
 

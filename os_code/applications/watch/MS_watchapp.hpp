@@ -28,19 +28,16 @@
 #include "../../../hardware/drivers/psram_std/psram_std.hpp"
 #include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
 #include "os_code/core/rShell/enviroment/env_vars.h"
-#include "os_code/core/rShell/s_hell.hpp"
+#include "os_code/core/rShell/rshell_appFramework.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "tusb.h"
 #include "os_code/middle_layer/input/hid_t.h"
 #include "os_code/core/notification_sys/rs_notif_dispatcher.h"
-
-
-
-// Forward declaration
-extern char time_str[256];   // Fixed size declaration
+#include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
+#include "os_code/core/rShell/defaultAppList.hpp"
+extern char time_str[256];
 extern const char* months[];
-
-extern void h_alert_dispatch(uint16_t duration_s, bool run_even_when_sleep, uint8_t loudness, bool useBuzzer);
 
 typedef enum {
     WM_MAIN,
@@ -57,19 +54,20 @@ class MyWatchApp : public AppBase {
 public:
     explicit MyWatchApp(const ApplicationConfig& cfg);
 
+    static std::shared_ptr<AppBase> create_instance() {
+        return std::make_shared<MyWatchApp>(make_watch_config());
+    }
+
     void tick_app(uint32_t delta_ms) override;
     void receive_event_input(const void* event) override;
-    void suspend() override;
-    void force_close() override;
+    void on_draw() override;
 
     void on_start() override;
     void on_stop() override;
     void on_pause() override;
     void on_resume() override;
-    void on_draw() override;
 
     void watchapp_back();
-
 private:
     std::shared_ptr<Window> watch_window;
 
@@ -85,11 +83,10 @@ private:
         uint32_t remaining_ms = 0;
         bool running = false;
     };
-    std::vector<Timer> timers{3};  // 3 default timers
+    std::vector<Timer> timers{3};
     int selected_timer = 0;
-    bool timer_edit_mode = false;
 
-    // Alarms (basic)
+    // Alarms
     struct Alarm {
         uint8_t hh = 8, mm = 0;
         bool enabled = true;
@@ -112,7 +109,7 @@ private:
 static ApplicationConfig make_watch_config() {
     ApplicationConfig cfg;
     cfg.capabilities = static_cast<uint32_t>(AppCapability::FULLSCREEN) |
-                       static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
+    static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
     cfg.stack_size_bytes = 8192;
     cfg.priority = 5;
     cfg.name = "WatchApp";

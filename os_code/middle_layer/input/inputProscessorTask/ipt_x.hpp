@@ -12,7 +12,8 @@
 #include "esp_timer.h"
 #include "hardware/drivers/psram_std/psram_std.hpp"
 #include "hardware/drivers/sd_card/d_sdc.h"
-#include "s_hell.hpp"
+#include "os_code/core/rShell/rshell_appFramework.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
 #include "os_code/core/rShell/streams/rshell_pipe.hpp"
 // Forward declaration of InputEvent to break circular include
 

@@ -6,7 +6,7 @@ extern "C" {
 
 
 
-#include "hardware/drivers/sd_card/d_sdc.c" // For OFV_Mode + extension mapping (storage type hints)
+#include "hardware/drivers/sd_card/d_sdc.h" // For OFV_Mode + extension mapping (storage type hints)
 #include <stdint.h>
 #include <stdbool.h>
 

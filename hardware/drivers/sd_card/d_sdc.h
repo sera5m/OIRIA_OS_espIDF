@@ -25,6 +25,7 @@
         OFV_XR, //future xr overlay for alt modes or headset/target delegate?
         OFV_CANVAS_ANIM_REPLAY, //REPLAY an animation made on device by shapes in the canvas object. future use
         OFV_RAW, //raw file types  that are application specific
+        OFV_RSHELL_SPECIAL,
          OFV_COUNT
         }OFV_Mode; 
         
@@ -151,6 +152,12 @@ static const OFV_ExtMap g_ofv_ext_map[] = {
     // =========================
     {".ofca",  OFV_CANVAS_ANIM_REPLAY},
     {".canim", OFV_CANVAS_ANIM_REPLAY},
+
+    //=======================
+    //self-system for rshell integration and custom msc files
+    //===================
+    {".rpool",OFV_RSHELL_SPECIAL}, //specific pool type for rshell pool save state
+    {".rpool_tmp",OFV_RSHELL_SPECIAL}, //temporary only rshell pool save, wipe this on init!
 
 };
 

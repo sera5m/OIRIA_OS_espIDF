@@ -6,10 +6,11 @@
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "hardware/drivers/psram_std/stdpsram.hpp"
-#include "d_sdc.h"
+#include "hardware/drivers/psram_std/psram_std.hpp"
+#include "os_code/core/window_env/wenv_basicThemes.h"
 
-#include "os_code/core/rShell/s_hell.hpp"
+#include "os_code/core/rShell/rshell_appFramework.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
 
 
 static const char* TAG = "DataPump";
@@ -22,15 +23,11 @@ void DataStreamerPump::start() {
         event_queue = xQueueCreate(64, sizeof(DataItem*));
     }
 
-    // PSRAM ring init (global fallback)
-    if (!psram::g_ring) {
-        psram::g_ring = new (heap_caps_malloc(sizeof(psram::EventRingBuffer), MALLOC_CAP_SPIRAM)) 
-                        psram::EventRingBuffer();
-    }
-
+    // PSRAM ring is handled in DataPool - no need for g_ring here
     xTaskCreatePinnedToCore(pump_task, "datastream_pump", 8192, nullptr, 2, nullptr, 0);
     ESP_LOGI(TAG, "DataStreamer pump started");
 }
+
 
 bool DataStreamerPump::register_pipe(RshellPipe* pipe) {
     if (!pipe) return false;
@@ -39,61 +36,67 @@ bool DataStreamerPump::register_pipe(RshellPipe* pipe) {
     return true;
 }
 
-bool DataStreamerPump::pushInputEvent(const InputEvent& ev) { /* unchanged */ }
+bool DataStreamerPump::pushInputEvent(const InputEvent& ev) {
+    DataItem* item = dataitem_new(SOURCE_INPUT_SYSTEM, 0);
+    if (!item) return false;
 
-bool DataStreamerPump::pushDataItem(DataItem* item) { /* unchanged */ }
+    item->specific.input_ev_ptr = (void*)&ev;
+    item->timestamp = esp_timer_get_time();
+    item->compat_flags = COMPAT_CAN_BRANCH | COMPAT_LOW_LATENCY;
+
+    return pushDataItem(item);
+}
+
+bool DataStreamerPump::pushDataItem(DataItem* item) {
+    if (!item || !event_queue) return false;
+    return xQueueSend(event_queue, &item, 0) == pdTRUE;
+}
 
 static void pump_task(void* param) {
     ESP_LOGI(TAG, "Pump task running");
     DataItem* item = nullptr;
 
     while (true) {
-        if (xQueueReceive(event_queue, &item, pdMS_TO_TICKS(10)) == pdTRUE) {
+        if (xQueueReceive(DataStreamerPump::event_queue, &item, pdMS_TO_TICKS(10)) == pdTRUE) {
             if (!item) continue;
-
-            // === BASIC COMPAT ROUTING ===
-            const StreamCompatEntry* compat = stream_get_compat(/* name or source-based */);
 
             // Legacy input handling
             if (item->source_type == SOURCE_INPUT_SYSTEM) {
                 const InputEvent* ev = static_cast<const InputEvent*>(item->specific.input_ev_ptr);
                 if (ev) {
-                    // HID / existing routes...
                     if (auto focused = appManager::instance().get_focused_app()) {
                         focused->on_stream_data(item);
                     }
                 }
             }
 
-            // === NEW: PIPE-BASED FAN-OUT / POOL SHARING ===
-            
-            
-            // === PIPE FAN-OUT ===
-for (const auto& pipe_ptr : DataStreamerPump::active_pipes) {  // or appManager's
-    auto* pipe = pipe_ptr.get();
-    if (!pipe) continue;
+            // PIPE FAN-OUT
+            for (auto* pipe : DataStreamerPump::active_pipes) {
+                if (!pipe) continue;
 
-    bool should_route = (pipe->mode == direct || pipe->mode == fan || pipe->mode == clone);
-    if (!should_route) continue;
+                bool should_route = (pipe->mode == direct || pipe->mode == fan || pipe->mode == clone);
+                if (!should_route) continue;
 
-    for (const auto& t : pipe->targets) {
-        if (t.type == PipeTarget::Type::APP && t.app) {
-            t.app->on_stream_data(item);
-        } else if (t.type == PipeTarget::Type::POOL && t.pool && t.pool->is_ring()) {
-            PoolAccessToken token(t.pool, "pump", AccessMode::READ_WRITE);
-            if (token.is_valid()) {
-                t.pool->push_ring(item->payload, item->payload_len);
-            }
-        }
-    }
-}
-
-            // Storage / other sinks
-            if (compat && (compat->can_sink_to & (1 << SINK_STORAGE))) {
-                // TODO: CBOR serialize + d_sdc write
+                for (const auto& t : pipe->targets) {
+                    if (t.type == PipeTarget::Type::APP && t.app) {
+                        t.app->on_stream_data(item);
+                    } else if (t.type == PipeTarget::Type::POOL && t.pool && t.pool->is_ring()) {
+                        PoolAccessToken token(t.pool, "pump", AccessMode::READ_WRITE);
+                        if (token.is_valid()) {
+                            t.pool->push_ring(item->payload, item->payload_len);
+                        }
+                    }
+                }
             }
 
             dataitem_free(item);
+            //sneed harder, we have
+            // Storage / other sinks
+           // if (compat && (compat->can_sink_to & (1 << SINK_STORAGE))) {
+                // TODO: CBOR serialize + d_sdc write
+            //}
+
+            //dataitem_free(item);
         }
 
         vTaskDelay(pdMS_TO_TICKS(5));

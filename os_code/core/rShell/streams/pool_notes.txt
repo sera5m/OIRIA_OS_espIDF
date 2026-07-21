@@ -637,3 +637,20 @@ if (pool->has_access("caller_id")) {
 - [ESP-IDF PSRAM Documentation](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/external-ram.html)
 - [ESP-IDF Heap Allocation](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/mem_alloc.html)
 - [RAII Pattern in C++](https://en.cppreference.com/w/cpp/language/raii)
+
+
+
+
+
+
+
+
+
+
+
+// Save
+current_pool->save_to_rpool("apps/watch/state");
+
+// Load
+current_pool = DataPool::create_shared(4096, STORAGE_PSRAM, "watch_state");
+current_pool->load_from_rpool("apps/watch/state");
