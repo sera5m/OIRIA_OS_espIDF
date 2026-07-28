@@ -1,60 +1,28 @@
 #pragma once
 #include <stdint.h>
-#include "esp_timer.h"
-#include "hardware/drivers/lcd/fonts/font_basic_types.h"
 #include <string>
 #include <memory>
-#include <sstream>
-#include <algorithm>
-#include <variant>
-#include "code_stuff/types.h"
-#include <math.h>
-#include "hardware/wiring/wiring.h"
+#include <vector>
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/gpio.h"
-#include "driver/spi_master.h"
-#include "driver/spi_common.h"
-#include "esp_log.h"
-#include "esp_heap_caps.h"
-#include "esp_psram.h"
-#include "rom/cache.h"
-#include <string.h>
-#include "hardware/drivers/abstraction_layers/al_scr.h"
-#include "hardware/drivers/lcd/fonts/font_avr_classics.h"
-#include "hardware/drivers/lcd/st7789v2/lcDriver.h"
 #include "os_code/core/window_env/wenv_basicThemes.h"
-#include <vector>
-#include "../../../hardware/drivers/psram_std/psram_std.hpp"
-#include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/core/rShell/rshell_appFramework.hpp"
 #include "os_code/core/rShell/rshell_appmanager.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
-#include "os_code/core/rShell/defaultAppList.hpp" 
-#include "os_code/middle_layer/input/hid_t.h"   
-#include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
-#include "os_code/core/rShell/defaultAppList.hpp"
+#include "os_code/middle_layer/input/hid_t.h"
+#include "os_code/core/rShell/rshell_appFramework.hpp"
+// Forward declaration
 
+// Forward declarations
+struct InputEvent;
 struct MenuItem;
-//bool is_running_
+
 
 class app_launcher_menu : public AppBase {
 public:
     explicit app_launcher_menu(const ApplicationConfig& cfg);
-
-    static std::shared_ptr<AppBase> create_instance() {
-        return std::make_shared<app_launcher_menu>(make_menu_config());
-    }
-   
-    //======
-
-    explicit app_launcher_menu(const ApplicationConfig& cfg);
-
-    // Static creator for registry
-    static std::shared_ptr<AppBase> create_instance() {
-        return std::make_shared<MyWatchApp>(make_watch_config());
-    }
 
     void tick_app(uint32_t delta_ms) override;
     void receive_event_input(const void* event) override;
@@ -66,21 +34,16 @@ public:
     void on_resume() override;
     void appmenu_launch_app(uint16_t index);
 
-//=========
 
 private:
     std::shared_ptr<Window> menu_window;
     uint16_t selected_index = 0;
-    std::vector<MenuItem>* current_menu;  // Pointer to active menu
+    std::vector<MenuItem>* current_menu;
+    
+    // Error message handling
+    std::string error_message;
+    uint32_t error_timestamp = 0; 
 };
 
-static ApplicationConfig make_menu_config() {
-    ApplicationConfig cfg;
-    cfg.capabilities = static_cast<uint32_t>(AppCapability::FULLSCREEN) |
-                       static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
-    cfg.stack_size_bytes = 8192;
-    cfg.priority = 5;
-    cfg.name = "MenuApp";
-    cfg.tick_rate_hz = 5;
-    return cfg;
-}
+// Registration function - call from main
+void register_menu();

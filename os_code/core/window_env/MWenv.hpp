@@ -284,11 +284,11 @@ struct WindowCfg {
 /* ---------------- helpers ---------------- */
 
 struct WinComp_sizing {
-    ui16 Xpos   = 0;
-    ui16 Ypos   = 0;
-    ui16 Zorder = 0;
-    ui16 Width  = 0;
-    ui16 Height = 0;
+     uint16_t  Xpos   = 0;
+     uint16_t  Ypos   = 0;
+     uint16_t  Zorder = 0;
+     uint16_t  Width  = 0;
+     uint16_t  Height = 0;
     uint8_t rotation = 0;
 };
 

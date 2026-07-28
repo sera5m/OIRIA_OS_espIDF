@@ -35,7 +35,7 @@ idf_component_register(
   "os_code/core/rShell/rshell_appFramework.cpp" 
          "os_code/core/rShell/rshell_appmanager.cpp"
          
-      "os_code/core/rShell/defaultAppList.cpp" #needed for app framework   
+        
          
        #rshell ipc and storage
 "os_code/core/rShell/streams/rshell_pool.cpp"
@@ -51,7 +51,7 @@ idf_component_register(
         # Applications
         "os_code/applications/watch/MS_watchapp.cpp"
         "os_code/applications/menu/app_menu.cpp"
-
+	"os_code/applications/fileviewer/MS_file_viewer.cpp"
 
 
 

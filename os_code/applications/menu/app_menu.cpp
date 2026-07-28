@@ -32,10 +32,10 @@
 #include "code_stuff/helperfunctions.hpp"
 #include "esp_task_wdt.h" 
 #include "os_code/applications/menu/app_menu.hpp"
-#include "os_code/core/rShell/defaultAppList.hpp" 
+#include "os_code/middle_layer/input/input_handler.hpp"
 #include "os_code/middle_layer/input/hid_t.h"   
 #include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
-#include "os_code/core/rShell/defaultAppList.hpp"
+//lol
 
 static const char* TAG = "app_launcher_menu";
 
@@ -55,6 +55,7 @@ static std::vector<MenuItem> main_menu = {
     {"Health", "HealthApp", false},
     {"Games", "", true},
     {"Utilities", "", true},
+    {"Load ELF", "", true},  // Submenu for ELF loading
     {"Exit", "WatchApp", false}
 };
 
@@ -81,11 +82,14 @@ app_launcher_menu::app_launcher_menu(const ApplicationConfig& cfg)
 
 void app_launcher_menu::on_start()
 {
-    ESP_LOGI(TAG, "app_launcher_menu started – creating window");
+        ESP_LOGI(TAG, "app_launcher_menu started – creating window");
 
     // Disable toolbar + reset positioning fights
     WindowManager::getInstance().SetToolbarActive(false);
-    esp_task_wdt_add(NULL); //add owning task
+
+    // Disable toolbar + reset positioning fights
+    
+  //  esp_task_wdt_add(NULL); //add owning task
 
     WindowCfg cfg{
         .Posx = 0,
@@ -141,7 +145,7 @@ void app_launcher_menu::on_pause()  { ESP_LOGI(TAG, "app_launcher_menu paused");
 void app_launcher_menu::on_resume() { ESP_LOGI(TAG, "app_launcher_menu resumed"); }
 
 void app_launcher_menu::on_draw() {
-    if (should_stop_) return; //if we need to stop this we have to tell it to fuck off
+    if (should_stop_) return;
     if (!menu_window) return;
     
     std::string menu_text = "<|size=2|><|color=0xFFFF|>";
@@ -160,20 +164,39 @@ void app_launcher_menu::on_draw() {
         start_idx = selected_index - visible_items + 1;
     }
     
-    for (int i = start_idx; i < current_menu->size() && i < start_idx + visible_items; i++) {
+    for (int i = start_idx; i < (int)current_menu->size() && i < start_idx + visible_items; i++) {
         const auto& item = (*current_menu)[i];
         
         if (i == selected_index) {
             menu_text += "<|color=0xFDFC|>" + item.name + " <|color=0xFFFF|><|n|>";
         } else {
             menu_text += "   " + item.name;
-            if (item.is_submenu) menu_text += "-";
+            if (item.is_submenu) menu_text += "→";
             menu_text += "<|n|>";
+
         }
     }
     
-    menu_text += "<|n|><|size=1|><|color=0xFDFC|>";
-    menu_text += "^/v=Navigate  ENTER=Select  BACK=Exit";
+    menu_text += "<|n|>";
+    
+    // --- Error message handling ---
+    static uint32_t error_timestamp = 0;
+    static std::string error_message = "";
+    
+    uint32_t now = esp_timer_get_time() / 1000;
+    bool show_error = !error_message.empty() && (now - error_timestamp < 2000);
+    
+    if (show_error) {
+        menu_text += "<|size=2|><|color=0xF000|>" + error_message + "<|n|>";
+        // Don't clear immediately - let it display for the full 2 seconds
+    } else {
+        menu_text += "<|size=1|><|color=0xFDFC|>";
+        menu_text += "^/v=Navigate  ENTER=Select  BACK=Exit";
+        // Clear error if it expired
+        if (!error_message.empty()) {
+            error_message = "";
+        }
+    }
     
     menu_window->SetText(menu_text);
     menu_window->dirty = true;
@@ -206,7 +229,6 @@ void app_launcher_menu::force_tick(){
     last_force_tick = current_time;
 }*/
 
-
 void app_launcher_menu::appmenu_launch_app(uint16_t index) {
     if (index >= current_menu->size()) return;
 
@@ -218,7 +240,18 @@ void app_launcher_menu::appmenu_launch_app(uint16_t index) {
         else if (item.name == "<- Back") current_menu = &main_menu;
 
         selected_index = 0;
+        error_message = "";
     } else if (!item.app_name.empty()) {
+        // Check if the app is REGISTERED (exists in manifest), not just running
+        if (!appManager::instance().is_app_registered(item.app_name)) {
+            // App doesn't exist - show error
+            error_message = "Error: '" + item.app_name + "' not found!";
+            error_timestamp = esp_timer_get_time() / 1000;
+            on_draw();
+            ESP_LOGW(TAG, "App not registered: %s", item.app_name.c_str());
+            return;
+        }
+        
         appManager::instance().close_current_and_open(item.app_name);
     }
 }
@@ -266,15 +299,28 @@ void app_launcher_menu::receive_event_input(const void* event) {
 
 
 
+// ========================================================
+// Registration
+// ========================================================
 
-static ApplicationConfig make_app_launcher_menu_config() {
-    ApplicationConfig cfg;
-    cfg.capabilities = static_cast<uint32_t>(AppCapability::FULLSCREEN) |
-                       static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
-    cfg.stack_size_bytes = 8192;
-    cfg.priority = 5;
-    cfg.name = "MenuApp";
-    cfg.tick_rate_hz = 10;
-    return cfg;
+static std::shared_ptr<AppBase> create_menu(const ApplicationConfig& cfg) {
+    return std::make_shared<app_launcher_menu>(cfg);
 }
 
+// Registration function
+void register_menu() {
+    AppManifest m;
+    m.name = "MenuApp";
+    m.display_name = "Menu";
+    m.description = "Application launcher";
+    m.capabilities = static_cast<uint32_t>(AppCapability::FULLSCREEN) | 
+                     static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
+    m.stack_size_bytes = 8192;
+    m.priority = 5;
+    m.tick_rate_hz = 5;
+    m.create = [](const ApplicationConfig& cfg) {
+        return std::make_shared<app_launcher_menu>(cfg);
+    };
+    
+    appManager::instance().register_app(m);
+}

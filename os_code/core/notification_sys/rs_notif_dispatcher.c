@@ -70,5 +70,5 @@ void ulp_add_alarm_from_main(uint8_t hour, uint8_t minute, uint8_t days, bool en
 }
 
 void ulp_add_timer_from_main(uint32_t seconds, uint8_t id) {
-    ESP_LOGI("NOTIF", "Timer %d sec (stub)", seconds);
+    ESP_LOGI("NOTIF", "Timer %lu sec (stub)", (unsigned long)seconds);
 }

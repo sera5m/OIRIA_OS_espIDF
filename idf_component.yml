@@ -4,3 +4,5 @@ dependencies:
   idf: ^5.0
   bitbank2/jpegdec: ^1.6.2
   espressif/cbor: '*'
+  espressif/elf_loader: '*'
+  espressif/tinyusb: '*'

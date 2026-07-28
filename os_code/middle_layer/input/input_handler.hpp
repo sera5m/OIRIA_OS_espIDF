@@ -20,13 +20,9 @@ extern QueueHandle_t ProcInputQueTarget;
 extern bool usb_hid_enabled;  // ← Changed from 'bool usb_hid_enabled;' to 'extern'
 
 // ===================================================================
-// Key definitions (keep yours)
-#define KEY_ENTER   0x23CE
-#define KEY_BACK    0x232B
-#define KEY_UP      0x2191
-#define KEY_DOWN    0x2193
-#define KEY_LEFT    0x2190
-#define KEY_RIGHT   0x2192
+// Key definitions 
+
+
 
 // ===================================================================
 // Enums

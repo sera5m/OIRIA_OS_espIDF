@@ -6,7 +6,7 @@
 #include "code_stuff/types.h"
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/middle_layer/input/hid_t.h"
-#include "tusb.h"
+//note: don't include tusb.h here, it will cause abnormalities with the build system. it's in the cpp anyway.
 #include "os_code/core/rShell/streams/rshell_pump.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"

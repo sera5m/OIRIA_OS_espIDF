@@ -32,7 +32,10 @@
 #include "os_code/core/rShell/rshell_appmanager.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "os_code/core/rShell/streams/rshell_nv_pool.hpp"
-//the file viewwer app draws from the file m nagement app. 
+#include "os_code/middle_layer/input/hid_t.h"
+#include "os_code/middle_layer/input/input_handler.hpp"
+//#include "os_code/core/rShell/streams/rshell_nv_pool.hpp"
+//the file viewer app draws from the file m nagement app. 
 //this was intended to take some inspiration from listary, using an indexed table, but we're so constrained on psram it's diabolical
 
 
@@ -54,41 +57,54 @@ typedef enum{
     }FV_APP_Mode;
 
 
-    //open file viewwer mode [moved to driver]
+    //open file viewer mode [moved to driver]
    
 
-        typedef enum{//file viewwer use mode
+        typedef enum{//file viewer use mode
             FVU_load,FVU_save, //it takes some time to pull the file out of memory
             FVU_editing, //we're fucking with it
             FVU_observing, //we are looking at it
             FVU_StateTransition //the file is transgender!(it's opening or closing). they call them trans rights because i have nothing left :(
-           }FV_U_Mode; //file viewwer app use mode
+           }FV_U_Mode; //file viewer app use mode
 
 
- class fv_app : public AppBase {
-           public:
-               explicit fv_app(const ApplicationConfig& cfg);
+// Forward declarations
+struct InputEvent;
 
-               void tick_app(uint32_t delta_ms) override;
-               void receive_event_input(const void* event) override;
-               void on_draw() override;
 
-               void on_start() override;
-               void on_stop() override;
-               void on_pause() override;
-               void on_resume() override;
 
-           private:
-               std::shared_ptr<Window> fv_app_window;
+class File_Viewer_App : public AppBase {
+public:
+    explicit File_Viewer_App(const ApplicationConfig& cfg);
 
-               FV_APP_Mode current_mode = FV_MAIN;
-               FV_U_Mode use_mode = FVU_observing;
+    void tick_app(uint32_t delta_ms) override;
+    void receive_event_input(const void* event) override;
+    void on_draw() override;
 
-               // Add your file state here
-               // std::string current_path;
-               // std::vector<FileEntry> current_dir;
-               std::shared_ptr<DataPool> current_pool;
+    void on_start() override;
+    void on_stop() override;
+    void on_pause() override;
+    void on_resume() override;
+
+    void suspend();
+    void force_close();
+
+private:
+    std::shared_ptr<Window> fv_app_window;
+
+    FV_APP_Mode current_mode = FV_MAIN;
+    FV_U_Mode use_mode = FVU_observing;
+
+    std::shared_ptr<DataPool> current_pool;
     std::string current_path;
+    std::vector<std::string> directory_entries;
+    int selected_index = 0;
+    int scroll_offset = 0;
+
     bool load_rpool(const std::string& path);
     bool save_rpool(const std::string& path);
-           };
+    void refresh_directory(const std::string& path);
+};
+
+// Registration function - call from main
+void register_fileviewer();

@@ -56,7 +56,7 @@
 
 #include "os_code/core/rShell/rshell_appFramework.hpp"
 #include "os_code/core/rShell/rshell_appmanager.hpp"
-#include "os_code/core/rShell/defaultAppList.hpp"
+//lol
 #include "os_code/applications/watch/MS_watchapp.hpp"
 
 #include "esp_task_wdt.h"
@@ -68,7 +68,8 @@
 #include "class/hid/hid.h"
 
 
-#include  "os_code/applications/fileviewwer/MS_file_viewwer.hpp"
+#include  "os_code/applications/fileviewer/MS_file_viewer.hpp"
+
 #include "os_code/applications/watch/MS_watchapp.hpp"
 #include  "os_code/applications/menu/app_menu.hpp"
 #include "os_code/core/notification_sys/rs_notif_dispatcher.h"
@@ -154,6 +155,13 @@ static void bootloader_final_app(void);
 
 //extern retardtasks to fucking handle this the slur slur slur sahlur way
 extern TaskHandle_t core2TaskHandle;
+
+
+
+
+//forward declarations for further bootfuncts
+//void register_watch();
+//void register_menu();
 
 
 
@@ -275,15 +283,12 @@ WindowManager::getInstance().UpdateAll(false, true, true, true);
 
 
 
-REGISTER_BUILTIN_APP(MyWatchApp, "WatchApp", "Watch", "Main watch face",
-                     AppCapability::FULLSCREEN | AppCapability::NEEDS_WINDOW, 
-                     8192, 5, 20);
 
 
 //handles some boot stuff and will also update sensors (not input, it's got it's own task)
 static void bootloader_final_app() {
 	
-	
+
 
 	
 	//added delays to stop weird timing from causing crashes
@@ -303,23 +308,50 @@ ESP_LOGI(TAG, "invoking fb clear");
   	vTaskDelay(50);
   	refreshScreen();
     //lcd_fb_display_framebuffer(false, false);
-    vTaskDelay(pdMS_TO_TICKS(50));
+
     
     
-    //--------------------i'll just skip this it takes forever with all my testing
-  //  stage_2_i2c_scan();
-  //-------------------------
- 
+
+ //section: load window manager components and start the DE
    vTaskDelay(pdMS_TO_TICKS(50));
     fb_clear(0x0000);
         // Initialize WindowManager
     auto& wm = WindowManager::getInstance();
 ESP_LOGI(TAG, "WindowManager init-d");
     
-    ESP_LOGI(TAG, "WindowManager created");
+
     
-    //start application manager object, we will tick and own it inside this task
+	//load msc vars	
+	    //added dynamic throttle because display overperforms above target to ease cpu
+	const TickType_t targetTicks = pdMS_TO_TICKS(1000 / v_env.fpsTarget);
+
+	TickType_t lastWakeTime = xTaskGetTickCount();
+	//esp_task_wdt_add(NULL); //null means this task. as this task is the heavy refresh one, we need to add it so we can manually feed watchdog
+	//esp_task_wdt_set_timeout(6); //default five, i think? 
+
+	//Increase watchdog timeout
+	// In app_main() or bootloader_final_app() before creating tasks:
+	esp_task_wdt_config_t wdt_config = {
+	    .timeout_ms = 10000,  // 10 seconds instead of 5
+	    .idle_core_mask = (1 << 0) | (1 << 1),  // monitor both idle tasks
+	    .trigger_panic = true
+	};
+	esp_task_wdt_reconfigure(&wdt_config);
+
+
+	g_display_mutex = xSemaphoreCreateMutex();//this is specifically for the core 2 display pusher, so we init it before the task is made itself and then use it
+
+
+	//create new tasks for proscessing loop-needed for video
+	xTaskCreatePinnedToCore(core1_createData, "core1", 8192, NULL, 5, &core1TaskHandle, 1);
+	launchTHESTUPIDMOTHERFUCKINGPEICEOFSHITDISPLAYPUSHTASKFUCKYOU();
+//end sector for de init
+
+	
+//boot appmanager and further shell components which might rely on this. bit abckwards but okay
+   
 	auto& manager = appManager::instance();
+	appManager::instance().start_manager_task();
     vTaskDelay(8);
     
         v_env.CurrentHIDTarget=(HIDTarget)HIDTarget::toTaskAndDebug; //for now we'll use debug too. this is position 7. see hid_t.h if this doesn't work right
@@ -327,45 +359,29 @@ ESP_LOGI(TAG, "WindowManager init-d");
     
     
     // Create or get the instance first
-auto watchapp = appManager::instance().launch_app("WatchApp");  // This creates and starts it
-if (watchapp) {
-    appManager::instance().set_focused_app(watchapp);
-}
-
-
-
+    register_watch();
+    register_menu();
+	register_fileviewer();
+    // Start the app manager task
     
     
-    //added dynamic throttle because display overperforms above target to ease cpu
-const TickType_t targetTicks = pdMS_TO_TICKS(1000 / v_env.fpsTarget);
+    
 
-TickType_t lastWakeTime = xTaskGetTickCount();
-//esp_task_wdt_add(NULL); //null means this task. as this task is the heavy refresh one, we need to add it so we can manually feed watchdog
-//esp_task_wdt_set_timeout(6); //default five, i think? 
-
-//Increase watchdog timeout
-// In app_main() or bootloader_final_app() before creating tasks:
-esp_task_wdt_config_t wdt_config = {
-    .timeout_ms = 10000,  // 10 seconds instead of 5
-    .idle_core_mask = (1 << 0) | (1 << 1),  // monitor both idle tasks
-    .trigger_panic = true
-};
-esp_task_wdt_reconfigure(&wdt_config);
-
-
-g_display_mutex = xSemaphoreCreateMutex();//this is specifically for the core 2 display pusher, so we init it before the task is made itself and then use it
-
-
-//create new tasks for proscessing loop-needed for video
-xTaskCreatePinnedToCore(core1_createData, "core1", 8192, NULL, 5, &core1TaskHandle, 1);
-launchTHESTUPIDMOTHERFUCKINGPEICEOFSHITDISPLAYPUSHTASKFUCKYOU();
 
 // Register MenuApp
+//register apps here
+// Static registrations[LOAD DYNAMIC REGISTER NEXT!]
+    
 
-REGISTER_BUILTIN_APP(app_launcher_menu, "MenuApp", "App Launcher", "Launch other apps",
-                     AppCapability::FULLSCREEN | AppCapability::NEEDS_WINDOW, 
-                     8192, 5, 10);
-					 
+    // Launch the watch app
+    auto watchapp = appManager::instance().open_app("WatchApp");
+    if (!watchapp) {
+        ESP_LOGE(TAG, "Failed to launch WatchApp!");
+    }
+
+
+	vTaskDelay(8);
+	//end bootloader
 vTaskDelete(NULL); //KILL YOURSELF, BOOTLOADER! 
 }
 

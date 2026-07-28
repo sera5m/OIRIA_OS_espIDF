@@ -1,11 +1,10 @@
 #include "MS_watchapp.hpp"
 #include "code_stuff/helperfunctions.hpp"
-#include "os_code/middle_layer/input/hid_t.h"   
+#include "os_code/middle_layer/input/hid_t.h"          // <-- For KEY_*, KeyAction
+#include "os_code/middle_layer/input/input_handler.hpp" // <-- For InputEvent definition
 #include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
-
 #include "os_code/core/notification_sys/rs_notif_dispatcher.h"
-#include "os_code/core/rShell/defaultAppList.hpp"
-
+#include "os_code/core/rShell/rshell_appFramework.hpp"
 
 static const char* TAG = "MyWatchApp";
 
@@ -21,8 +20,7 @@ MyWatchApp::MyWatchApp(const ApplicationConfig& cfg) : AppBase(cfg) {
 void MyWatchApp::on_start() {
     ESP_LOGI(TAG, "WatchApp started");
     // Registration at file scope (runs before main)
-REGISTER_BUILTIN_APP(MyWatchApp, "WatchApp", "Watch", "Main watch face",
-AppCapability::FULLSCREEN | AppCapability::NEEDS_WINDOW, 8192, 5, 20);
+
     watch_window = std::make_shared<Window>(
         WindowCfg{
             .Posx = 0, .Posy = 0,
@@ -60,6 +58,13 @@ void MyWatchApp::next_mode() {
     CurrentWatchMode = static_cast<WatchMode>(current_mode_index);
     on_draw();
 }
+
+void MyWatchApp::prev_mode() {
+    current_mode_index = (current_mode_index + static_cast<int>(WM_COUNT) - 1) % static_cast<int>(WM_COUNT);
+    CurrentWatchMode = static_cast<WatchMode>(current_mode_index);
+    on_draw();
+}
+
 void MyWatchApp::on_draw() {
     if (!watch_window) return;
 
@@ -73,11 +78,6 @@ void MyWatchApp::on_draw() {
         default:            draw_main(); break;
     }
     watch_window->dirty = true;
-}
-void MyWatchApp::prev_mode() {
-    current_mode_index = (current_mode_index + static_cast<int>(WM_COUNT) - 1) % static_cast<int>(WM_COUNT);
-    CurrentWatchMode = static_cast<WatchMode>(current_mode_index);
-    on_draw();
 }
 
 void MyWatchApp::draw_main() {
@@ -211,8 +211,32 @@ void MyWatchApp::receive_event_input(const void* event) {
         case KeyAction::Repeat:
         case KeyAction::Unknown:
         case KeyAction::PositionDelta:
-            // ignored for now
             break;
     }
 }
 
+// ========================================================
+// Registration (single, no duplicates)
+// ========================================================
+
+static std::shared_ptr<AppBase> create_watch(const ApplicationConfig& cfg) {
+    return std::make_shared<MyWatchApp>(cfg);
+}
+
+// Registration function
+void register_watch() {
+    AppManifest m;
+    m.name = "WatchApp";
+    m.display_name = "Watch";
+    m.description = "Main watch face";
+    m.capabilities = static_cast<uint32_t>(AppCapability::FULLSCREEN) | 
+                     static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
+    m.stack_size_bytes = 8192;
+    m.priority = 5;
+    m.tick_rate_hz = 20;
+    m.create = [](const ApplicationConfig& cfg) {
+        return std::make_shared<MyWatchApp>(cfg);
+    };
+    
+    appManager::instance().register_app(m);
+}

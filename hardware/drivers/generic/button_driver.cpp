@@ -5,7 +5,7 @@
 #include "esp_timer.h"
 #include <stdlib.h>
 #include <string.h>
-
+#include <inttypes.h>
 #define TAG "BUTTON"
 
 struct button_impl_t {
@@ -68,7 +68,7 @@ esp_err_t button_new(const button_config_t *cfg, button_handle_t *out_handle) {
 
     *out_handle = self;
     ESP_LOGI(TAG, "Button init OK: pin=%d, active_low=%d, debounce=%d ms",
-             self->pin, self->active_low, self->debounce_ms);
+         (int)self->pin, (int)self->active_low, (int)self->debounce_ms);
     return ESP_OK;
 }
 

@@ -4,13 +4,13 @@
 #include "os_code/core/rShell/streams/rshell_pump.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "esp_log.h"
-#include "esp_timer.h"
 #include "hardware/drivers/psram_std/psram_std.hpp"
 #include "os_code/core/window_env/wenv_basicThemes.h"
-
 #include "os_code/core/rShell/rshell_appFramework.hpp"
 #include "os_code/core/rShell/rshell_appmanager.hpp"
+
+// Remove duplicate includes of esp_log.h and esp_timer.h
+
 
 
 static const char* TAG = "DataPump";

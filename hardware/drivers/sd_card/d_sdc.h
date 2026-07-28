@@ -38,13 +38,13 @@
 static const OFV_ExtMap g_ofv_ext_map[] = {
 
 	//specials for apps
-	{"ptbl" ,OFV_RAW},//table of pointers
-	{"nfcd" ,OFV_RAW}, //nfc card data
-	{"duck",OFV_RAW}, //my own stupid rubberducky script externsion
-	{"ramst",OFV_RAW}, //ram state saved ?
-	{"arr",OFV_RAW}, //raw array
-
-
+	{".ptbl" ,OFV_RAW},//table of pointers
+	{".nfcd" ,OFV_RAW}, //nfc card data
+	{".duck",OFV_RAW}, //my own stupid rubberducky script externsion
+	{".ramst",OFV_RAW}, //ram state saved ?
+	{".arr",OFV_RAW}, //raw array
+	{".CBOR",OFV_RAW},
+	{".cbor",OFV_RAW},
     // =========================
     // TEXT / DOCUMENTS
     // =========================
@@ -158,7 +158,7 @@ static const OFV_ExtMap g_ofv_ext_map[] = {
     //===================
     {".rpool",OFV_RSHELL_SPECIAL}, //specific pool type for rshell pool save state
     {".rpool_tmp",OFV_RSHELL_SPECIAL}, //temporary only rshell pool save, wipe this on init!
-
+	{".rsh",OFV_RSHELL_SPECIAL}, //bash for rshell
 };
 
 

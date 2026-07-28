@@ -1,41 +1,23 @@
 #pragma once
 #include <stdint.h>
 #include "esp_timer.h"
-#include "hardware/drivers/lcd/fonts/font_basic_types.h"
 #include <string>
 #include <memory>
-#include <sstream>
-#include <algorithm>
-#include <variant>
-#include "code_stuff/types.h"
-#include <math.h>
-#include "hardware/wiring/wiring.h"
+#include <vector>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/gpio.h"
-#include "driver/spi_master.h"
-#include "driver/spi_common.h"
 #include "esp_log.h"
-#include "esp_heap_caps.h"
-#include "esp_psram.h"
-#include "rom/cache.h"
-#include <string.h>
-#include "hardware/drivers/abstraction_layers/al_scr.h"
-#include "hardware/drivers/lcd/fonts/font_avr_classics.h"
-#include "hardware/drivers/lcd/st7789v2/lcDriver.h"
 #include "os_code/core/window_env/wenv_basicThemes.h"
-#include <vector>
-#include "../../../hardware/drivers/psram_std/psram_std.hpp"
-#include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/core/rShell/rshell_appFramework.hpp"
 #include "os_code/core/rShell/rshell_appmanager.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
-#include "tusb.h"
 #include "os_code/middle_layer/input/hid_t.h"
-#include "os_code/core/notification_sys/rs_notif_dispatcher.h"
-#include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
-#include "os_code/core/rShell/defaultAppList.hpp"
+//lol
+
+// Forward declarations
+struct InputEvent;
+
 extern char time_str[256];
 extern const char* months[];
 
@@ -54,10 +36,6 @@ class MyWatchApp : public AppBase {
 public:
     explicit MyWatchApp(const ApplicationConfig& cfg);
 
-    static std::shared_ptr<AppBase> create_instance() {
-        return std::make_shared<MyWatchApp>(make_watch_config());
-    }
-
     void tick_app(uint32_t delta_ms) override;
     void receive_event_input(const void* event) override;
     void on_draw() override;
@@ -68,6 +46,7 @@ public:
     void on_resume() override;
 
     void watchapp_back();
+
 private:
     std::shared_ptr<Window> watch_window;
 
@@ -106,13 +85,5 @@ private:
     void draw_set_time();
 };
 
-static ApplicationConfig make_watch_config() {
-    ApplicationConfig cfg;
-    cfg.capabilities = static_cast<uint32_t>(AppCapability::FULLSCREEN) |
-    static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
-    cfg.stack_size_bytes = 8192;
-    cfg.priority = 5;
-    cfg.name = "WatchApp";
-    cfg.tick_rate_hz = 20;
-    return cfg;
-}
+// Registration function - call from main
+void register_watch();

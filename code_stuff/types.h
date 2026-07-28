@@ -11,8 +11,12 @@
 
 //math
 
-#define ui8 uint8_t
-#define ui16 uint16_t
+//#define ui8 uint8_t
+//#define  ui  uint16_t
+//guess who found out this define fucked the project up and made it not compile for a while? me. i did. guess who's killing themselves?
+// probably me. but not today. today i will live. and then die tomorrow. or maybe the day after. who knows. not me, that's for sure.
+//than fucking shit for "find . -type f -exec sed -i 's/ui16/ uint16_t /g' {} +"" or i'd blow my shit
+
 
 struct int16vect {
     int16_t x;
@@ -25,13 +29,13 @@ struct int16vect {
 #endif
 };
 
-struct vec2_ui16t {
+struct vec2_uint16_t {
     int16_t x;
     int16_t y;
 
 #ifdef __cplusplus
-    vec2_ui16t() : x(0), y(0) {}
-    vec2_ui16t(int16_t x, int16_t y) : x(x), y(y) {}
+    vec2_uint16_t() : x(0), y(0) {}
+    vec2_uint16_t(int16_t x, int16_t y) : x(x), y(y) {}
 #endif
 };
 

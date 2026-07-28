@@ -53,7 +53,7 @@ static void handle_debug_output(const InputEvent& ev)
         case KEY_BACK:  ESP_LOGI(TAG, "BACK"); break;
         default:
             if (ev.action == KeyAction::PositionDelta) {
-                ESP_LOGI(TAG, "Knob delta: %+d", ev.delta);
+                ESP_LOGI(TAG, "Knob delta: %+ld", (long)ev.delta);
             }
             break;
     }
