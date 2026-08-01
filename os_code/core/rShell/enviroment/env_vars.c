@@ -49,11 +49,11 @@ EnvConfig v_env = { //vars_env
     .UseFrameThrottle=false,
     //change this to the actual screen size in the driver, retard
     //but i do not want to load drivers for screens dynamically rn because i have bigger towers to topple
-    .screen_dim_w=240, 
-    .screen_dim_h=280,
+    .screen_dim_w=280, 
+    .screen_dim_h=240,
     //these two variables may change at any time, but screen dim basics won't, so cope harder LLLLIBERRUUUULLLL
-    .clamped_screen_dim_w=240, 
-    .clamped_screen_dim_h=280, 
+    .clamped_screen_dim_w=280, 
+    .clamped_screen_dim_h=240, 
     // =========================
     // STORAGE
     // =========================

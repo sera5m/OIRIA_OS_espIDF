@@ -1,77 +1,33 @@
 #pragma once
 #include <stdint.h>
-#include "esp_timer.h"
-#include "hardware/drivers/lcd/fonts/font_basic_types.h"
 #include <string>
 #include <memory>
-#include <sstream>
-#include <algorithm>
-#include <variant>
-#include "code_stuff/types.h"
-#include <math.h>
-#include "hardware/wiring/wiring.h"
+#include <vector>
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/gpio.h"
-#include "driver/spi_master.h"
-#include "driver/spi_common.h"
-#include "esp_log.h"
-#include "esp_heap_caps.h"
-#include "esp_psram.h"
-#include "rom/cache.h"
-#include <string.h>
-#include "hardware/drivers/abstraction_layers/al_scr.h"
-#include "hardware/drivers/lcd/fonts/font_avr_classics.h"
-#include "hardware/drivers/lcd/st7789v2/lcDriver.h"
-#include "os_code/core/window_env/wenv_basicThemes.h"
-#include <vector>
-#include "../../../hardware/drivers/psram_std/psram_std.hpp"
-#include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
-#include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/core/rShell/rshell_appFramework.hpp"
 #include "os_code/core/rShell/rshell_appmanager.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
-#include "os_code/core/rShell/streams/rshell_nv_pool.hpp"
 #include "os_code/middle_layer/input/hid_t.h"
-#include "os_code/middle_layer/input/input_handler.hpp"
-//#include "os_code/core/rShell/streams/rshell_nv_pool.hpp"
-//the file viewer app draws from the file m nagement app. 
-//this was intended to take some inspiration from listary, using an indexed table, but we're so constrained on psram it's diabolical
+#include "hardware/drivers/sd_card/d_sdc.h"
 
+// App-level navigation state
+typedef enum {
+    FV_MAIN = 0,          // browsing a directory
+    FV_VIEW_TEXT,         // viewing / editing a text file
+    FV_VIEW_IMAGE,        // showing a decoded image
+    FV_CREATE_TXT,        // naming a new .txt file
+    FV_COUNT
+} FV_APP_Mode;
 
-//THE distinction between these two modes is that f v_app mode is what we do with closed files, 
-//and u_mode is use mode, and what is open file doing
+struct DirEntry {
+    std::string name;     // basename only
+    bool is_dir = false;
+    OFV_Mode type = OFV_TXT;
+};
 
-typedef enum{
-    FV_MAIN, //entrypoint
-     FV_SEARCHING, //actively searching for the file
-     FV_OPENING, //opening a selected file
-     FV_CLOSING, //closing the file
-     FV_IDLE_VIEW, //we're looking at a file
-     FV_IDLE_TRAVERSING, //the user is looking for a file
-     FV_IDLE, //just sitting here with the directory open
-     FV_MOVING, 
-     FV_DELETING,
-     FV_COPYING,
-     FV_COUNT
-    }FV_APP_Mode;
-
-
-    //open file viewer mode [moved to driver]
-   
-
-        typedef enum{//file viewer use mode
-            FVU_load,FVU_save, //it takes some time to pull the file out of memory
-            FVU_editing, //we're fucking with it
-            FVU_observing, //we are looking at it
-            FVU_StateTransition //the file is transgender!(it's opening or closing). they call them trans rights because i have nothing left :(
-           }FV_U_Mode; //file viewer app use mode
-
-
-// Forward declarations
-struct InputEvent;
-
-
+struct InputEvent;  // forward
 
 class File_Viewer_App : public AppBase {
 public:
@@ -93,18 +49,44 @@ private:
     std::shared_ptr<Window> fv_app_window;
 
     FV_APP_Mode current_mode = FV_MAIN;
-    FV_U_Mode use_mode = FVU_observing;
 
-    std::shared_ptr<DataPool> current_pool;
-    std::string current_path;
-    std::vector<std::string> directory_entries;
+    std::string current_path;                 // e.g. "/sdcard" or "/sdcard/notes"
+    std::vector<DirEntry> directory_entries;
     int selected_index = 0;
-    int scroll_offset = 0;
+    int scroll_offset  = 0;
+    static constexpr int kVisibleRows = 10;
 
-    bool load_rpool(const std::string& path);
-    bool save_rpool(const std::string& path);
+    // Text viewer / editor
+    std::string text_path;
+    std::string text_buffer;                  // full file in PSRAM-friendly std::string for now
+    int  text_cursor = 0;                     // byte index for simple insert
+    bool text_dirty  = false;
+
+    // Create-file name buffer
+    std::string new_name_buf;
+
+    // Image path currently shown (decoded straight into framebuffer)
+    std::string image_path;
+
+    // Directory
     void refresh_directory(const std::string& path);
+    bool path_is_dir(const std::string& path) const;
+    std::string join_path(const std::string& base, const std::string& name) const;
+    std::string parent_path(const std::string& path) const;
+
+    // File ops
+    bool load_text_file(const std::string& path);
+    bool save_text_file(const std::string& path);
+    bool create_text_file(const std::string& path);
+    bool show_image(const std::string& path);   // decode JPEG/BMP → framebuffer
+
+    // UI helpers
+    uint16_t color_for_type(OFV_Mode m) const;
+    const char* label_for_type(OFV_Mode m) const;
+    void draw_browser();
+    void draw_text_view();
+    void draw_create_txt();
+    void open_selected();
 };
 
-// Registration function - call from main
 void register_fileviewer();

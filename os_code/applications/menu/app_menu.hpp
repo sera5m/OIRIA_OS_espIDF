@@ -32,7 +32,7 @@ public:
     void on_stop() override;
     void on_pause() override;
     void on_resume() override;
-    void appmenu_launch_app(uint16_t index);
+    bool appmenu_launch_app(uint16_t index);
 
 
 private:

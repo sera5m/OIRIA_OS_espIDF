@@ -73,6 +73,10 @@ static std::vector<MenuItem> utils_menu = {
     {"<- Back", "", true}
 };
 
+static std::vector<MenuItem> elf_menu = {
+    {"Load test_app", "test_app", false},
+    {"<- Back", "", true}
+};
 app_launcher_menu::app_launcher_menu(const ApplicationConfig& cfg)
  : AppBase(cfg), selected_index(0), current_menu(&main_menu)
 {
@@ -147,61 +151,59 @@ void app_launcher_menu::on_resume() { ESP_LOGI(TAG, "app_launcher_menu resumed")
 void app_launcher_menu::on_draw() {
     if (should_stop_) return;
     if (!menu_window) return;
-    
+    if (!current_menu) return;
+
     std::string menu_text = "<|size=2|><|color=0xFFFF|>";
-    
+
     if (current_menu == &main_menu) {
         menu_text += "--- MAIN MENU ---<|n|><|n|>";
     } else if (current_menu == &games_menu) {
         menu_text += "--- GAMES ---<|n|><|n|>";
     } else if (current_menu == &utils_menu) {
         menu_text += "--- UTILITIES ---<|n|><|n|>";
+    } else if (current_menu == &elf_menu) {
+        menu_text += "--- LOAD ELF ---<|n|><|n|>";
     }
-    
+
     int start_idx = 0;
-    int visible_items = 10;
-    if (selected_index >= visible_items) {
-        start_idx = selected_index - visible_items + 1;
+    const int visible_items = 10;
+    if ((int)selected_index >= visible_items) {
+        start_idx = (int)selected_index - visible_items + 1;
     }
-    
-    for (int i = start_idx; i < (int)current_menu->size() && i < start_idx + visible_items; i++) {
+
+    for (int i = start_idx;
+         i < (int)current_menu->size() && i < start_idx + visible_items;
+         i++) {
         const auto& item = (*current_menu)[i];
-        
-        if (i == selected_index) {
+
+        if (i == (int)selected_index) {
             menu_text += "<|color=0xFDFC|>" + item.name + " <|color=0xFFFF|><|n|>";
         } else {
             menu_text += "   " + item.name;
-            if (item.is_submenu) menu_text += "→";
+            if (item.is_submenu) menu_text += ">";
             menu_text += "<|n|>";
-
         }
     }
-    
+
     menu_text += "<|n|>";
-    
-    // --- Error message handling ---
-    static uint32_t error_timestamp = 0;
-    static std::string error_message = "";
-    
-    uint32_t now = esp_timer_get_time() / 1000;
+
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
     bool show_error = !error_message.empty() && (now - error_timestamp < 2000);
-    
+
     if (show_error) {
         menu_text += "<|size=2|><|color=0xF000|>" + error_message + "<|n|>";
-        // Don't clear immediately - let it display for the full 2 seconds
     } else {
         menu_text += "<|size=1|><|color=0xFDFC|>";
         menu_text += "^/v=Navigate  ENTER=Select  BACK=Exit";
-        // Clear error if it expired
-        if (!error_message.empty()) {
-            error_message = "";
-        }
+        if (!error_message.empty()) error_message.clear();
     }
-    
+
     menu_window->SetText(menu_text);
     menu_window->dirty = true;
-    menu_window->WinDraw();
-    display_framebuffer(true, false);
+    // Prefer letting WindowManager push – direct display_framebuffer from the
+    // menu task can race the display core. Keep if you need it for now:
+    // menu_window->WinDraw();
+    // display_framebuffer(true, false);
 }
 
 void app_launcher_menu::tick_app(uint32_t delta_ms) {
@@ -229,35 +231,43 @@ void app_launcher_menu::force_tick(){
     last_force_tick = current_time;
 }*/
 
-void app_launcher_menu::appmenu_launch_app(uint16_t index) {
-    if (index >= current_menu->size()) return;
+bool app_launcher_menu::appmenu_launch_app(uint16_t index) {
+    if (!current_menu) return false;
+    if (index >= current_menu->size()) return false;
 
     const auto& item = (*current_menu)[index];
 
     if (item.is_submenu) {
-        if (item.name == "Games") current_menu = &games_menu;
-        else if (item.name == "Utilities") current_menu = &utils_menu;
-        else if (item.name == "<- Back") current_menu = &main_menu;
+        if (item.name == "Games")           current_menu = &games_menu;
+        else if (item.name == "Utilities")  current_menu = &utils_menu;
+        else if (item.name == "Load ELF")   current_menu = &elf_menu;
+        else if (item.name == "<- Back")    current_menu = &main_menu;
 
         selected_index = 0;
-        error_message = "";
-    } else if (!item.app_name.empty()) {
-        // Check if the app is REGISTERED (exists in manifest), not just running
-        if (!appManager::instance().is_app_registered(item.app_name)) {
-            // App doesn't exist - show error
-            error_message = "Error: '" + item.app_name + "' not found!";
-            error_timestamp = esp_timer_get_time() / 1000;
-            on_draw();
-            ESP_LOGW(TAG, "App not registered: %s", item.app_name.c_str());
-            return;
-        }
-        
-        appManager::instance().close_current_and_open(item.app_name);
+        error_message.clear();
+        return false;   // still in menu
     }
+
+    if (item.app_name.empty()) return false;
+
+    if (!appManager::instance().is_app_registered(item.app_name)) {
+        error_message = "Error: '" + item.app_name + "' not found!";
+        error_timestamp = (uint32_t)(esp_timer_get_time() / 1000);
+        ESP_LOGW(TAG, "App not registered: %s", item.app_name.c_str());
+        return false;
+    }
+
+    // LEAVING the menu – do not touch this object after this call
+    appManager::instance().close_current_and_open(item.app_name);
+    return true;   // launched → caller must return immediately
 }
 
 void app_launcher_menu::receive_event_input(const void* event) {
     if (!event) return;
+    // App is shutting down / already replaced – ignore input
+    if (should_stop_) return;
+    if (!current_menu) return;
+    if (!menu_window) return;
 
     const InputEvent* ev = static_cast<const InputEvent*>(event);
     bool needs_redraw = false;
@@ -265,19 +275,28 @@ void app_launcher_menu::receive_event_input(const void* event) {
     if (ev->action == KeyAction::Tap) {
         switch (ev->key) {
             case KEY_UP:
-                selected_index = (selected_index + current_menu->size() - 1) % current_menu->size();
-                needs_redraw = true;
+                if (!current_menu->empty()) {
+                    selected_index = (selected_index + (int)current_menu->size() - 1)
+                                     % (int)current_menu->size();
+                    needs_redraw = true;
+                }
                 break;
 
             case KEY_DOWN:
-                selected_index = (selected_index + 1) % current_menu->size();
-                needs_redraw = true;
+                if (!current_menu->empty()) {
+                    selected_index = (selected_index + 1) % (int)current_menu->size();
+                    needs_redraw = true;
+                }
                 break;
 
-            case KEY_ENTER:
-                appmenu_launch_app(selected_index);
+            case KEY_ENTER: {
+                // If we launched another app, this instance may be destroyed
+                // immediately – do not redraw or touch members after this.
+                bool left = appmenu_launch_app(selected_index);
+                if (left) return;
                 needs_redraw = true;
                 break;
+            }
 
             case KEY_BACK:
                 if (current_menu != &main_menu) {
@@ -286,16 +305,19 @@ void app_launcher_menu::receive_event_input(const void* event) {
                     needs_redraw = true;
                 } else {
                     appManager::instance().close_current_and_open("WatchApp");
+                    return;   // same rule – object may be gone
                 }
+                break;
+
+            default:
                 break;
         }
     }
 
-    if (needs_redraw) {
+    if (needs_redraw && !should_stop_ && menu_window) {
         on_draw();
     }
 }
-
 
 
 

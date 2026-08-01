@@ -672,6 +672,21 @@ void fb_draw_text(uint8_t angle, int x, int y, const char* str,
         }
         cursor++;
     }
-
-    mark_rows_dirty(y - 10, y + (fdat.fcs.y * size) + 10);
+// Approximate full extent of the string we just drew. WARNING EXPEREMENTALw
+    /*
+   int nchars = 0;
+    for (const char* p = str; *p; ++p) nchars++;
+    int run_w = nchars * fdat.fcs.x * size;
+    int run_h = fdat.fcs.y * size;
+    int x0, y0, x1, y1;
+    // inline the same AABB logic (or call a C version)
+    switch (angle & 0x1F) {
+        case 4:  x0 = x - run_h; y0 = y;         x1 = x;         y1 = y + run_w; break;
+        case 8:  x0 = x - run_w; y0 = y - run_h; x1 = x;         y1 = y;         break;
+        case 12: x0 = x;         y0 = y - run_w; x1 = x + run_h; y1 = y;         break;
+        default: x0 = x;         y0 = y;         x1 = x + run_w; y1 = y + run_h; break;
+    }
+    mark_rows_dirty(y0 - 1, y1 + 1); */
+      mark_rows_dirty(y - 10, y + (fdat.fcs.y * size) + 10);
+//
 }

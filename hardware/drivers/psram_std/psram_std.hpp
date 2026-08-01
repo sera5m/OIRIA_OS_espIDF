@@ -11,13 +11,19 @@
 #include <memory>
 #include <stdexcept>
 
-namespace stdpsram {
+
 
 // ──────────────────────────────────────────────
 // Allocator that requests SPIRAM-capable memory
 // ──────────────────────────────────────────────
 // psram_std.h (inside namespace stdpsram)
 
+
+namespace stdpsram {
+
+// Stateless PSRAM allocator. is_always_equal = true is required so
+// std::basic_string move does NOT fall back to element-wise copy
+// (copy would allocate twice and can double-free on some libstdc++ paths).
 template <typename T>
 struct Allocator {
     using value_type = T;
@@ -34,51 +40,45 @@ struct Allocator {
 
     pointer allocate(size_type n) {
         if (n == 0) return nullptr;
-        pointer p = static_cast<pointer>(
-            heap_caps_malloc(n * sizeof(T), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
-        );
+        void* p = heap_caps_malloc(n * sizeof(T), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!p) throw std::bad_alloc();
-        return p;
+        return static_cast<pointer>(p);
     }
 
     void deallocate(pointer p, size_type) noexcept {
-        if (p != nullptr) {                    // ← Critical safety
-            heap_caps_free(p);
-        }
-    }
-
-    // Optional: better reallocate
-    pointer reallocate(pointer p, size_type new_n) {
-        if (new_n == 0) {
-            deallocate(p, 0);
-            return nullptr;
-        }
-        
-        void* new_p = heap_caps_realloc(p, new_n * sizeof(T), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!new_p) {
-            // realloc failed, but original p is still valid
-            // We must NOT free p here - the caller still expects it to be valid
-            throw std::bad_alloc();  // Let caller handle the failure
-        }
-        return static_cast<pointer>(new_p);
+        if (p) heap_caps_free(p);
     }
 
     friend bool operator==(const Allocator&, const Allocator&) noexcept { return true; }
     friend bool operator!=(const Allocator&, const Allocator&) noexcept { return false; }
 };
 
+using String = std::basic_string<char, std::char_traits<char>, Allocator<char>>;
+
+template <typename T>
+using Vector = std::vector<T, Allocator<T>>;
+
+inline String make_string(const char* cstr) {
+    return String(cstr ? cstr : "", Allocator<char>{});
+}
+inline String make_string(const char* cstr, size_t len) {
+    return String(cstr, len, Allocator<char>{});
+}
+inline String make_string(std::string_view sv) {
+    return String(sv.data(), sv.size(), Allocator<char>{});
+}
+
+inline size_t get_psram_free() {
+    return heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+}
+
+
 // ──────────────────────────────────────────────
 // Convenience aliases
 // ──────────────────────────────────────────────
 
-using String = std::basic_string<
-    char,
-    std::char_traits<char>,
-    Allocator<char>
->;
 
-template <typename T>
-using Vector = std::vector<T, Allocator<T>>;
+
 
 // Optional future containers
 // template <typename T>
@@ -88,25 +88,8 @@ using Vector = std::vector<T, Allocator<T>>;
 // using Map = std::map<K, V, std::less<K>, Allocator<std::pair<const K, V>>>;
 
 // Create a String with initial content (avoids double allocation)
-inline String make_string(const char* cstr) {
-    return String(cstr, Allocator<char>{});
-}
-
-inline String make_string(const std::string_view sv) {
-    return String(sv.data(), sv.size(), Allocator<char>{});
-}
-
-inline String make_string(const char* cstr, size_t len) {
-    return String(cstr, len, Allocator<char>{});
-}
 
 // Reserve + assign in one go (good for performance)
-inline String make_string_reserved(size_t capacity, const char* cstr = nullptr) {
-    String s(Allocator<char>{});
-    s.reserve(capacity);
-    if (cstr) s = cstr;
-    return s;
-}
 
 // ------------------------------------------------------------------
 // Safe numeric conversion helpers (you already have safe_parse_*)
@@ -150,9 +133,7 @@ inline size_t get_psram_used() {
     return info.total_allocated_bytes;
 }
 
-inline size_t get_psram_free() {
-    return heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-}
+
 
 inline size_t get_psram_largest_free_block() {
     return heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);

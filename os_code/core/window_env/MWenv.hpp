@@ -40,7 +40,7 @@
 // forward declarations
 #include "hardware/drivers/lcd/st7789v2/t_shapes.h"
 #include <atomic>
-
+#include "freertos/semphr.h"
 class Window;
 class Canvas;
 struct CanvasCfg;
@@ -74,8 +74,31 @@ extern TaskHandle_t core2TaskHandle;
 
 
 // Forward declare so variant can use it
+struct PlainTextRef {
+    uint32_t offset = 0;
+    uint32_t length = 0;
+};
+
+enum class TagType : int8_t {
+    None = 0,
+    PlainText,
+    LineBreak,
+    UnderlineToggle,
+    StrikethroughToggle,
+    BoldToggle,
+    ItalicToggle,
+    ColorChange,
+    SizeChange,
+    PosChange,
+    HighlightChange,
+    UnderlineOff      = -UnderlineToggle,
+    StrikethroughOff  = -StrikethroughToggle,
+    BoldOff           = -BoldToggle,
+    ItalicOff         = -ItalicToggle,
+};
+
 using ChunkContent = std::variant<
-    stdpsram::String,
+    PlainTextRef,
     ColorTag,
     SizeTag,
     PosTag,
@@ -83,55 +106,30 @@ using ChunkContent = std::variant<
     std::monostate
 >;
 
+struct TextChunk {
+    TagType kind = TagType::None;
+    ChunkContent content = std::monostate{};
+
+    TextChunk() = default;
+
+    explicit TextChunk(PlainTextRef ref)
+        : kind(TagType::PlainText), content(ref) {}
+
+    explicit TextChunk(TagType t) : kind(t) {}
+    TextChunk(TagType t, ColorTag c)       : kind(t), content(c) {}
+    TextChunk(TagType t, SizeTag s)        : kind(t), content(s) {}
+    TextChunk(TagType t, PosTag p)         : kind(t), content(p) {}
+    TextChunk(TagType t, HighlighterTag h) : kind(t), content(h) {}
+
+    TextChunk(const TextChunk&) = default;
+    TextChunk(TextChunk&&) noexcept = default;
+    TextChunk& operator=(const TextChunk&) = default;
+    TextChunk& operator=(TextChunk&&) noexcept = default;
+    ~TextChunk() = default;
+};
 
 
- //if the enum value is negative, it disables the tag as opposed to having tag removal things, so HAH i am goated
-    enum class TagType : int8_t {
-        None = 0,
-    
-        PlainText,
-    
-        LineBreak,           // <n>
-        UnderlineToggle,     // <u>
-        StrikethroughToggle, // <s>
-        BoldToggle,
-        ItalicToggle,
-    
-        ColorChange,
-        SizeChange,
-        PosChange,
-        HighlightChange,
-    
-        // negative values = disable
-        UnderlineOff      = -UnderlineToggle,
-        StrikethroughOff  = -StrikethroughToggle,
-        BoldOff           = -BoldToggle,
-        ItalicOff         = -ItalicToggle,
-    };
 
-    struct TextChunk {
-        TagType kind = TagType::None;
-        ChunkContent content = std::monostate{};
-    
-        TextChunk() = default;
-    
-        explicit TextChunk(stdpsram::String txt)
-            : kind(TagType::PlainText), content(std::move(txt)) {}
-    
-        explicit TextChunk(TagType t) : kind(t) {}
-        TextChunk(TagType t, ColorTag c)       : kind(t), content(c) {}
-        TextChunk(TagType t, SizeTag s)        : kind(t), content(s) {}
-        TextChunk(TagType t, PosTag p)         : kind(t), content(p) {}
-        TextChunk(TagType t, HighlighterTag h) : kind(t), content(h) {}
-    
-        // Let compiler generate correct Rule-of-5 instead of manual because it crashes
-        TextChunk(const TextChunk&) = default;
-        TextChunk(TextChunk&&) noexcept = default;
-        TextChunk& operator=(const TextChunk&) = default;
-        TextChunk& operator=(TextChunk&&) noexcept = default;
-    
-        ~TextChunk()=default;
-    };
 /* ---------------- update mode ---------------- */
 
 enum e_wenv_updateType {
@@ -384,6 +382,8 @@ private:
 
 
 
+// ChunkContent: PlainTextRef instead of stdpsram::String
+// TextChunk: explicit TextChunk(PlainTextRef ref) : kind(PlainText), content(ref) {}
 
 
 
@@ -396,6 +396,13 @@ void clearScreenEveryXCalls(uint16_t x);
 class Window : public std::enable_shared_from_this<Window> {
 
     public:
+
+bool content_dirty = true;
+
+
+SemaphoreHandle_t text_mtx = nullptr; 
+
+
     void HaltDrawing();
     void ResumeDrawing();
     //why the fuck did i not have this

@@ -542,8 +542,10 @@ Window::~Window() {
     // Mark as dead so WindowManager can prune it safely
     IsWindowShown = false;
     dirty = false;
+if (text_mtx) { vSemaphoreDelete(text_mtx); text_mtx = nullptr; }
 
     ESP_LOGI(TAG, "Window '%s' fully cleaned up", Currentcfg.name);
+    
 }
 
 void Window::setupBackgroundTile() {
@@ -593,6 +595,7 @@ Window::Window(const WindowCfg& cfg, const std::string& initialContent)
       Currentcfg(cfg),
       w_font_info(ft_AVR_classic_6x8)   //init with default font
 {
+    text_mtx = xSemaphoreCreateMutex();
     // Make sure name is null-terminated
     Currentcfg.name[sizeof(Currentcfg.name) - 1] = '\0';
 
@@ -689,6 +692,25 @@ void Window::LocalToScreen(int lx, int ly, int& sx, int& sy)
     sy = currentPhysY + ry;
 }
 
+void Window::get_physical_bounds(int& out_x, int& out_y, int& out_w, int& out_h) {
+    const int rot = wi_sizing.rotation & 3;
+    const int rawW = wi_sizing.Width;
+    const int rawH = wi_sizing.Height;
+    
+    // Rotated dimensions
+    out_w = (rot % 2 == 0) ? rawW : rawH;
+    out_h = (rot % 2 == 0) ? rawH : rawW;
+    
+    // Rotated position offset
+    int offsetX, offsetY;
+    rotPointLocal(0, 0, rawW, rawH, rot, offsetX, offsetY);
+    out_x = wi_sizing.Xpos - offsetX;
+    out_y = wi_sizing.Ypos - offsetY;
+    
+    // Clamp to screen (same as WinDraw)
+    out_x = std::max(0, std::min(out_x, v_env.clamped_screen_dim_w - out_w));
+    out_y = std::max(0, std::min(out_y, v_env.clamped_screen_dim_h - out_h));
+}
 // Helper function (add to MWenv.cpp or a utils header)
 [[maybe_unused]] static int16_t parse_int(const stdpsram::String& str, int base) {
     int16_t result = 0;
@@ -808,126 +830,98 @@ uint16_t safe_parse_color(std::string_view str, uint16_t default_val = 0xFFFF) {
 
 // ====================== IMPROVED TOKENIZER ======================
 
-stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& input) 
+stdpsram::Vector<TextChunk> Window::tokenize(const stdpsram::String& input)
 {
     stdpsram::Vector<TextChunk> chunks;
-    
-    if (input.empty()) {
-        return chunks;
-    }
+    if (input.empty()) return chunks;
 
-    std::string_view s(input.c_str(), input.length());
-    stdpsram::String text_buffer;
-    text_buffer.reserve((input.length() + 1) / 2 + 32);
+    const char* data = input.c_str();
+    const size_t len = input.length();
+    chunks.reserve(std::max<size_t>(8, len / 16));
 
-    auto flush = [&]() {
-        if (!text_buffer.empty()) {
-            chunks.emplace_back(TextChunk(std::move(text_buffer)));
-            text_buffer.clear();
+    size_t i = 0;
+    size_t run_start = 0;
+
+    auto flush_run = [&](size_t end) {
+        if (end > run_start) {
+            PlainTextRef ref{
+                static_cast<uint32_t>(run_start),
+                static_cast<uint32_t>(end - run_start)
+            };
+            chunks.emplace_back(ref);
         }
     };
 
-    size_t i = 0;
-
-    chunks.reserve(std::max<size_t>(8, input.length() / 16)); //reserve chunks of the size so we don't have to reserve this later causing assignment issues
-
-    while (i < s.length()) {
-        if (s[i] != '<' || i + 1 >= s.length() || s[i + 1] != '|') {
-            text_buffer += s[i];
+    while (i < len) {
+        if (!(data[i] == '<' && (i + 1) < len && data[i + 1] == '|')) {
             ++i;
             continue;
         }
 
-        flush();
+        flush_run(i);
 
-        size_t end = s.find("|>", i + 2);
-        if (end == std::string_view::npos) {
-            text_buffer = s.substr(i);
+        size_t end = i + 2;
+        while (end + 1 < len && !(data[end] == '|' && data[end + 1] == '>'))
+            ++end;
+
+        if (end + 1 >= len) {
+            run_start = i;   // unclosed tag → rest is plain
             break;
         }
 
-        std::string_view inside = s.substr(i + 2, end - i - 2);
+        const size_t inside_off = i + 2;
+        const size_t inside_len = end - inside_off;
         i = end + 2;
+        run_start = i;
 
-        if (inside.empty()) continue;
+        if (inside_len == 0) continue;
 
-        // Short toggle tags
-        if (inside.length() <= 2) {
-            bool is_off = (inside.length() == 2 && inside[0] == '/');
-            char first = is_off ? inside[1] : inside[0];
+        std::string_view inside(data + inside_off, inside_len);
 
+        if (inside_len <= 2) {
+            bool is_off = (inside_len == 2 && inside[0] == '/');
+            char first  = is_off ? inside[1] : inside[0];
             switch (first) {
                 case 'n': if (!is_off) chunks.emplace_back(TagType::LineBreak); break;
                 case 'u': chunks.emplace_back(is_off ? TagType::UnderlineOff : TagType::UnderlineToggle); break;
                 case 's': chunks.emplace_back(is_off ? TagType::StrikethroughOff : TagType::StrikethroughToggle); break;
                 case 'b': chunks.emplace_back(is_off ? TagType::BoldOff : TagType::BoldToggle); break;
                 case 'i': chunks.emplace_back(is_off ? TagType::ItalicOff : TagType::ItalicToggle); break;
-                default: text_buffer.append(inside.data(), inside.size()); break;
+                default: break;
             }
             continue;
         }
 
-        // Value tags - safer parsing
         if (inside.starts_with("size=")) {
-            auto val = inside.substr(5);
-            int sz = safe_parse_int(val, 1);
-            if (sz >= 1 && sz <= 16) {
+            int sz = safe_parse_int(inside.substr(5), 1);
+            if (sz >= 1 && sz <= 16)
                 chunks.emplace_back(TagType::SizeChange, SizeTag{static_cast<uint8_t>(sz)});
-            } else {
-                text_buffer.append(inside.data(), inside.size());
-            }
         }
         else if (inside.starts_with("color=")) {
-            auto val = inside.substr(6);
-            uint16_t col = safe_parse_color(val);
-            chunks.emplace_back(TagType::ColorChange, ColorTag{col});
+            chunks.emplace_back(TagType::ColorChange,
+                ColorTag{safe_parse_color(inside.substr(6))});
         }
         else if (inside.starts_with("hl=")) {
-            auto val = inside.substr(3);
-            uint16_t col = safe_parse_color(val, 0xFFFF);
-            chunks.emplace_back(TagType::HighlightChange, HighlighterTag{col, true});
+            chunks.emplace_back(TagType::HighlightChange,
+                HighlighterTag{safe_parse_color(inside.substr(3), 0xFFFF), true});
         }
         else if (inside.starts_with("pos=")) {
             size_t comma = inside.find(',', 4);
             if (comma != std::string_view::npos) {
-                auto x_str = inside.substr(4, comma - 4);
-                auto y_str = inside.substr(comma + 1);
-                int16_t x = safe_parse_int(x_str);
-                int16_t y = safe_parse_int(y_str);
-                chunks.emplace_back(TagType::PosChange, PosTag{x, y});
-            } else {
-                text_buffer.append(inside.data(), inside.size());
+                chunks.emplace_back(TagType::PosChange, PosTag{
+                    (int16_t)safe_parse_int(inside.substr(4, comma - 4)),
+                    (int16_t)safe_parse_int(inside.substr(comma + 1))
+                });
             }
-        }
-        else {
-            text_buffer.append(inside.data(), inside.size());
         }
     }
 
-    flush();
+    flush_run(len);
     return chunks;
 }
 
 
-void Window::get_physical_bounds(int& out_x, int& out_y, int& out_w, int& out_h) {
-    const int rot = wi_sizing.rotation & 3;
-    const int rawW = wi_sizing.Width;
-    const int rawH = wi_sizing.Height;
-    
-    // Rotated dimensions
-    out_w = (rot % 2 == 0) ? rawW : rawH;
-    out_h = (rot % 2 == 0) ? rawH : rawW;
-    
-    // Rotated position offset
-    int offsetX, offsetY;
-    rotPointLocal(0, 0, rawW, rawH, rot, offsetX, offsetY);
-    out_x = wi_sizing.Xpos - offsetX;
-    out_y = wi_sizing.Ypos - offsetY;
-    
-    // Clamp to screen (same as WinDraw)
-    out_x = std::max(0, std::min(out_x, v_env.clamped_screen_dim_w - out_w));
-    out_y = std::max(0, std::min(out_y, v_env.clamped_screen_dim_h - out_h));
-}
+
 
 // ──────────────────────────────────────────────
 // WinDraw() – logical origin fixed at (Posx, Posy) for ALL rotations
@@ -962,7 +956,71 @@ void Window::ResumeDrawing() {
     dirty = true;
 }
 
+// Text bounds fix for prior recurring issue
+//
+// Problem:
+//   Layout assumes ink is [cursor .. cursor+width] x [cursor .. cursor+height]
+//   in *logical* +X/+Y.  fb_draw_text with angle grows ink along (ax,ay)/(ux,uy).
+//   At size>=2 that box sticks out of the window (often "above" after rot=1).
+//
+// Fix:
+//   1. Know the screen-space AABB of a run for each angle
+//   2. Shift (sx,sy) so the full AABB stays inside the window physical rect
+//   3. Keep logical clamp so soft-wrap / line advance still work
+// =============================================================================
 
+// ---------------------------------------------------------------------------
+// Helper: screen AABB of a text run for a given fb_draw_text angle
+//   origin (ox,oy) = the (x,y) you pass to fb_draw_text
+//   run_w  = strlen * glyph_w * size     (advance direction extent)
+//   run_h  = glyph_h * size              (glyph-row direction extent)
+// ---------------------------------------------------------------------------
+static inline void text_run_aabb(
+    uint8_t angle, int ox, int oy, int run_w, int run_h,
+    int& out_x0, int& out_y0, int& out_x1, int& out_y1)
+{
+    switch (angle & 0x1F) {
+        case 4:  // 90°  advance +Y, glyph rows -X
+            out_x0 = ox - run_h;
+            out_y0 = oy;
+            out_x1 = ox;
+            out_y1 = oy + run_w;
+            break;
+        case 8:  // 180° advance -X, glyph rows -Y
+            out_x0 = ox - run_w;
+            out_y0 = oy - run_h;
+            out_x1 = ox;
+            out_y1 = oy;
+            break;
+        case 12: // 270° advance -Y, glyph rows +X
+            out_x0 = ox;
+            out_y0 = oy - run_w;
+            out_x1 = ox + run_h;
+            out_y1 = oy;
+            break;
+        default: // 0°   advance +X, glyph rows +Y
+            out_x0 = ox;
+            out_y0 = oy;
+            out_x1 = ox + run_w;
+            out_y1 = oy + run_h;
+            break;
+    }
+}
+
+// Shift origin so the run AABB sits inside [winX, winX+winW) x [winY, winY+winH)
+static inline void fit_text_origin_in_window(
+    uint8_t angle, int& ox, int& oy,
+    int run_w, int run_h,
+    int winX, int winY, int winW, int winH)
+{
+    int x0, y0, x1, y1;
+    text_run_aabb(angle, ox, oy, run_w, run_h, x0, y0, x1, y1);
+
+    if (x0 < winX)           ox += (winX - x0);
+    if (y0 < winY)           oy += (winY - y0);
+    if (x1 > winX + winW)    ox -= (x1 - (winX + winW));
+    if (y1 > winY + winH)    oy -= (y1 - (winY + winH));
+}
 
 void Window::WinDraw() {
 	
@@ -1070,97 +1128,156 @@ if (last_x != wi_sizing.Xpos || last_y != wi_sizing.Ypos) {
     }
 
     
-    // === 4. TEXT & CONTENT
-    if (!isTokenized || content != last_content) { 
-        cachedChunks = tokenize(content);
-        last_content = content;        // move if possible
-        isTokenized = true;
+      // === 4. TEXT & CONTENT ===
+    if (content_dirty || !isTokenized) {
+        if (text_mtx) xSemaphoreTake(text_mtx, portMAX_DELAY);
+        cachedChunks.clear();
+        {
+            auto fresh = tokenize(content);
+            cachedChunks.swap(fresh);
+        }
+        isTokenized   = true;
+        content_dirty = false;
+        if (text_mtx) xSemaphoreGive(text_mtx);
     }
 
-    Tstate.color         = win_internal_color_text;
-    Tstate.size          = Currentcfg.TextSizeMult;
-    Tstate.underline     = false;
-    Tstate.strikethrough = false;
-    Tstate.bold          = false;
-    Tstate.italic        = false;
-    Tstate.highlight_bg  = 0;
+    Tstate.color = win_internal_color_text;
+    Tstate.size  = Currentcfg.TextSizeMult;
+    if (Tstate.size < 1) Tstate.size = 1;
+    Tstate.underline = Tstate.strikethrough = Tstate.bold = Tstate.italic = false;
+    Tstate.highlight_bg = 0;
 
-    const int text_rot_flag = rot * 4;
+    const int text_rot_flag = (rot & 3) * 4;   // 0,4,8,12
+    const int glyph_w = w_font_info.fcs.x;     // 6
+    const int glyph_h = w_font_info.fcs.y;     // 8
+    const int line_gap = 2;
 
-    int curLX = 2;
-    int curLY = 2;
-    uint8_t last_line_height = Currentcfg.TextSizeMult;
+    // Physical window rect (already rotation-aware via get_physical_bounds /
+    // the physX/physY + logicalW/H you compute at the top of WinDraw)
+    const int winX = (int)currentPhysX;
+    const int winY = (int)currentPhysY;
+    const int winW = (rot % 2 == 0) ? rawW : rawH;
+    const int winH = (rot % 2 == 0) ? rawH : rawW;
+
+    // Logical padding – at least 2, and never smaller than half a glyph at
+    // current size so the first line cannot start with ink outside the box.
+    const int pad = 2;
+    const int max_local_x = rawW - pad;
+    const int max_local_y = rawH - pad;
+
+    int curLX = pad;
+    int curLY = pad;
+    int line_max_size = Tstate.size;
+
+    std::string draw_buf;
+    draw_buf.reserve(64);
 
     for (const auto& chunk : cachedChunks) {
         switch (chunk.kind) {
+
         case TagType::PlainText: {
-            const stdpsram::String* pTxt = std::get_if<stdpsram::String>(&chunk.content);
-            if (!pTxt || pTxt->empty()) break;
-            const auto& txt = *pTxt;
+            const PlainTextRef* ref = std::get_if<PlainTextRef>(&chunk.content);
+            if (!ref || ref->length == 0) break;
+            if ((size_t)ref->offset + ref->length > content.size()) break;
+
+            if (Tstate.size > line_max_size)
+                line_max_size = Tstate.size;
+
+            const int run_px = (int)ref->length * glyph_w * Tstate.size; // advance dir
+            const int run_py = glyph_h * Tstate.size;                    // glyph-row dir
+
+            // Soft-wrap in logical space
+            if (curLX > pad && curLX + run_px > max_local_x) {
+                curLX = pad;
+                curLY += glyph_h * line_max_size + line_gap;
+                line_max_size = Tstate.size;
+            }
+
+            // Past bottom of logical window – stop
+            if (curLY + run_py > max_local_y && curLY > pad)
+                break;
+
+            int drawLX = (curLX < pad) ? pad : curLX;
+            int drawLY = (curLY < pad) ? pad : curLY;
 
             int rx, ry;
-            rotPointLocal(curLX, curLY, rawW, rawH, rot, rx, ry);
+            rotPointLocal(drawLX, drawLY, rawW, rawH, rot, rx, ry);
             int sx = physX + rx;
             int sy = physY + ry;
 
-            fb_draw_ptext(text_rot_flag,
-                          sx, sy,
-                          txt,
-                          Tstate.color,
-                          Tstate.size,
-                          12,
-                          Tstate.highlight_bg,
-                          win_internal_color_background,
-                          100,
-                          w_font_info);
+            // *** KEY FIX: pull origin so full ink stays inside window ***
+            fit_text_origin_in_window(
+                (uint8_t)text_rot_flag, sx, sy,
+                run_px, run_py,
+                winX, winY, winW, winH
+            );
 
-            curLX += txt.length() * (w_font_info.fcs.x) * Tstate.size;
-            if (curLX >= rawW - 4) {
-                curLX = 2;
-                curLY += (w_font_info.fcs.y) * last_line_height + 4;
+            draw_buf.assign(content.c_str() + ref->offset, ref->length);
+
+            fb_draw_text(
+                (uint8_t)text_rot_flag,
+                sx, sy,
+                draw_buf.c_str(),
+                Tstate.color,
+                (uint8_t)Tstate.size,
+                0,
+                (Tstate.highlight_bg != 0),
+                Tstate.highlight_bg ? Tstate.highlight_bg : win_internal_color_background,
+                0,
+                w_font_info
+            );
+
+            curLX += run_px;
+            if (curLX > max_local_x) {
+                curLX = pad;
+                curLY += glyph_h * line_max_size + line_gap;
+                line_max_size = Tstate.size;
             }
-            last_line_height = Tstate.size;
             break;
         }
+
         case TagType::LineBreak:
-            curLX = 2;
-            curLY += w_font_info.fcs.y * last_line_height + 4;
+            curLX = pad;
+            curLY += glyph_h * line_max_size + line_gap;
+            line_max_size = Tstate.size;
             break;
-        case TagType::PosChange: {
-            auto p = std::get<PosTag>(chunk.content);
-            curLX = p.x;
-            curLY = p.y;
+
+        case TagType::PosChange:
+            if (auto* p = std::get_if<PosTag>(&chunk.content)) {
+                curLX = std::max(pad, std::min((int)p->x, max_local_x));
+                curLY = std::max(pad, std::min((int)p->y, max_local_y));
+                line_max_size = Tstate.size;
+            }
             break;
-        }
-        case TagType::SizeChange: {
+
+        case TagType::SizeChange:
             if (auto* p = std::get_if<SizeTag>(&chunk.content)) {
                 int s = p->value;
-                if (s >= 1 && s <= 16) Tstate.size = s;
+                if (s >= 1 && s <= 16) {
+                    Tstate.size = s;
+                    if (s > line_max_size) line_max_size = s;
+                }
             }
             break;
-        }
-        
-        case TagType::ColorChange: {
-            if (auto* p = std::get_if<ColorTag>(&chunk.content)) {
+
+        case TagType::ColorChange:
+            if (auto* p = std::get_if<ColorTag>(&chunk.content))
                 Tstate.color = p->value;
-            }
             break;
-        }
-        
-        case TagType::HighlightChange: {
-            if (auto* p = std::get_if<HighlighterTag>(&chunk.content)) {
+
+        case TagType::HighlightChange:
+            if (auto* p = std::get_if<HighlighterTag>(&chunk.content))
                 Tstate.highlight_bg = p->enabled ? p->color : 0;
-            }
             break;
-        }
-        case TagType::UnderlineToggle:    Tstate.underline = true; break;
-        case TagType::UnderlineOff:       Tstate.underline = false; break;
-        case TagType::StrikethroughToggle:Tstate.strikethrough = true; break;
-        case TagType::StrikethroughOff:   Tstate.strikethrough = false; break;
-        case TagType::BoldToggle:         Tstate.bold = true; break;
-        case TagType::BoldOff:            Tstate.bold = false; break;
-        case TagType::ItalicToggle:       Tstate.italic = true; break;
-        case TagType::ItalicOff:          Tstate.italic = false; break;
+
+        case TagType::UnderlineToggle:     Tstate.underline = true;  break;
+        case TagType::UnderlineOff:        Tstate.underline = false; break;
+        case TagType::StrikethroughToggle: Tstate.strikethrough = true;  break;
+        case TagType::StrikethroughOff:    Tstate.strikethrough = false; break;
+        case TagType::BoldToggle:          Tstate.bold = true;  break;
+        case TagType::BoldOff:             Tstate.bold = false; break;
+        case TagType::ItalicToggle:        Tstate.italic = true;  break;
+        case TagType::ItalicOff:           Tstate.italic = false; break;
         default: break;
         }
     }
@@ -1202,61 +1319,83 @@ if (last_x != wi_sizing.Xpos || last_y != wi_sizing.Ypos) {
 
 //guess who found out she needed to do this a lot after making the window system and working on other drivers
 //i swear to god bruh
-void Window::SetText(const char* newText){
+void Window::SetText(const stdpsram::String& newText)
+{
+    if (text_mtx) xSemaphoreTake(text_mtx, portMAX_DELAY);
+    content = newText;
+    isTokenized   = false;
+    content_dirty = true;
+    dirty         = true;
+    if (text_mtx) xSemaphoreGive(text_mtx);
+}
+
+void Window::SetText(const char* newText)
+{
+    if (text_mtx) xSemaphoreTake(text_mtx, portMAX_DELAY);
     if (!newText) {
         content.clear();
-        isTokenized = false;
-        dirty = true;
-        return;
+        cachedChunks.clear();
+    } else {
+        content = stdpsram::String(newText);
     }
-
-    // Direct assignment = copy + null termination handled correctly
-    content = stdpsram::String(newText);
-
-    isTokenized = false;
-    dirty = true;
+    isTokenized   = false;
+    content_dirty = true;
+    dirty         = true;
+    if (text_mtx) xSemaphoreGive(text_mtx);
 }
 
-void Window::SetText(std::string_view text)
+void Window::ClearText()
 {
+    if (text_mtx) xSemaphoreTake(text_mtx, portMAX_DELAY);
+    cachedChunks.clear();
+    content.clear();
+    last_content.clear();
+    isTokenized   = false;
+    content_dirty = true;
+    dirty         = true;
+    if (text_mtx) xSemaphoreGive(text_mtx);
+}
+
+void Window::SetText(std::string_view text) {
     content = stdpsram::String(text.data(), text.size());
     isTokenized = false;
+    content_dirty = true;
     dirty = true;
 }
 
-void Window::SetText(const std::string& newText) { //std string variant with explicit conversion
-    content = stdpsram::String(newText.begin(), newText.end());  // force PSRAM copy
+void Window::SetText(const std::string& newText) {
+    content = stdpsram::String(newText.begin(), newText.end());
     isTokenized = false;
-    dirty = true;
-}
-
-void Window::SetText(const stdpsram::String& newText) { //stdpsram variant with no conversion needed
-    content=newText;  
-    isTokenized = false;
+    content_dirty = true;
     dirty = true;
 }
 
 
-//overloaded for std and stdpsram
+
 void Window::AppendText(const stdpsram::String& moreText) {
     content.append(moreText);
     isTokenized = false;
+    content_dirty = true;
     dirty = true;
 }
 
-void Window::AppendText(const std::string& moreText) { //overloaded stdstr, convert needed
+void Window::AppendText(const std::string& moreText) {
     content.append(stdpsram::String(moreText.begin(), moreText.end()));
     isTokenized = false;
+    content_dirty = true;
     dirty = true;
 }
-
+/*
 void Window::ClearText() {
-    cachedChunks.clear();     // cache then content then last
+    // Destroy chunks first while allocator is still healthy, then strings
+    cachedChunks.clear();
+    cachedChunks.shrink_to_fit();   // release PSRAM capacity held by the vector
     content.clear();
     last_content.clear();
     isTokenized = false;
+    content_dirty = true;
     dirty = true;
-}
+}*/
 
 //remember, dumbass,
 /*
@@ -1890,6 +2029,16 @@ void WindowManager::DebugPrintWindowDOM() const {
 // Update UpdateAll to handle toolbar with cooperative yielding
 void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWindows, bool draw_toolbar_ontop)
 {
+
+
+ ToolbarUpdate=false;
+ draw_toolbar_ontop=false;
+ //fuck off, i'm not dealing with this shit
+
+
+
+
+
     static uint32_t last_update_ms = 0;
     uint32_t now_ms = esp_timer_get_time() / 1000;
 

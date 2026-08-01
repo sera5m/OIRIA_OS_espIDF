@@ -162,5 +162,14 @@ static const OFV_ExtMap g_ofv_ext_map[] = {
 };
 
 
-
+#ifdef __cplusplus
+extern "C" {
 #endif
+
+OFV_Mode    OFV_GetModeFromExt(const char* ext);
+const char* OFV_GetExtension(const char* path);
+
+#ifdef __cplusplus
+}
+#endif
+#endif // D_SDC_H
