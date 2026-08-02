@@ -29,7 +29,8 @@ idf_component_register(
         # OS core
         "os_code/core/rShell/enviroment/env_vars.c"
         "os_code/core/window_env/MWenv.cpp"
-       
+        "os_code/core/window_env/Canvas.cpp"
+       "os_code/core/window_env/PsramBackgroundTile.cpp"
 
 # rshell core 
   "os_code/core/rShell/rshell_appFramework.cpp" 

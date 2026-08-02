@@ -1,53 +1,46 @@
 
 #include <stdint.h>
-
 #include <string>
 #include <memory>
 #include <sstream>
 #include <algorithm>
-#include <variant>//unions for the code
-#include "code_stuff/types.h"
-#include "hardware/drivers/lcd/fonts/font_basic_types.h"
-#include <memory>
-#include <math.h>
-#include "hardware/wiring/wiring.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "driver/gpio.h"
-#include "driver/spi_master.h"
-#include "driver/spi_common.h"
+#include <variant>
+#include <vector>
+#include <atomic>
+#include <string_view>
+
+#include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_psram.h"
-#include "rom/cache.h"
-#include <string.h>
-#include <math.h>
-#include "hardware/drivers/abstraction_layers/al_scr.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
+
+#include "code_stuff/types.h"
+#include "hardware/drivers/lcd/fonts/font_basic_types.h"
 #include "hardware/drivers/lcd/fonts/font_avr_classics.h"
 #include "hardware/drivers/lcd/st7789v2/lcDriver.h"
-#include "os_code/core/window_env/MWenv.hpp"
-#include "esp_timer.h"
-#include "os_code/core/window_env/wenv_basicThemes.h"
-#include "hardware/drivers/lcd/fonts/font_avr_classics.h"
-#include <esp_heap_caps.h>
-
-#include "hardware/drivers/psram_std/psram_std.hpp" //my custom work for psram stdd things
 #include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
-// Custom allocator for std::string that prefers PSRAM
-#include "esp_log.h"
-#include "os_code/core/rShell/enviroment/env_vars.h"
 #include "hardware/drivers/lcd/st7789v2/t_shapes.h"
-#include "esp_task_wdt.h" 
+#include "hardware/drivers/abstraction_layers/al_scr.h"
+#include "hardware/drivers/psram_std/psram_std.hpp"
+#include "os_code/core/rShell/enviroment/env_vars.h"
+#include "MWenv.hpp"
+#include "os_code/core/window_env/wenv_basicThemes.h"
 
-#include <atomic>
+#include "PsramBackgroundTile.hpp"
+#include "Canvas.hpp"
+#include <math.h>
+#include <string.h>
+#include <algorithm>
+#include <string_view>
 
+#include "esp_task_wdt.h"
+#include "hardware/wiring/wiring.h"
 
+static const char *TAG = "MWenv";
 
-//unrelated but i hate how every time ihave to type idf.py build flash monitor to check if the code works every time i make my 253st change of the day
-//and idf also stands for isralie defense force, who are genocidal rapists and whatnot, it's a fun reminder 
-static const char *TAG = "MWenv"; 
-
-//extern the task management declarations
 TaskHandle_t core2TaskHandle = NULL;
 
  volatile bool g_display_dirty=0;           // set by WindowManager
@@ -67,432 +60,6 @@ toolbarconfig g_defaultToolbarConfig = {
 };
 
 
-//backgroundfill will use a seperate small buffer to avoid regenerating complex patterns or images, fortunately it's smaller than the actual screen size, and loops, so we'll just render one tile and translate it from position a to b in memory
-//i think we'll have to transfer the blocks over to the adjacent position in memory, therefore redrawing it over text
-//i'll have to account for text rotation, and store this in psram as bitmap segments
-//i hate to do this but i'll encapsulate the background tile in an object
-
-PsramBackgroundTile::PsramBackgroundTile(uint16_t tileSizeX, uint16_t tileSizeY) {
-    if (allocated) return;
-
-    pbt_cfg.tileSize_x = tileSizeX;
-    pbt_cfg.tileSize_y = tileSizeY;
-
-    size_t sz = (size_t)tileSizeX * tileSizeY * sizeof(uint16_t);
-    ESP_LOGI("PsramBG", "Allocating %u×%u tile (%u bytes)", tileSizeX, tileSizeY, sz);
-
-    pseudoframebuffer = (uint16_t*)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
-
-    if (pseudoframebuffer) {
-        allocated = true;
-        ESP_LOGI("PsramBG", "PSRAM tile allocated at %p", pseudoframebuffer);
-    } else {
-        ESP_LOGE("PsramBG", "Failed to allocate background tile!");
-    }
-}
-
-PsramBackgroundTile::~PsramBackgroundTile() {
-    if (pseudoframebuffer) {
-        heap_caps_free(pseudoframebuffer);
-        pseudoframebuffer = nullptr;
-        allocated = false;
-    }
-}
-
-void PsramBackgroundTile::generate_pattern(BgFillType type, uint16_t primary, uint16_t secondary) {
-    if (!allocated || !pseudoframebuffer) return;
-
-    primaryColor = primary;
-    secondaryColor = secondary;
-    uint16_t* bmp = pseudoframebuffer;
-    const uint16_t SX = pbt_cfg.tileSize_x;
-    const uint16_t SY = pbt_cfg.tileSize_y;
-    //type=BgFillType::waves;
-    ESP_LOGE("PsramBG", "colors %u %u", primary, secondary);
-
-    switch (type) {
-
-        case BgFillType::Solid:
-            for (uint16_t i = 0; i < SX * SY; ++i) 
-                bmp[i] = primary;
-            break;
-
-        case BgFillType::GradientVertical:
-            for (uint16_t y = 0; y < SY; ++y) {
-                uint16_t c = primary + ((secondary - primary) * y) / (SY - 1);
-                for (uint16_t x = 0; x < SX; ++x) 
-                    bmp[y * SX + x] = c;
-            }
-            break;
-
-        case BgFillType::GradientHorizontal:
-            for (uint16_t y = 0; y < SY; ++y)
-                for (uint16_t x = 0; x < SX; ++x) {
-                    uint16_t c = primary + ((secondary - primary) * x) / (SX - 1);
-                    bmp[y * SX + x] = c;
-                }
-            break;
-
-        case BgFillType::Checkerboard:
-            for (uint16_t y = 0; y < SY; ++y)
-                for (uint16_t x = 0; x < SX; ++x)
-                    bmp[y * SX + x] = ((x / 4 + y / 4) % 2 == 0) ? primary : secondary;
-            break;
-
-        case BgFillType::Noise:
-            for (uint16_t i = 0; i < SX * SY; ++i)
-                bmp[i] = (rand() & 1) ? primary : secondary;
-            break;
-
-        case BgFillType::Diagonal_lines:
-            for (uint16_t y = 0; y < SY; ++y)
-                for (uint16_t x = 0; x < SX; ++x)
-                    bmp[y * SX + x] = ((x + y) % 8 < 4) ? primary : secondary;
-            break;
-
-        case BgFillType::Transparent:
-            // Leave untouched (useful when you want to keep previous content 
-            // or draw on top of another layer)
-            break;
-
-        case BgFillType::waves: //WARNING NOT EFFICIENT I THINK
-        for (uint16_t y = 0; y < SY; ++y) {
-            for (uint16_t x = 0; x < SX; ++x) {
-        
-                float t = (float)x * 0.19635f; // ~2π / 32
-                int y_center = (int)(sinf(t) * 8 + 16);
-        
-                if (abs((int)y - y_center) <= 2)
-                    bmp[y * SX + x] = secondary;
-                else
-                    bmp[y * SX + x] = primary;
-            }
-        }
-            break;
-
-        case BgFillType::triangles:
-            for (uint16_t y = 0; y < SY; ++y)
-                for (uint16_t x = 0; x < SX; ++x) {
-                    // Simple repeating triangle / diagonal stripe pattern
-                    int val = (x + y) % 16;
-                    bmp[y * SX + x] = (val < 8) ? primary : secondary;
-                }
-            break;
-
-        case BgFillType::dots:
-            for (uint16_t y = 0; y < SY; ++y)
-                for (uint16_t x = 0; x < SX; ++x) {
-                    // Small dot pattern (every 4 pixels)
-                    bool is_dot = ((x % 4 == 0) && (y % 4 == 0));
-                    bmp[y * SX + x] = is_dot ? primary : secondary;
-                }
-            break;
-
-        case BgFillType::count:
-            // Should never reach here - added for completeness
-            ESP_LOGW("PsramBG", "BgFillType::count should not be used as a pattern");
-            [[fallthrough]];
-
-        default:
-            ESP_LOGW("PsramBG", "Unknown pattern %d – using Solid", (int)type);
-            for (uint16_t i = 0; i < SX * SY; ++i) 
-                bmp[i] = primary;
-            break;
-    }
-}
-
-// Helper – copies one tile into the framebuffer with rotation
-static void blit_tile(                 // renamed for clarity
-    uint16_t targetX, uint16_t targetY,
-    uint16_t* framebuffer,
-    uint16_t* tileBuffer,
-    uint16_t tileW, uint16_t tileH)
-{
-    for (uint16_t ty = 0; ty < tileH; ++ty) {
-        for (uint16_t tx = 0; tx < tileW; ++tx) {
-            int sx = targetX + tx;
-            int sy = targetY + ty;
-
-            if (sx < 0 || sy < 0 || sx >= SCREEN_W || sy >= SCREEN_H)
-                continue;
-
-            uint16_t color = tileBuffer[ty * tileW + tx];
-            framebuffer[sy * SCREEN_W + sx] = color;
-        }
-    }
-}
- //pushes origin buffer to target framebuffer at position xy with rotation
-//rot quadrant is the cartesian quadrant the tile is meant to be rotated into when placed. typically just follows the window
-//start x is rotated by rot quadrant before it begins
-
-static void blit_tile_clipped(
-    uint16_t targetX, uint16_t targetY,           // where the tile top-left would go on screen
-    uint16_t clipX,   uint16_t clipY,
-    uint16_t clipW,   uint16_t clipH,             // window's physical bounding box
-    uint16_t* framebuffer,
-    uint16_t* tileBuffer,
-    uint16_t tileW,   uint16_t tileH)
-{
-    // Compute overlapping rectangle between the placed tile and the window clip area
-    int left   = std::max(static_cast<int>(targetX), static_cast<int>(clipX));
-    int top    = std::max(static_cast<int>(targetY), static_cast<int>(clipY));
-    int right  = std::min(static_cast<int>(targetX + tileW), static_cast<int>(clipX + clipW));
-    int bottom = std::min(static_cast<int>(targetY + tileH), static_cast<int>(clipY + clipH));
-
-    if (left >= right || top >= bottom) return;
-
-    uint16_t src_x = left - targetX;
-    uint16_t src_y = top  - targetY;
-    uint16_t copy_w = right - left;
-    uint16_t copy_h = bottom - top;
-
-    for (uint16_t dy = 0; dy < copy_h; ++dy) {
-        for (uint16_t dx = 0; dx < copy_w; ++dx) {
-            int sx = left + dx;
-            int sy = top + dy;
-
-            // still respect screen edges
-            if (sx < 0 || sy < 0 || sx >= SCREEN_W || sy >= SCREEN_H) continue;
-
-            uint16_t color = tileBuffer[(src_y + dy) * tileW + (src_x + dx)];
-            framebuffer[sy * SCREEN_W + sx] = color;
-        }
-    }
-}
-
-/////===============END PSRAM BACKGROUND TILE DATA
-
-///////==canvas object
-
-// ===================== CANVAS IMPLEMENTATION =====================
-Canvas::Canvas(const CanvasCfg& cfg) 
-    : m_cfg(cfg)
-    , m_parentWindow(cfg.parentWindow)
-    , m_shapeBuffer(nullptr)
-    , m_maxShapes(FB_MAX_SHAPES)
-    , m_dirty(true)
-{
-    // Allocate shape buffer on PSRAM
-    m_shapeBuffer = (fb_shape_buffer_t*)heap_caps_malloc(
-        sizeof(fb_shape_buffer_t), 
-        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
-    );
-    
-    if (!m_shapeBuffer) {
-        ESP_LOGE(TAG, "Failed to allocate shape buffer!");
-        return;
-    }
-    
-    // Initialize the buffer
-    if (!fb_shapes_init(m_shapeBuffer, m_maxShapes)) {
-        ESP_LOGE(TAG, "Failed to initialize shapes!");
-        heap_caps_free(m_shapeBuffer);
-        m_shapeBuffer = nullptr;
-        return;
-    }
-    
-    ESP_LOGI(TAG, "Canvas created with parent window at %p", m_parentWindow);
-}
-
-Canvas::~Canvas() {
-    if (m_shapeBuffer) {
-        fb_shapes_free(m_shapeBuffer);
-        heap_caps_free(m_shapeBuffer);
-        m_shapeBuffer = nullptr;
-    }
-}
-
-void Canvas::Update(float deltaTime) {
-    // Update any animated shapes or handle transformations
-    // For now, just mark dirty if shapes changed
-    if (m_dirty) {
-        SortShapes();
-        if (m_parentWindow) {
-            m_parentWindow->dirty = true;
-        }
-        m_dirty = false;
-    }
-}
-
-void Canvas::Draw() {
-    if (!m_shapeBuffer || !m_parentWindow || !m_parentWindow->IsWindowShown) {
-        return;
-    }
-    
-    // Convert all shapes from canvas-local coordinates to screen coordinates
-    for (uint16_t i = 0; i < m_shapeBuffer->count; i++) {
-        fb_shape_t* shape = &m_shapeBuffer->shapes[i];
-        if (!shape->shown) continue;
-        
-        // Convert bounds from canvas-local to screen coordinates
-        s_bounds_16u screenBounds;
-        int sx1, sy1, sx2, sy2;
-        
-        m_parentWindow->LocalToScreen(shape->bounds.x, shape->bounds.y, sx1, sy1);
-        m_parentWindow->LocalToScreen(
-            shape->bounds.x + shape->bounds.w, 
-            shape->bounds.y + shape->bounds.h, 
-            sx2, sy2
-        );
-        
-        screenBounds.x = sx1;
-        screenBounds.y = sy1;
-        screenBounds.w = sx2 - sx1;
-        screenBounds.h = sy2 - sy1;
-        
-        // Apply bounds checking (clamp to parent window)
-        s_bounds_16u windowBounds = {
-            .x = m_parentWindow->currentPhysX,
-            .y = m_parentWindow->currentPhysY,
-            .w = m_parentWindow->logicalW,
-            .h = m_parentWindow->logicalH
-        };
-        
-        screenBounds = ClampBoundsToParent(screenBounds, windowBounds);
-        if (screenBounds.w <= 0 || screenBounds.h <= 0) continue;
-        
-        // Draw based on shape type
-        switch ((fb_shape_type)shape->type) {
-            case SHAPE_RECT:
-                fb_rect(true, 1, 
-                       screenBounds.x, screenBounds.y,
-                       screenBounds.w, screenBounds.h,
-                       shape->color, shape->color);
-                break;
-                
-            case SHAPE_LINE:
-                // For lines, bounds contains the two endpoints
-                // bounds.x,y = start point, bounds.w,h = end point offset
-                fb_line(screenBounds.x, screenBounds.y,
-                       screenBounds.x + screenBounds.w,
-                       screenBounds.y + screenBounds.h,
-                       shape->color);
-                break;
-                
-            case SHAPE_CIRCLE: {
-                // For circles, bounds.x,y = center, bounds.w = radius
-                int radius = screenBounds.w / 2;
-                fb_circle(screenBounds.x + radius,
-                         screenBounds.y + radius,
-                         radius, plain, shape->color, shape->color);
-                break;
-            }
-            
-            case SHAPE_BITMAP:
-                if (shape->data) {
-                    fb_draw_bitmap(screenBounds.x, screenBounds.y,
-                                  screenBounds.w, screenBounds.h,
-                                  (const uint16_t*)shape->data);
-                }
-                break;
-                
-            case SHAPE_TEXT:
-                if (shape->data) {
-                    fb_draw_text(0, screenBounds.x, screenBounds.y,
-                                (const char*)shape->data,
-                                shape->color, 1, 0, true, 0x0000,
-                                screenBounds.w, ft_AVR_classic_6x8);
-                }
-                break;
-                
-            default:
-                break;
-        }
-    }
-}
-
-fb_shape_t* Canvas::AddShape(fb_shape_type type, s_bounds_16u bounds, 
-                              uint16_t color, uint8_t layer) {
-    if (!m_shapeBuffer) return nullptr;
-    
-    // Bounds check - ensure shape is within canvas
-    s_bounds_16u clampedBounds = bounds;
-    if (clampedBounds.x < 0) {  // or just remove if x is unsigned. nah
-        clampedBounds.w += clampedBounds.x;  // this line is also suspicious
-        clampedBounds.x = 0;
-    }
-    if (clampedBounds.y < 0) {
-        clampedBounds.h += clampedBounds.y;
-        clampedBounds.y = 0;
-    }
-    if (clampedBounds.x + clampedBounds.w > m_cfg.width) {
-        clampedBounds.w = m_cfg.width - clampedBounds.x;
-    }
-    if (clampedBounds.y + clampedBounds.h > m_cfg.height) {
-        clampedBounds.h = m_cfg.height - clampedBounds.y;
-    }
-    
-    if (clampedBounds.w <= 0 || clampedBounds.h <= 0) {
-        ESP_LOGW(TAG, "Shape bounds invalid after clamping");
-        return nullptr;
-    }
-    
-    fb_shape_t* shape = fb_shape_add(m_shapeBuffer, type, clampedBounds, color, layer);
-    if (shape) {
-        m_dirty = true;
-        ESP_LOGI(TAG, "Added shape type=%d at (%d,%d) size=%dx%d", 
-                 type, bounds.x, bounds.y, bounds.w, bounds.h);
-    }
-    
-    return shape;
-}
-
-void Canvas::RemoveShape(uint16_t index) {
-    if (!m_shapeBuffer || index >= m_shapeBuffer->count) return;
-    
-    // Shift all shapes after index left by one
-    for (uint16_t i = index; i < m_shapeBuffer->count - 1; i++) {
-        m_shapeBuffer->shapes[i] = m_shapeBuffer->shapes[i + 1];
-    }
-    
-    m_shapeBuffer->count--;
-    m_dirty = true;
-}
-
-void Canvas::ClearShapes() {
-    if (!m_shapeBuffer) return;
-    m_shapeBuffer->count = 0;
-    for (int i = 0; i < FB_MAX_LAYERS; i++) {
-        m_shapeBuffer->layer_counts[i] = 0;
-        m_shapeBuffer->layer_offsets[i] = 0;
-    }
-    m_dirty = true;
-}
-
-void Canvas::SortShapes() {
-    if (!m_shapeBuffer) return;
-    fb_shapes_Fsort_by_layer(m_shapeBuffer);  // Use the fixed version
-}
-
-void Canvas::SetShapeVisible(uint16_t index, bool visible) {
-    if (!m_shapeBuffer || index >= m_shapeBuffer->count) return;
-    m_shapeBuffer->shapes[index].shown = visible;
-    m_dirty = true;
-}
-
-s_bounds_16u Canvas::ClampBoundsToParent(s_bounds_16u bounds, s_bounds_16u parentBounds) {
-    s_bounds_16u result = bounds;
-    
-    // Clamp to parent window boundaries
-    if (result.x < parentBounds.x) {
-        result.w -= (parentBounds.x - result.x);
-        result.x = parentBounds.x;
-    }
-    if (result.y < parentBounds.y) {
-        result.h -= (parentBounds.y - result.y);
-        result.y = parentBounds.y;
-    }
-    if (result.x + result.w > parentBounds.x + parentBounds.w) {
-        result.w = (parentBounds.x + parentBounds.w) - result.x;
-    }
-    if (result.y + result.h > parentBounds.y + parentBounds.h) {
-        result.h = (parentBounds.y + parentBounds.h) - result.y;
-    }
-    
-    return result;
-}
-
-////////////
 std::shared_ptr<Canvas> Window::AddCanvas(const CanvasCfg& cfg) {
     // Create canvas with this window as parent
     CanvasCfg canvasCfg = cfg;
@@ -772,7 +339,7 @@ inline void ui8Tostr(uint8_t v, std::string& out, size_t pos = std::string::npos
 
 // ====================== FASTER PARSERS ======================
 
-int safe_parse_int(std::string_view str, int default_val = 0) {
+int safe_parse_int(std::string_view str, int default_val) {
     if (str.empty()) return default_val;
 
     int sign = 1;
@@ -795,7 +362,7 @@ int safe_parse_int(std::string_view str, int default_val = 0) {
     return digits_found ? result * sign : default_val;
 }
 
-uint16_t safe_parse_color(std::string_view str, uint16_t default_val = 0xFFFF) {
+uint16_t safe_parse_color(std::string_view str, uint16_t default_val) {
     if (str.empty()) return default_val;
 
     size_t start = 0;
