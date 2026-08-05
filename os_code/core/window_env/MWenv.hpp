@@ -29,6 +29,7 @@
 #include "hardware/drivers/psram_std/psram_std.hpp"
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/core/window_env/wenv_basicThemes.h"
+#include "os_code/core/window_env/AnimWorld.hpp"
 
 #include "PsramBackgroundTile.hpp"
 #include "Canvas.hpp"

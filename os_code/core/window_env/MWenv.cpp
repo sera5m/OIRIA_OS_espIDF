@@ -29,6 +29,9 @@
 #include "MWenv.hpp"
 #include "os_code/core/window_env/wenv_basicThemes.h"
 
+#include "os_code/core/window_env/AnimWorld.hpp"
+
+
 #include "PsramBackgroundTile.hpp"
 #include "Canvas.hpp"
 #include <math.h>
@@ -38,6 +41,7 @@
 
 #include "esp_task_wdt.h"
 #include "hardware/wiring/wiring.h"
+
 
 static const char *TAG = "MWenv";
 
@@ -875,6 +879,12 @@ if (last_x != wi_sizing.Xpos || last_y != wi_sizing.Ypos) {
         // no highlight today
     }
     
+
+    //============================6. warning experemental feature===========canvas===========
+DrawCanvas();
+
+
+
     // === FINISH ===
     currentPhysX = physX;
     currentPhysY = physY;

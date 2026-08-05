@@ -7,6 +7,7 @@
 
 #include "hardware/drivers/lcd/st7789v2/t_shapes.h"
 #include "code_stuff/types.h" // s_bounds_16u
+#include "AnimWorld.hpp"
 
 class Window; // forward
 
@@ -31,7 +32,7 @@ struct CanvasCfg {
 };
 
 // ---------------------------------------------------------------------------
-// Canvas – shape buffer owned by a Window
+// Canvas – shape buffer owned by a Window, optional AnimWorld attach
 // ---------------------------------------------------------------------------
 
 class Canvas : public std::enable_shared_from_this<Canvas> {
@@ -55,6 +56,22 @@ public:
     void SetShapeVisible(uint16_t index, bool visible);
 
     fb_shape_buffer_t* GetShapeBuffer() { return m_shapeBuffer; }
+
+    // --- AnimWorld integration ---
+    // Non-owning pointer; caller keeps the world alive.
+    // When attached, Draw() will step-draw the world after static shapes.
+    void AttachWorld(AnimWorld* world);
+    void DetachWorld();
+    AnimWorld* GetWorld() const { return m_world; }
+
+    // Camera maps world units into this canvas's local pixel space.
+    // offset defaults to canvas (x,y); origin/scale are world mapping.
+    void SetWorldCamera(const AwCamera& cam);
+    const AwCamera& GetWorldCamera() const { return m_cam; }
+
+    // If true (default), Draw() calls world->draw(). Set false if you
+    // step/draw the world yourself from game code.
+    void SetAutoDrawWorld(bool on) { m_auto_draw_world = on; }
 
     // Getters
     int GetX() const { return m_cfg.x; }
@@ -80,6 +97,10 @@ private:
     fb_shape_buffer_t* m_shapeBuffer;
     uint16_t           m_maxShapes;
     bool               m_dirty;
+
+    AnimWorld*         m_world = nullptr;
+    AwCamera           m_cam{};
+    bool               m_auto_draw_world = true;
 };
 
 #endif // OS_CODE_CORE_WINDOW_ENV_CANVAS_HPP_

@@ -68,10 +68,18 @@
 #include "class/hid/hid.h"
 
 
+//==============================================================apps
 #include  "os_code/applications/fileviewer/MS_file_viewer.hpp"
 
 #include "os_code/applications/watch/MS_watchapp.hpp"
 #include  "os_code/applications/menu/app_menu.hpp"
+#include "os_code/applications/pong/MS_pongapp.hpp"
+
+//==============================================================apps
+
+
+
+
 #include "os_code/core/notification_sys/rs_notif_dispatcher.h"
 #include "ulp_riscv.h"
 //#include "ulp_riscv/ulp_riscv.h"
@@ -362,8 +370,7 @@ ESP_LOGI(TAG, "WindowManager init-d");
     register_watch();
     register_menu();
 	register_fileviewer();
-    // Start the app manager task
-    
+    register_pong();
     
     
 

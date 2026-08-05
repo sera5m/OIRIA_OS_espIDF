@@ -16,6 +16,7 @@ idf_component_register(
         "hardware/drivers/lcd/st7789v2/lcDriver.c"
         "hardware/drivers/lcd/st7789v2/lcdriverAddon.cpp"
         "hardware/drivers/lcd/fonts/font_avr_classics.c"
+        
 
         # Input handling
         "hardware/drivers/encoders/ky040_driver.cpp"
@@ -26,11 +27,14 @@ idf_component_register(
         # Storage
         "hardware/drivers/sd_card/d_sdc.c"
 
-        # OS core
+        # OS stuff
         "os_code/core/rShell/enviroment/env_vars.c"
+        
+        #window enviroment
         "os_code/core/window_env/MWenv.cpp"
         "os_code/core/window_env/Canvas.cpp"
        "os_code/core/window_env/PsramBackgroundTile.cpp"
+       "os_code/core/window_env/AnimWorld.cpp" 
 
 # rshell core 
   "os_code/core/rShell/rshell_appFramework.cpp" 
@@ -50,9 +54,12 @@ idf_component_register(
 "sss/shared_state.c"
 
         # Applications
+        		#utils
         "os_code/applications/watch/MS_watchapp.cpp"
         "os_code/applications/menu/app_menu.cpp"
 	"os_code/applications/fileviewer/MS_file_viewer.cpp"
+			#fun apps
+			"os_code/applications/pong/MS_pongapp.cpp" #pong gap deez nuts
 
 
 

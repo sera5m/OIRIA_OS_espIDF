@@ -19,7 +19,15 @@ Canvas::Canvas(const CanvasCfg& cfg)
     , m_shapeBuffer(nullptr)
     , m_maxShapes(FB_MAX_SHAPES)
     , m_dirty(true)
+    , m_world(nullptr)
+    , m_auto_draw_world(true)
 {
+    // Default camera: world (0,0) → canvas top-left, 1:1 pixels
+    m_cam.origin = {0.f, 0.f};
+    m_cam.scale = 1.f;
+    m_cam.offset_x = cfg.x;
+    m_cam.offset_y = cfg.y;
+
     m_shapeBuffer = (fb_shape_buffer_t*)heap_caps_malloc(
         sizeof(fb_shape_buffer_t),
         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
@@ -64,83 +72,118 @@ void Canvas::Update(float deltaTime) {
 }
 
 void Canvas::Draw() {
-    if (!m_shapeBuffer || !m_parentWindow || !m_parentWindow->IsWindowShown) {
+    if (!m_parentWindow || !m_parentWindow->IsWindowShown) {
         return;
     }
 
-    for (uint16_t i = 0; i < m_shapeBuffer->count; i++) {
-        fb_shape_t* shape = &m_shapeBuffer->shapes[i];
-        if (!shape->shown) continue;
+    // 1) Static shape buffer (UI chrome, overlays, etc.)
+    if (m_shapeBuffer) {
+        for (uint16_t i = 0; i < m_shapeBuffer->count; i++) {
+            fb_shape_t* shape = &m_shapeBuffer->shapes[i];
+            if (!shape->shown) continue;
 
-        s_bounds_16u screenBounds;
-        int sx1, sy1, sx2, sy2;
+            s_bounds_16u screenBounds;
+            int sx1, sy1, sx2, sy2;
 
-        m_parentWindow->LocalToScreen(shape->bounds.x, shape->bounds.y, sx1, sy1);
-        m_parentWindow->LocalToScreen(
-            shape->bounds.x + shape->bounds.w,
-            shape->bounds.y + shape->bounds.h,
-            sx2, sy2
-        );
+            m_parentWindow->LocalToScreen(shape->bounds.x, shape->bounds.y, sx1, sy1);
+            m_parentWindow->LocalToScreen(
+                shape->bounds.x + shape->bounds.w,
+                shape->bounds.y + shape->bounds.h,
+                sx2, sy2
+            );
 
-        screenBounds.x = sx1;
-        screenBounds.y = sy1;
-        screenBounds.w = sx2 - sx1;
-        screenBounds.h = sy2 - sy1;
+            screenBounds.x = sx1;
+            screenBounds.y = sy1;
+            screenBounds.w = sx2 - sx1;
+            screenBounds.h = sy2 - sy1;
 
-        s_bounds_16u windowBounds = {
-            .x = m_parentWindow->currentPhysX,
-            .y = m_parentWindow->currentPhysY,
-            .w = m_parentWindow->logicalW,
-            .h = m_parentWindow->logicalH
-        };
+            s_bounds_16u windowBounds = {
+                .x = m_parentWindow->currentPhysX,
+                .y = m_parentWindow->currentPhysY,
+                .w = m_parentWindow->logicalW,
+                .h = m_parentWindow->logicalH
+            };
 
-        screenBounds = ClampBoundsToParent(screenBounds, windowBounds);
-        if (screenBounds.w <= 0 || screenBounds.h <= 0) continue;
+            screenBounds = ClampBoundsToParent(screenBounds, windowBounds);
+            if (screenBounds.w <= 0 || screenBounds.h <= 0) continue;
 
-        switch ((fb_shape_type)shape->type) {
-            case SHAPE_RECT:
-                fb_rect(true, 1,
-                        screenBounds.x, screenBounds.y,
-                        screenBounds.w, screenBounds.h,
-                        shape->color, shape->color);
-                break;
+            switch ((fb_shape_type)shape->type) {
+                case SHAPE_RECT:
+                    fb_rect(true, 1,
+                            screenBounds.x, screenBounds.y,
+                            screenBounds.w, screenBounds.h,
+                            shape->color, shape->color);
+                    break;
 
-            case SHAPE_LINE:
-                fb_line(screenBounds.x, screenBounds.y,
-                        screenBounds.x + screenBounds.w,
-                        screenBounds.y + screenBounds.h,
-                        shape->color);
-                break;
+                case SHAPE_LINE:
+                    fb_line(screenBounds.x, screenBounds.y,
+                            screenBounds.x + screenBounds.w,
+                            screenBounds.y + screenBounds.h,
+                            shape->color);
+                    break;
 
-            case SHAPE_CIRCLE: {
-                int radius = screenBounds.w / 2;
-                fb_circle(screenBounds.x + radius,
-                          screenBounds.y + radius,
-                          radius, plain, shape->color, shape->color);
-                break;
+                case SHAPE_CIRCLE: {
+                    int radius = screenBounds.w / 2;
+                    fb_circle(screenBounds.x + radius,
+                              screenBounds.y + radius,
+                              radius, plain, shape->color, shape->color);
+                    break;
+                }
+
+                case SHAPE_BITMAP:
+                    if (shape->data) {
+                        fb_draw_bitmap(screenBounds.x, screenBounds.y,
+                                       screenBounds.w, screenBounds.h,
+                                       (const uint16_t*)shape->data);
+                    }
+                    break;
+
+                case SHAPE_TEXT:
+                    if (shape->data) {
+                        fb_draw_text(0, screenBounds.x, screenBounds.y,
+                                     (const char*)shape->data,
+                                     shape->color, 1, 0, true, 0x0000,
+                                     screenBounds.w, ft_AVR_classic_6x8);
+                    }
+                    break;
+
+                default:
+                    break;
             }
-
-            case SHAPE_BITMAP:
-                if (shape->data) {
-                    fb_draw_bitmap(screenBounds.x, screenBounds.y,
-                                   screenBounds.w, screenBounds.h,
-                                   (const uint16_t*)shape->data);
-                }
-                break;
-
-            case SHAPE_TEXT:
-                if (shape->data) {
-                    fb_draw_text(0, screenBounds.x, screenBounds.y,
-                                 (const char*)shape->data,
-                                 shape->color, 1, 0, true, 0x0000,
-                                 screenBounds.w, ft_AVR_classic_6x8);
-                }
-                break;
-
-            default:
-                break;
         }
     }
+
+    // 2) AnimWorld layer (pong / 2048 / etc.)
+        // 2) AnimWorld layer (pong / 2048 / etc.)
+    if (m_auto_draw_world && m_world) {
+        // Keep camera offset in sync with canvas position unless caller overrode
+        AwCamera cam = m_cam;
+        if (cam.offset_x == 0 && cam.offset_y == 0) {
+            cam.offset_x = m_cfg.x;
+            cam.offset_y = m_cfg.y;
+        }
+        // Trampoline so AnimWorld never needs a complete Window type.
+        auto l2s = [](void* ctx, int lx, int ly, int& sx, int& sy) {
+            static_cast<Window*>(ctx)->LocalToScreen(lx, ly, sx, sy);
+        };
+        m_world->draw(cam, l2s, m_parentWindow);
+    }
+}
+
+void Canvas::AttachWorld(AnimWorld* world) {
+    m_world = world;
+    m_dirty = true;
+    if (m_parentWindow) m_parentWindow->dirty = true;
+}
+
+void Canvas::DetachWorld() {
+    m_world = nullptr;
+    m_dirty = true;
+}
+
+void Canvas::SetWorldCamera(const AwCamera& cam) {
+    m_cam = cam;
+    m_dirty = true;
 }
 
 // ---------------------------------------------------------------------------
