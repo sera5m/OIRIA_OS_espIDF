@@ -9,18 +9,14 @@
 #include <cctype>
 #include <algorithm>
 #include "os_code/middle_layer/input/input_handler.hpp"
+#include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
 #include "hardware/drivers/lcd/st7789v2/lcDriver.h"
 
-// If you have an ESP JPEG decoder component, expose something like:
-//   bool jpeg_decode_file(const char* path, uint16_t* fb, int fb_w, int fb_h);
-// and link it. Stub falls back to a placeholder message.
 extern "C" bool jpeg_decode_file(const char* path, uint16_t* fb, int fb_w, int fb_h) __attribute__((weak));
 extern "C" bool bmp_decode_file(const char* path, uint16_t* fb, int fb_w, int fb_h) __attribute__((weak));
 
 static const char* TAG = "File_Viewer_App";
 
-// ===================================================================
-// Constructor / lifecycle
 // ===================================================================
 
 File_Viewer_App::File_Viewer_App(const ApplicationConfig& cfg)
@@ -71,8 +67,29 @@ void File_Viewer_App::on_stop()
 void File_Viewer_App::on_pause()  {}
 void File_Viewer_App::on_resume() { on_draw(); }
 
-void File_Viewer_App::suspend()     { on_pause(); }
-void File_Viewer_App::force_close() { on_stop(); stop_task(); }
+// ===================================================================
+// Markup-safe text (prevents tokenizer eating filenames / file bodies)
+// ===================================================================
+
+void File_Viewer_App::append_safe(std::string& out, const std::string& s)
+{
+    for (char c : s) {
+        if (c == '<') {
+            // Break potential <| sequences; show a stand-in
+            out += "{lt}";
+        } else if (c == '>') {
+            out += "{gt}";
+        } else if (c == '\r') {
+            continue;
+        } else if (c == '\n') {
+            out += "<|n|>";
+        } else if ((unsigned char)c < 0x20 && c != '\t') {
+            out.push_back('?');
+        } else {
+            out.push_back(c);
+        }
+    }
+}
 
 // ===================================================================
 // Path helpers
@@ -102,7 +119,7 @@ bool File_Viewer_App::path_is_dir(const std::string& path) const
 }
 
 // ===================================================================
-// Directory listing (real VFS)
+// Directory listing
 // ===================================================================
 
 void File_Viewer_App::refresh_directory(const std::string& path)
@@ -111,7 +128,8 @@ void File_Viewer_App::refresh_directory(const std::string& path)
     selected_index = 0;
     scroll_offset  = 0;
 
-    // Always offer parent
+    // Synthetic top entries
+    directory_entries.push_back(DirEntry{ "[Create]", false, OFV_TXT });
     directory_entries.push_back(DirEntry{ "..", true, OFV_TXT });
 
     DIR* dir = opendir(path.c_str());
@@ -133,7 +151,6 @@ void File_Viewer_App::refresh_directory(const std::string& path)
         DirEntry e;
         e.name = n;
 
-        // Prefer stat – d_type is not always reliable on FAT
         struct stat st{};
         if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
             e.is_dir = true;
@@ -161,24 +178,24 @@ void File_Viewer_App::refresh_directory(const std::string& path)
 }
 
 // ===================================================================
-// Colors / labels by OFV type
+// Colors / labels
 // ===================================================================
 
 uint16_t File_Viewer_App::color_for_type(OFV_Mode m) const
 {
     switch (m) {
-        case OFV_TXT:              return 0xFFFF; // white
-        case OFV_WEBPAGE:          return 0x07FF; // cyan
-        case OFV_IMG:              return 0xF81F; // magenta
-        case OFV_AUDIO:            return 0xFFE0; // yellow
-        case OFV_VIDEO:            return 0xF800; // red
-        case OFV_STREAMED_AUDIO:   return 0xFD20; // orange
+        case OFV_TXT:              return 0xFFFF;
+        case OFV_WEBPAGE:          return 0x07FF;
+        case OFV_IMG:              return 0xF81F;
+        case OFV_AUDIO:            return 0xFFE0;
+        case OFV_VIDEO:            return 0xF800;
+        case OFV_STREAMED_AUDIO:   return 0xFD20;
         case OFV_STREAMED_VIDEO:   return 0xF800;
-        case OFV_3DOBJ:            return 0x07E0; // green
+        case OFV_3DOBJ:            return 0x07E0;
         case OFV_XR:               return 0xAFE5;
         case OFV_CANVAS_ANIM_REPLAY: return 0x8410;
         case OFV_RAW:              return 0xAD55;
-        case OFV_RSHELL_SPECIAL:   return 0x001F; // blue
+        case OFV_RSHELL_SPECIAL:   return 0x001F;
         default:                   return 0xC618;
     }
 }
@@ -199,7 +216,7 @@ const char* File_Viewer_App::label_for_type(OFV_Mode m) const
 }
 
 // ===================================================================
-// Text file load / save / create
+// Text load / save
 // ===================================================================
 
 bool File_Viewer_App::load_text_file(const std::string& path)
@@ -213,7 +230,6 @@ bool File_Viewer_App::load_text_file(const std::string& path)
     long sz = ftell(f);
     fseek(f, 0, SEEK_SET);
     if (sz < 0) sz = 0;
-    // Cap at 64 KB for safety on this device
     if (sz > 64 * 1024) sz = 64 * 1024;
 
     text_buffer.assign((size_t)sz, '\0');
@@ -223,7 +239,8 @@ bool File_Viewer_App::load_text_file(const std::string& path)
     }
     fclose(f);
     text_path   = path;
-    text_cursor = (int)text_buffer.size();
+    text_cursor = 0;
+    text_view_origin = 0;
     text_dirty  = false;
     ESP_LOGI(TAG, "Loaded text %s (%d bytes)", path.c_str(), (int)text_buffer.size());
     return true;
@@ -236,69 +253,68 @@ bool File_Viewer_App::save_text_file(const std::string& path)
         ESP_LOGE(TAG, "save fopen('%s') failed", path.c_str());
         return false;
     }
-    if (!text_buffer.empty()) {
+    if (!text_buffer.empty())
         fwrite(text_buffer.data(), 1, text_buffer.size(), f);
-    }
     fclose(f);
     text_dirty = false;
     ESP_LOGI(TAG, "Saved %s (%d bytes)", path.c_str(), (int)text_buffer.size());
     return true;
 }
 
-bool File_Viewer_App::create_text_file(const std::string& path)
+bool File_Viewer_App::create_file_from_cells()
 {
-    FILE* f = fopen(path.c_str(), "wb");
-    if (!f) return false;
+    if (create_name.empty()) create_name = "file";
+    const char* ext = kExts[create_ext_index % kExtCount];
+    std::string full = join_path(current_path, create_name + ext);
+
+    FILE* f = fopen(full.c_str(), "wb");
+    if (!f) {
+        ESP_LOGE(TAG, "create failed: %s", full.c_str());
+        return false;
+    }
     const char* seed = "# new file\n";
     fwrite(seed, 1, strlen(seed), f);
     fclose(f);
+    ESP_LOGI(TAG, "Created %s", full.c_str());
     return true;
 }
 
 // ===================================================================
-// Image view – decode from disk into framebuffer (no full RAM copy)
+// Image
 // ===================================================================
 
 bool File_Viewer_App::show_image(const std::string& path)
 {
     image_path = path;
     const char* ext = OFV_GetExtension(path.c_str());
-
-    // Clear to black first
     fb_clear(0x0000);
 
     bool ok = false;
     if (strcasecmp(ext, ".bmp") == 0) {
         if (bmp_decode_file)
             ok = bmp_decode_file(path.c_str(), framebuffer, SCREEN_W, SCREEN_H);
-        else
-            ESP_LOGW(TAG, "bmp_decode_file not linked");
     } else if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0) {
         if (jpeg_decode_file)
             ok = jpeg_decode_file(path.c_str(), framebuffer, SCREEN_W, SCREEN_H);
-        else
-            ESP_LOGW(TAG, "jpeg_decode_file not linked – provide weak override");
     }
 
     if (!ok) {
-        // Fallback message drawn as text so the user still sees something
         std::string msg =
-            "<|size=2|><|color=0xF800|>Image decode unavailable<|n|>"
-            "<|size=1|>" + path + "<|n|>"
-            "<|color=0x8888|>Link jpeg_decode_file / bmp_decode_file";
+            "<|size=1|><|color=0xF800|>Image decode unavailable<|n|>";
+        append_safe(msg, path);
+        msg += "<|n|><|color=0x8888|>Link jpeg/bmp decoder";
         fv_app_window->SetText(msg.c_str());
         fv_app_window->dirty = true;
         return false;
     }
 
-    // Mark whole screen dirty so the display task pushes it
     g_display_dirty = true;
     if (core2TaskHandle) xTaskNotifyGive(core2TaskHandle);
     return true;
 }
 
 // ===================================================================
-// Open selected entry
+// Open
 // ===================================================================
 
 void File_Viewer_App::open_selected()
@@ -307,6 +323,16 @@ void File_Viewer_App::open_selected()
         return;
 
     const DirEntry& e = directory_entries[selected_index];
+
+    if (e.name == "[Create]") {
+        create_cell = FCELL_NAME;
+        create_name = "note";
+        create_ext_index = 0;
+        create_name_cursor = (int)create_name.size() - 1;
+        if (create_name_cursor < 0) create_name_cursor = 0;
+        current_mode = FV_CREATE;
+        return;
+    }
 
     if (e.name == "..") {
         current_path = parent_path(current_path);
@@ -328,16 +354,13 @@ void File_Viewer_App::open_selected()
         case OFV_TXT:
         case OFV_WEBPAGE:
         case OFV_RSHELL_SPECIAL:
-            if (load_text_file(full)) {
+            if (load_text_file(full))
                 current_mode = FV_VIEW_TEXT;
-            }
             break;
-
         case OFV_IMG:
             current_mode = FV_VIEW_IMAGE;
             show_image(full);
             break;
-
         default:
             ESP_LOGI(TAG, "No handler for type %d (%s)", (int)e.type, e.name.c_str());
             break;
@@ -353,9 +376,10 @@ void File_Viewer_App::draw_browser()
     std::string text;
     text.reserve(1024);
 
-    text += "<|size=2|><|color=0x07FF|>Files<|n|>";
-    text += "<|size=1|><|color=0x8410|>";
-    text += current_path;
+    // Fixed size=1 for the whole browser list (size leak was the main bug)
+    text += "<|size=1|><|color=0x07FF|>Files  ";
+    text += "<|color=0x8410|>";
+    append_safe(text, current_path);
     text += "<|n|>";
 
     int start = scroll_offset;
@@ -365,37 +389,36 @@ void File_Viewer_App::draw_browser()
         const DirEntry& e = directory_entries[i];
         bool sel = (i == selected_index);
 
-        if (sel) text += "<|color=0xFFE0|>";
-        else if (e.is_dir) text += "<|color=0x07E0|>";
-        else text += "<|color=";
-        if (!sel && !e.is_dir) {
-            char cbuf[16];
-            snprintf(cbuf, sizeof(cbuf), "0x%04X", (unsigned)color_for_type(e.type));
+        if (sel)
+            text += "<|color=0xFFE0|>";
+        else if (e.name == "[Create]")
+            text += "<|color=0x07E0|>";
+        else if (e.is_dir)
+            text += "<|color=0x07E0|>";
+        else {
+            char cbuf[24];
+            snprintf(cbuf, sizeof(cbuf), "<|color=0x%04X|>",
+                     (unsigned)color_for_type(e.type));
             text += cbuf;
-            text += "|>";
-        } else if (!sel && e.is_dir) {
-            /* already set */
-        } else {
-            /* selected already set */
         }
 
         text += sel ? "> " : "  ";
 
-        if (e.is_dir) {
+        if (e.name == "[Create]") {
+            text += "[+] Create file";
+        } else if (e.is_dir) {
             text += "[";
-            text += e.name;
+            append_safe(text, e.name);
             text += "]";
         } else {
-            text += e.name;
-            text += " <|size=1|>";
+            append_safe(text, e.name);
+            text += " ";
             text += label_for_type(e.type);
-            text += "<|size=2|>";
         }
         text += "<|n|>";
     }
 
-    text += "<|size=1|><|color=0x8888|>";
-    text += "UP/DN  ENTER=open  HOLD-ENT=new.txt  BACK=up/exit";
+    text += "<|color=0x8888|>UP/DN ENTER  HOLD-ENT=create  BACK";
 
     fv_app_window->SetText(text.c_str());
     fv_app_window->dirty = true;
@@ -404,33 +427,101 @@ void File_Viewer_App::draw_browser()
 void File_Viewer_App::draw_text_view()
 {
     std::string text;
-    text.reserve(text_buffer.size() + 128);
+    text.reserve(kTextWindowChars * 2 + 128);
 
     text += "<|size=1|><|color=0x07FF|>";
-    text += text_path;
+    append_safe(text, text_path);
     if (text_dirty) text += " *";
-    text += "<|n|><|color=0xFFFF|>";
+    text += "<|n|>";
 
-    // Show a window of the buffer (simple – full small files)
-    // Escape '<' so markup parser doesn't choke on source code
-    for (char c : text_buffer) {
-        if (c == '<') text += "<<";
-        else text += c;
+    // Keep cursor in window
+    if (text_cursor < text_view_origin)
+        text_view_origin = text_cursor;
+    if (text_cursor >= text_view_origin + kTextWindowChars)
+        text_view_origin = text_cursor - kTextWindowChars + 1;
+    if (text_view_origin < 0) text_view_origin = 0;
+
+    int start = text_view_origin;
+    int end   = std::min((int)text_buffer.size(), start + kTextWindowChars);
+
+    text += "<|color=0xFFFF|>";
+
+    // Draw window with a box around the cursor character (classic editor style)
+    for (int i = start; i < end; ++i) {
+        char c = text_buffer[i];
+        bool at = (i == text_cursor);
+
+        if (at) text += "<|color=0x0000|><|color=0xFFE0|>";  // highlight via bright bg-ish color
+        // MWenv has no true bg-per-glyph; use brackets as the "box"
+        if (at) text += "[";
+
+        if (c == '<') text += "{lt}";
+        else if (c == '>') text += "{gt}";
+        else if (c == '\n') text += (at ? "\\n" : "<|n|>");
+        else if (c == '\r') continue;
+        else if ((unsigned char)c < 0x20) text.push_back('?');
+        else text.push_back(c);
+
+        if (at) {
+            text += "]";
+            text += "<|color=0xFFFF|>";
+        }
     }
 
-    text += "<|n|><|color=0x8888|>HOLD-ENT=save  BACK=close";
+    // Cursor past end
+    if (text_cursor >= (int)text_buffer.size()) {
+        text += "<|color=0xFFE0|>[_]<|color=0xFFFF|>";
+    }
+
+    char foot[64];
+    snprintf(foot, sizeof(foot),
+             "<|n|><|color=0x8888|>pos %d/%d  L/R move  HOLD-ENT=save  BACK",
+             text_cursor, (int)text_buffer.size());
+    text += foot;
 
     fv_app_window->SetText(text.c_str());
     fv_app_window->dirty = true;
 }
 
-void File_Viewer_App::draw_create_txt()
+void File_Viewer_App::draw_create()
 {
-    std::string text =
-        "<|size=2|><|color=0xFFFF|>New text file<|n|>"
-        "<|size=2|><|color=0xFDFC|>" + new_name_buf + "_.txt<|n|>"
-        "<|size=1|><|color=0x8888|>"
-        "UP/DN=char  ENTER=next letter  HOLD-ENT=create  BACK=cancel";
+    const char* ext = kExts[create_ext_index % kExtCount];
+
+    auto cell = [&](FV_CreateCell which, const std::string& label, const std::string& value) {
+        std::string s;
+        if (create_cell == which)
+            s += "<|color=0xFFE0|>[";
+        else
+            s += "<|color=0xAD55|> ";
+        s += label;
+        s += ":";
+        // name cell: box the active character
+        if (which == FCELL_NAME && create_cell == FCELL_NAME) {
+            for (int i = 0; i < (int)value.size(); ++i) {
+                if (i == create_name_cursor) s += "[";
+                s.push_back(value[i]);
+                if (i == create_name_cursor) s += "]";
+            }
+            if (value.empty()) s += "[_]";
+        } else {
+            append_safe(s, value);
+        }
+        if (create_cell == which) s += "]";
+        else s += " ";
+        s += "<|n|>";
+        return s;
+    };
+
+    std::string text = "<|size=1|><|color=0x07FF|>Create file<|n|>";
+    text += cell(FCELL_DIR,  "dir ", current_path);
+    text += cell(FCELL_NAME, "name", create_name);
+    text += cell(FCELL_EXT,  "ext ", ext);
+
+    text += "<|n|><|color=0xFFFF|>=> ";
+    append_safe(text, join_path(current_path, create_name + ext));
+    text += "<|n|>";
+    text += "<|color=0x8888|>L/R=cell  U/D=edit  ENT=add-char  HOLD-ENT=make  BACK";
+
     fv_app_window->SetText(text.c_str());
     fv_app_window->dirty = true;
 }
@@ -438,21 +529,18 @@ void File_Viewer_App::draw_create_txt()
 void File_Viewer_App::on_draw()
 {
     if (!fv_app_window) return;
-
     switch (current_mode) {
         case FV_MAIN:       draw_browser();   break;
         case FV_VIEW_TEXT:  draw_text_view(); break;
-        case FV_CREATE_TXT: draw_create_txt(); break;
-        case FV_VIEW_IMAGE:
-            // Image already blitted to framebuffer; keep a thin caption
-            {
-                std::string cap =
-                    "<|size=1|><|color=0xFFFF|>" + image_path +
-                    "<|n|><|color=0x8888|>BACK=close";
-                fv_app_window->SetText(cap.c_str());
-                fv_app_window->dirty = true;
-            }
+        case FV_CREATE:     draw_create();    break;
+        case FV_VIEW_IMAGE: {
+            std::string cap = "<|size=1|><|color=0xFFFF|>";
+            append_safe(cap, image_path);
+            cap += "<|n|><|color=0x8888|>BACK=close";
+            fv_app_window->SetText(cap.c_str());
+            fv_app_window->dirty = true;
             break;
+        }
         default:
             draw_browser();
             break;
@@ -460,7 +548,43 @@ void File_Viewer_App::on_draw()
 }
 
 // ===================================================================
-// Tick
+// Create cell editing
+// ===================================================================
+
+void File_Viewer_App::cycle_name_char(int delta)
+{
+    if (create_name.empty()) {
+        create_name = "a";
+        create_name_cursor = 0;
+        return;
+    }
+    if (create_name_cursor < 0) create_name_cursor = 0;
+    if (create_name_cursor >= (int)create_name.size())
+        create_name_cursor = (int)create_name.size() - 1;
+
+    // Allowed: a-z 0-9 _
+    static const char alphabet[] =
+        "abcdefghijklmnopqrstuvwxyz0123456789_";
+    const int alen = (int)sizeof(alphabet) - 1;
+
+    char& c = create_name[create_name_cursor];
+    int idx = 0;
+    for (int i = 0; i < alen; ++i) {
+        if (alphabet[i] == c) { idx = i; break; }
+    }
+    idx = (idx + delta) % alen;
+    if (idx < 0) idx += alen;
+    c = alphabet[idx];
+}
+
+void File_Viewer_App::cycle_ext(int delta)
+{
+    create_ext_index = (create_ext_index + delta) % kExtCount;
+    if (create_ext_index < 0) create_ext_index += kExtCount;
+}
+
+// ===================================================================
+// Tick / input
 // ===================================================================
 
 void File_Viewer_App::tick_app(uint32_t delta_ms)
@@ -474,10 +598,6 @@ void File_Viewer_App::tick_app(uint32_t delta_ms)
     }
 }
 
-// ===================================================================
-// Input
-// ===================================================================
-
 void File_Viewer_App::receive_event_input(const void* event)
 {
     if (!event) return;
@@ -486,9 +606,11 @@ void File_Viewer_App::receive_event_input(const void* event)
     // ---- Hold ENTER ----
     if (ev->action == KeyAction::Hold && ev->key == KEY_ENTER) {
         if (current_mode == FV_MAIN) {
-            // Start create-txt flow
-            new_name_buf = "note";
-            current_mode = FV_CREATE_TXT;
+            create_cell = FCELL_NAME;
+            create_name = "note";
+            create_ext_index = 0;
+            create_name_cursor = (int)create_name.size() - 1;
+            current_mode = FV_CREATE;
             on_draw();
             return;
         }
@@ -497,14 +619,14 @@ void File_Viewer_App::receive_event_input(const void* event)
             on_draw();
             return;
         }
-        if (current_mode == FV_CREATE_TXT) {
-            std::string full = join_path(current_path, new_name_buf + ".txt");
-            if (create_text_file(full)) {
+        if (current_mode == FV_CREATE) {
+            if (create_file_from_cells()) {
                 refresh_directory(current_path);
                 current_mode = FV_MAIN;
-                // Jump selection to the new file if present
+                // Select the new file if present
+                std::string want = create_name + kExts[create_ext_index % kExtCount];
                 for (size_t i = 0; i < directory_entries.size(); ++i) {
-                    if (directory_entries[i].name == new_name_buf + ".txt") {
+                    if (directory_entries[i].name == want) {
                         selected_index = (int)i;
                         break;
                     }
@@ -515,7 +637,8 @@ void File_Viewer_App::receive_event_input(const void* event)
         }
     }
 
-    if (ev->action != KeyAction::Tap) return;
+    if (ev->action != KeyAction::Tap && ev->action != KeyAction::Hold)
+        return;
 
     switch (current_mode) {
 
@@ -555,13 +678,41 @@ void File_Viewer_App::receive_event_input(const void* event)
         break;
 
     case FV_VIEW_TEXT:
-        if (ev->key == KEY_BACK) {
-            text_buffer.clear();
-            text_path.clear();
-            current_mode = FV_MAIN;
-            on_draw();
+        switch (ev->key) {
+            case KEY_LEFT:
+                if (text_cursor > 0) text_cursor--;
+                on_draw();
+                break;
+            case KEY_RIGHT:
+                if (text_cursor < (int)text_buffer.size()) text_cursor++;
+                on_draw();
+                break;
+            case KEY_UP:
+                // Jump ~one "line" back (to previous \n or window)
+                {
+                    int i = text_cursor - 1;
+                    while (i > 0 && text_buffer[i] != '\n') --i;
+                    text_cursor = std::max(0, i);
+                    on_draw();
+                }
+                break;
+            case KEY_DOWN:
+                {
+                    int i = text_cursor;
+                    while (i < (int)text_buffer.size() && text_buffer[i] != '\n') ++i;
+                    if (i < (int)text_buffer.size()) ++i;
+                    text_cursor = i;
+                    on_draw();
+                }
+                break;
+            case KEY_BACK:
+                text_buffer.clear();
+                text_path.clear();
+                current_mode = FV_MAIN;
+                on_draw();
+                break;
+            default: break;
         }
-        // Simple text editing can be expanded later (insert char on encoder, etc.)
         break;
 
     case FV_VIEW_IMAGE:
@@ -572,39 +723,53 @@ void File_Viewer_App::receive_event_input(const void* event)
         }
         break;
 
-    case FV_CREATE_TXT:
+    case FV_CREATE:
         switch (ev->key) {
-            case KEY_UP: {
-                // Cycle last character A-Z / 0-9 / _
-                if (new_name_buf.empty()) new_name_buf = "a";
-                char& c = new_name_buf.back();
-                if (c >= 'a' && c < 'z') c++;
-                else if (c == 'z') c = '0';
-                else if (c >= '0' && c < '9') c++;
-                else if (c == '9') c = '_';
-                else c = 'a';
+            case KEY_LEFT:
+                create_cell = (FV_CreateCell)((create_cell + FCELL_COUNT - 1) % FCELL_COUNT);
                 on_draw();
                 break;
-            }
-            case KEY_DOWN: {
-                if (new_name_buf.empty()) new_name_buf = "a";
-                char& c = new_name_buf.back();
-                if (c > 'a' && c <= 'z') c--;
-                else if (c == 'a') c = '_';
-                else if (c == '_') c = '9';
-                else if (c > '0' && c <= '9') c--;
-                else c = 'z';
+            case KEY_RIGHT:
+                create_cell = (FV_CreateCell)((create_cell + 1) % FCELL_COUNT);
                 on_draw();
                 break;
-            }
+            case KEY_UP:
+                if (create_cell == FCELL_NAME) cycle_name_char(+1);
+                else if (create_cell == FCELL_EXT) cycle_ext(+1);
+                // dir cell is read-only (current folder)
+                on_draw();
+                break;
+            case KEY_DOWN:
+                if (create_cell == FCELL_NAME) cycle_name_char(-1);
+                else if (create_cell == FCELL_EXT) cycle_ext(-1);
+                on_draw();
+                break;
             case KEY_ENTER:
-                // Append a new letter to the name
-                if (new_name_buf.size() < 24) new_name_buf.push_back('a');
+                // Append a character to the name (+), or advance name cursor
+                if (create_cell == FCELL_NAME) {
+                    if (ev->action == KeyAction::Hold) {
+                        // already handled above
+                    } else {
+                        // + char
+                        if (create_name.size() < 24) {
+                            create_name.push_back('a');
+                            create_name_cursor = (int)create_name.size() - 1;
+                        }
+                    }
+                }
                 on_draw();
                 break;
             case KEY_BACK:
-                current_mode = FV_MAIN;
-                on_draw();
+                // If name cell and length>1, delete last char (minus); else cancel
+                if (create_cell == FCELL_NAME && create_name.size() > 1) {
+                    create_name.pop_back();
+                    if (create_name_cursor >= (int)create_name.size())
+                        create_name_cursor = (int)create_name.size() - 1;
+                    on_draw();
+                } else {
+                    current_mode = FV_MAIN;
+                    on_draw();
+                }
                 break;
             default: break;
         }
@@ -614,10 +779,6 @@ void File_Viewer_App::receive_event_input(const void* event)
         break;
     }
 }
-
-// ===================================================================
-// Registration
-// ===================================================================
 
 void register_fileviewer()
 {

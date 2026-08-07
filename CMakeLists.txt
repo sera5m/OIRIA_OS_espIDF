@@ -58,10 +58,18 @@ idf_component_register(
         "os_code/applications/watch/MS_watchapp.cpp"
         "os_code/applications/menu/app_menu.cpp"
 	"os_code/applications/fileviewer/MS_file_viewer.cpp"
+	
+	
+	#appdepos
+	"os_code/applications/browser/html_to_mwenv.cpp"
+	
+	#experemental
+	"os_code/applications/browser/MS_browserapp.cpp"
+	
 			#fun apps
 			"os_code/applications/pong/MS_pongapp.cpp" #pong gap deez nuts
-
-
+			"os_code/applications/snake/MS_snakeapp.cpp"
+			"os_code/applications/2048/MS_2048app.cpp"
 
 
 #"os_code/core/rShell/streams/rshell_filter.cpp"

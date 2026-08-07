@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <algorithm>
+
+#include "code_stuff/helperfunctions.hpp"
 #include "os_code/middle_layer/input/hid_t.h"
 #include "os_code/middle_layer/input/input_handler.hpp"
 #include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
@@ -90,12 +92,16 @@ void PongApp::on_start() {
     score_ai = 0;
     running = false;
     paused = false;
+    game_stats::load(kStatsName, stats);
     serve_ball(true);
     update_score_text();
     on_draw();
 }
 
 void PongApp::on_stop() {
+    if (score_player > 0 || score_ai > 0) {
+        game_stats::record_round(kStatsName, stats, (uint32_t)score_player);
+    }
     if (pong_canvas) {
         pong_canvas->DetachWorld();
         pong_canvas.reset();
@@ -194,6 +200,10 @@ void PongApp::serve_ball(bool toward_player) {
 }
 
 void PongApp::reset_round() {
+    // End previous rally streak → count as a played game
+    if (score_player > 0 || score_ai > 0) {
+        game_stats::record_round(kStatsName, stats, (uint32_t)score_player);
+    }
     score_player = 0;
     score_ai = 0;
     hold_up = hold_down = false;
@@ -352,6 +362,11 @@ void PongApp::check_goals() {
     if (b->world_aabb_max_x < 0.f) {
         score_player++;
         ESP_LOGI(TAG, "Player scores! %d – %d", score_player, score_ai);
+        // Track player points as the "score" for high-score table
+        if ((uint32_t)score_player > stats.high_score) {
+            stats.high_score = (uint32_t)score_player;
+            game_stats::save(kStatsName, stats);
+        }
         running = false;
         serve_ball(false);   // serve toward AI
         update_score_text();
@@ -396,11 +411,12 @@ void PongApp::draw_debug_prediction() {
 
 void PongApp::update_score_text() {
     if (!pong_window) return;
-    char buf[128];
+    char buf[192];
     snprintf(buf, sizeof(buf),
-             "<|size=2|><|color=0xF800|>AI %d<|color=0xFFFF|>  –  <|color=0x07E0|>%d YOU<|n|>"
+             "<|size=2|><|color=0xF800|>AI %d<|color=0xFFFF|>  –  <|color=0x07E0|>%d YOU"
+             "  <|color=0x8888|>HI %u<|n|>"
              "<|size=1|><|color=0x8888|>UP/DN=paddle  ENTER=pause  BACK=menu",
-             score_ai, score_player);
+             score_ai, score_player, (unsigned)stats.high_score);
     pong_window->SetText(buf);
 }
 
@@ -409,7 +425,10 @@ void PongApp::update_score_text() {
 // ---------------------------------------------------------------------------
 
 void PongApp::tick_app(uint32_t delta_ms) {
-    if (!world || paused) return;
+    if (!world || paused) {
+        if (pong_window) pong_window->dirty = true;
+        return;
+    }
 
     float dt = delta_ms / 1000.f;
     if (dt > 0.05f) dt = 0.05f;
@@ -433,25 +452,54 @@ void PongApp::tick_app(uint32_t delta_ms) {
                 if (b->velocity.y > 0.f) b->velocity.y = -b->velocity.y;
                 world->update_world_aabb(*b);
             }
+
+            // Reflect off paddles (engine pair resolve can miss fast tunnels)
+            auto overlaps = [](const AwObject& a, const AwObject& p) {
+                return !(a.world_aabb_max_x < p.world_aabb_min_x ||
+                         a.world_aabb_min_x > p.world_aabb_max_x ||
+                         a.world_aabb_max_y < p.world_aabb_min_y ||
+                         a.world_aabb_min_y > p.world_aabb_max_y);
+            };
+            auto bounce_paddle = [&](uint16_t pid, bool player_side) {
+                AwObject* p = world->get(pid);
+                if (!p || !b) return;
+                if (!overlaps(*b, *p)) return;
+                // Only bounce when moving toward this paddle
+                if (player_side && b->velocity.x <= 0.f) return;
+                if (!player_side && b->velocity.x >= 0.f) return;
+
+                b->velocity.x = -b->velocity.x;
+                // English from hit offset
+                float rel = (b->pos.y - p->pos.y) / (paddle_hh + ball_r);
+                if (rel > 1.f) rel = 1.f;
+                if (rel < -1.f) rel = -1.f;
+                b->velocity.y += rel * 60.f;
+                // Nudge out of paddle
+                if (player_side)
+                    b->pos.x = p->world_aabb_min_x - ball_r - 0.5f;
+                else
+                    b->pos.x = p->world_aabb_max_x + ball_r + 0.5f;
+                world->update_world_aabb(*b);
+            };
+            bounce_paddle(player_id, true);
+            bounce_paddle(ai_id, false);
         }
 
         check_goals();
     }
 
-    // Mark dirty so WindowManager redraws
+    // Force full window redraw every tick so canvas sprites stay on screen
     if (pong_window) pong_window->dirty = true;
 }
 
 void PongApp::on_draw() {
     if (!pong_window) return;
 
-    // Canvas::Draw (via Window::DrawCanvas) renders world objects.
-    // Prediction lines are overlaid after that.
-    if (pong_canvas) {
-        pong_canvas->Draw();
-    }
-    draw_debug_prediction();
-
+    // Score text only here. Paddles/ball are drawn inside Window::WinDraw()
+    // via DrawCanvas() → Canvas::Draw() → AnimWorld::draw(), AFTER the
+    // solid background fill (so they are not wiped).
+    // Prediction lines are drawn in tick after WM has painted, if needed;
+    // for reliability we also mark dirty so WinDraw runs every frame.
     pong_window->dirty = true;
 }
 

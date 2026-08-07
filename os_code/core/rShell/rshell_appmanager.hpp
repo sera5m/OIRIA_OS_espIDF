@@ -14,7 +14,11 @@
 
 
 
-
+struct RegisteredAppInfo {
+    std::string name;          // manifest.name  (open_app key)
+    std::string display_name;  // shown in UI
+    std::string description;
+};
 
 //forward declarations for other items
 struct InputEvent;
@@ -61,6 +65,7 @@ public:
 
 // In appManager class (public section):
 bool is_app_registered(const std::string& name) const;
+std::vector<RegisteredAppInfo> list_registered_apps() const;
 
 private:
     appManager();

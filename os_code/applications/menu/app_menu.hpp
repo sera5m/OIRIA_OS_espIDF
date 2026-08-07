@@ -3,6 +3,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -12,13 +13,14 @@
 #include "os_code/core/rShell/rshell_appmanager.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "os_code/middle_layer/input/hid_t.h"
-#include "os_code/core/rShell/rshell_appFramework.hpp"
-// Forward declaration
 
-// Forward declarations
 struct InputEvent;
-struct MenuItem;
 
+struct MenuItem {
+    std::string name;       // label in the list
+    std::string app_name;   // open_app() key; empty if submenu / back
+    bool is_submenu = false;
+};
 
 class app_launcher_menu : public AppBase {
 public:
@@ -34,16 +36,24 @@ public:
     void on_resume() override;
     bool appmenu_launch_app(uint16_t index);
 
-
 private:
     std::shared_ptr<Window> menu_window;
     uint16_t selected_index = 0;
-    std::vector<MenuItem>* current_menu;
-    
-    // Error message handling
+    std::vector<MenuItem>* current_menu = nullptr;
+
     std::string error_message;
-    uint32_t error_timestamp = 0; 
+    uint32_t error_timestamp = 0;
+
+    // Hardcoded trees
+    std::vector<MenuItem> main_menu;
+    std::vector<MenuItem> games_menu;
+    std::vector<MenuItem> utils_menu;
+    std::vector<MenuItem> elf_menu;
+    std::vector<MenuItem> misc_menu;
+
+    void build_static_menus();
+    void rebuild_misc_menu();   // pulls from appManager registry
+    bool is_listed_elsewhere(const std::string& app_name) const;
 };
 
-// Registration function - call from main
 void register_menu();

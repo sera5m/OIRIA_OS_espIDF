@@ -212,6 +212,10 @@ void appManager::draw_all() {
     }
 }
 
+
+
+
+
 // =======================================================
 // Focus Management
 // =======================================================
@@ -249,6 +253,25 @@ void appManager::swap_to_app(std::shared_ptr<AppBase> new_app) {
     if (new_app) new_app->resume();
 }
 
+
+std::vector<RegisteredAppInfo> appManager::list_registered_apps() const {
+    std::vector<RegisteredAppInfo> out;
+    out.reserve(app_manifests.size());
+    for (const auto& kv : app_manifests) {
+        RegisteredAppInfo info;
+        info.name = kv.second.name.empty() ? kv.first : kv.second.name;
+        info.display_name = kv.second.display_name.empty()
+                                ? info.name
+                                : kv.second.display_name;
+        info.description = kv.second.description;
+        out.push_back(std::move(info));
+    }
+    std::sort(out.begin(), out.end(),
+              [](const RegisteredAppInfo& a, const RegisteredAppInfo& b) {
+                  return strcasecmp(a.display_name.c_str(), b.display_name.c_str()) < 0;
+              });
+    return out;
+}
 // =======================================================
 // Pool Management
 // =======================================================

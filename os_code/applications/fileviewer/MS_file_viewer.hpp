@@ -12,14 +12,21 @@
 #include "os_code/middle_layer/input/hid_t.h"
 #include "hardware/drivers/sd_card/d_sdc.h"
 
-// App-level navigation state
 typedef enum {
     FV_MAIN = 0,          // browsing a directory
     FV_VIEW_TEXT,         // viewing / editing a text file
     FV_VIEW_IMAGE,        // showing a decoded image
-    FV_CREATE_TXT,        // naming a new .txt file
+    FV_CREATE,            // cell editor: dir | name | ext
     FV_COUNT
 } FV_APP_Mode;
+
+// Which cell is active in FV_CREATE
+typedef enum {
+    FCELL_DIR = 0,
+    FCELL_NAME,
+    FCELL_EXT,
+    FCELL_COUNT
+} FV_CreateCell;
 
 struct DirEntry {
     std::string name;     // basename only
@@ -27,7 +34,7 @@ struct DirEntry {
     OFV_Mode type = OFV_TXT;
 };
 
-struct InputEvent;  // forward
+struct InputEvent;
 
 class File_Viewer_App : public AppBase {
 public:
@@ -42,51 +49,58 @@ public:
     void on_pause() override;
     void on_resume() override;
 
-    void suspend();
-    void force_close();
-
 private:
     std::shared_ptr<Window> fv_app_window;
 
     FV_APP_Mode current_mode = FV_MAIN;
 
-    std::string current_path;                 // e.g. "/sdcard" or "/sdcard/notes"
+    std::string current_path;
     std::vector<DirEntry> directory_entries;
     int selected_index = 0;
     int scroll_offset  = 0;
-    static constexpr int kVisibleRows = 10;
+    static constexpr int kVisibleRows = 9;
 
     // Text viewer / editor
     std::string text_path;
-    std::string text_buffer;                  // full file in PSRAM-friendly std::string for now
-    int  text_cursor = 0;                     // byte index for simple insert
+    std::string text_buffer;
+    int  text_cursor = 0;       // byte index
+    int  text_view_origin = 0;  // first visible char (horizontal-ish window)
     bool text_dirty  = false;
+    static constexpr int kTextWindowChars = 40;
 
-    // Create-file name buffer
-    std::string new_name_buf;
+    // Create-file cells
+    FV_CreateCell create_cell = FCELL_NAME;
+    std::string   create_name = "note";
+    int           create_ext_index = 0;
+    int           create_name_cursor = 0;  // which char in name is being edited
+    static constexpr const char* kExts[] = {
+        ".txt", ".htm", ".md", ".log", ".rgs", ".csv", ".json"
+    };
+    static constexpr int kExtCount = 7;
 
-    // Image path currently shown (decoded straight into framebuffer)
     std::string image_path;
 
-    // Directory
     void refresh_directory(const std::string& path);
     bool path_is_dir(const std::string& path) const;
     std::string join_path(const std::string& base, const std::string& name) const;
     std::string parent_path(const std::string& path) const;
 
-    // File ops
     bool load_text_file(const std::string& path);
     bool save_text_file(const std::string& path);
-    bool create_text_file(const std::string& path);
-    bool show_image(const std::string& path);   // decode JPEG/BMP → framebuffer
+    bool create_file_from_cells();
+    bool show_image(const std::string& path);
 
-    // UI helpers
     uint16_t color_for_type(OFV_Mode m) const;
     const char* label_for_type(OFV_Mode m) const;
     void draw_browser();
     void draw_text_view();
-    void draw_create_txt();
+    void draw_create();
     void open_selected();
+
+    // Safe append for MWenv markup (never emit raw "<|")
+    static void append_safe(std::string& out, const std::string& s);
+    void cycle_name_char(int delta);
+    void cycle_ext(int delta);
 };
 
 void register_fileviewer();

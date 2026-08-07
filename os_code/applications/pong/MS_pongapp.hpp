@@ -14,10 +14,11 @@
 #include "os_code/core/window_env/Canvas.hpp"
 #include "os_code/core/window_env/AnimWorld.hpp"
 #include "os_code/middle_layer/input/hid_t.h"
+// Full InputEvent / KeyAction (same stack as WatchApp).
+// Do not rely only on the opaque forward typedef in rshell_streamdefs.h.
 #include "os_code/middle_layer/input/input_handler.hpp"
 #include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
-
-struct InputEvent;
+#include "os_code/applications/game_stats.hpp"
 
 // ---------------------------------------------------------------------------
 // Pong – AnimWorld + Canvas mini-game
@@ -71,6 +72,9 @@ private:
     int  score_ai     = 0;
     bool running      = false;    // ball in play
     bool paused       = false;
+
+    GameStats stats{};            // high score persistence (/sdcard/apps/savedat/)
+    static constexpr const char* kStatsName = "PongApp";
 
     // Held keys for continuous paddle motion
     bool hold_up   = false;

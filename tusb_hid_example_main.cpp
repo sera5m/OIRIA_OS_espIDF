@@ -75,6 +75,9 @@
 #include  "os_code/applications/menu/app_menu.hpp"
 #include "os_code/applications/pong/MS_pongapp.hpp"
 
+#include "os_code/applications/snake/MS_snakeapp.hpp"
+#include"os_code/applications/2048/MS_2048app.hpp"
+#include "os_code/applications/browser/MS_browserapp.hpp"
 //==============================================================apps
 
 
@@ -365,14 +368,17 @@ ESP_LOGI(TAG, "WindowManager init-d");
         v_env.CurrentHIDTarget=(HIDTarget)HIDTarget::toTaskAndDebug; //for now we'll use debug too. this is position 7. see hid_t.h if this doesn't work right
 
     
-    
+    //man this section is so stupid and i want to change it
     // Create or get the instance first
     register_watch();
     register_menu();
 	register_fileviewer();
+	
     register_pong();
-    
-    
+    register_snake();
+	register_2048();
+	
+	register_browser();
 
 
 // Register MenuApp
