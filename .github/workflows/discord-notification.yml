@@ -1,0 +1,34 @@
+name: Discord Notification
+
+on: [push]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Get Changed Files
+        id: files
+        run: |
+          # Grabs list of changed files separated by spaces
+          CHANGED=$(git diff --name-only HEAD~1 HEAD | tr '\n' ' ')
+          echo "list=$CHANGED" >> $GITHUB_OUTPUT
+
+      - name: Send Custom Discord Message
+        uses: Ilshidur/action-discord@master
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        with:
+          args: |
+            **new update in_${{ github.event.repository.name }}**
+            🎨 **Commit Message:** ${{ github.event.head_commit.message }}
+            👤 **Author:** ${{ github.actor }}
+            
+            📂 **Changed Files:**
+            ```
+            \${{ steps.files.outputs.list }}
+            ```
