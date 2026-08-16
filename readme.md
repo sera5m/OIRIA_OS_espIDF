@@ -20,3 +20,4 @@ i've done a lot of hacks to keep the ram free, but when i add the document viewe
 applications: we are ALMOST there gng
 input handler: only buttons and knobs so far. keyboard/mouse/touchscreen/using your phone soon-ish
 
+computer
