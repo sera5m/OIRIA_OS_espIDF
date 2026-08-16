@@ -11,12 +11,20 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Get Changed Files
-        id: files
+      - name: Gather Change Details
+        id: details
         run: |
-          # Grabs list of changed files separated by spaces
+          # Grabs list of changed files separated by newlines for clean reading
           CHANGED=$(git diff --name-only HEAD~1 HEAD | tr '\n' ' ')
-          echo "list=$CHANGED" >> $GITHUB_OUTPUT
+          echo "files_list=$CHANGED" >> $GITHUB_OUTPUT
+
+          # Counts lines added and lines removed
+          STATS=$(git diff --shortstat HEAD~1 HEAD)
+          echo "stats_summary=$STATS" >> $GITHUB_OUTPUT
+
+          # Grabs the short 7-character commit hash identifier
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
 
       - name: Send Custom Discord Message
         uses: Ilshidur/action-discord@master
@@ -25,11 +33,17 @@ jobs:
         with:
           args: |
             **new update in_${{ github.event.repository.name }}**
-            🎨 **Commit Message:** ${{ github.event.head_commit.message }}
+            🎨 **Commit:** `${{ steps.details.outputs.short_sha }}` - ${{ github.event.head_commit.message }}
             👤 **Author:** ${{ github.actor }}
+            📊 **Line Changes:** ${{ steps.details.outputs.stats_summary }}
             
             📂 **Changed Files:**
             ```
-            \${{ steps.files.outputs.list }}
+            \${{ steps.details.outputs.files_list }}
             ```
-
+            
+            ```
+             /\_/\  
+            ( o.o )  help i am stuck inside the computer
+             > ^ <
+            ```
