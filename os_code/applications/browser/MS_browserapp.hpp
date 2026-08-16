@@ -65,17 +65,22 @@ private:
     std::vector<std::string> history;
     int hist_pos = -1;
 
+    // Connectivity
+    bool wifi_ok = false;
+    bool show_wifi_banner = true;
+
     void navigate(const std::string& target, bool push_hist = true);
     void load_builtin(const std::string& name);
     void apply_doc();
     void rebuild_viewport();
     void update_chrome();
+    void refresh_wifi_status();
 
-    // Built-in pages (no network required)
     static const char* page_home();
     static const char* page_about();
     static const char* page_kernel();
     static const char* page_help();
+    static const char* page_wifi();
 };
 
 void register_browser();

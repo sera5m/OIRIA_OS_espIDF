@@ -358,12 +358,13 @@ void Game2048App::receive_event_input(const void* event) {
     const InputEvent* ev = static_cast<const InputEvent*>(event);
 
     if (ev->action == KeyAction::Hold && ev->key == KEY_ENTER) {
-        // Reset empty-slot static flag? tiles destroyed in reset_game
         reset_game();
         return;
     }
 
-    if (ev->action != KeyAction::Tap) return;
+    // Accept Tap and Hold so dial ticks register reliably
+    if (ev->action != KeyAction::Tap && ev->action != KeyAction::Hold)
+        return;
 
     if (ev->key == KEY_BACK) {
         appManager::instance().close_current_and_open("MenuApp");
@@ -372,24 +373,35 @@ void Game2048App::receive_event_input(const void* event) {
 
     if (lost) return;
 
+    // win_rotation = 1 (90° CW). On-wrist right dial is KEY_UP/KEY_DOWN and
+    // should move the *board* vertically; left dial KEY_LEFT/RIGHT horizontally.
+    // If your HID already rotates events, this still maps 1:1 to board axes.
     int dx = 0, dy = 0;
     switch (ev->key) {
-        case KEY_LEFT:  dx = -1; break;
-        case KEY_RIGHT: dx =  1; break;
         case KEY_UP:    dy = -1; break;
         case KEY_DOWN:  dy =  1; break;
+        case KEY_LEFT:  dx = -1; break;
+        case KEY_RIGHT: dx =  1; break;
         default: return;
     }
 
+    // Discrete moves on Tap; slow auto-repeat on Hold so one tick ≠ flood
+    static uint32_t last_slide_ms = 0;
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    if (ev->action == KeyAction::Hold && (now - last_slide_ms) < 220)
+        return;
+    if (ev->action == KeyAction::Tap && (now - last_slide_ms) < 80)
+        return;
+
+    ESP_LOGD(TAG, "slide dx=%d dy=%d action=%d", dx, dy, (int)ev->action);
     if (slide(dx, dy)) {
+        last_slide_ms = now;
         spawn_random();
         rebuild_visuals();
-        // Live high-score update during play
         if ((uint32_t)score > stats.high_score) {
             stats.high_score = (uint32_t)score;
             game_stats::save(kStatsName, stats);
         }
-
         if (!can_move()) {
             lost = true;
             if (!scored_this_round) {

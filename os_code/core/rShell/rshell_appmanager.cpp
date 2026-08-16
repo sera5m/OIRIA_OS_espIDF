@@ -237,7 +237,7 @@ void appManager::route_input_to_focused(const InputEvent& ev) {
     }
 }
 
-void appManager::close_current_and_open(const std::string& name) {
+void appManager::close_current_and_open(std::string name) {
     if (focused_app) {
         std::string current_name = focused_app->get_app_name();
         kill_app(current_name);

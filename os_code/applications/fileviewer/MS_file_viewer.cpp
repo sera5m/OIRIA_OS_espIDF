@@ -11,24 +11,163 @@
 #include "os_code/middle_layer/input/input_handler.hpp"
 #include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
 #include "hardware/drivers/lcd/st7789v2/lcDriver.h"
+#include "Fboot/bootfunctions.hpp"
+// Provided by hardware/drivers/sd_card (d_sdc)
+
 
 extern "C" bool jpeg_decode_file(const char* path, uint16_t* fb, int fb_w, int fb_h) __attribute__((weak));
 extern "C" bool bmp_decode_file(const char* path, uint16_t* fb, int fb_w, int fb_h) __attribute__((weak));
 
 static const char* TAG = "File_Viewer_App";
 
+static const char kGlyphs[] =
+    "abcdefghijklmnopqrstuvwxyz0123456789_-.";
+static constexpr int kGlyphCount = (int)sizeof(kGlyphs) - 1;
+
+// ===================================================================
+// DialEditor
 // ===================================================================
 
-File_Viewer_App::File_Viewer_App(const ApplicationConfig& cfg)
-    : AppBase(cfg)
-{
-    appTickRateHZ = 10;
+void DialEditor::open(DialTarget t, const std::string& seed) {
+    target = t;
+    text = seed;
+    pointer = text.empty() ? slot_plus() : 1;
+    char_index = 0;
+    active = true;
+    enter_burst = 0;
+    last_enter_ms = 0;
 }
 
-void File_Viewer_App::on_start()
-{
-    ESP_LOGI(TAG, "File Viewer started");
+void DialEditor::close() { active = false; }
 
+int DialEditor::slot_count() const {
+    return 1 + (int)text.size() + 1 + 1 + 1;
+}
+
+void DialEditor::cycle_char(int delta) {
+    if (pointer < text_slot_begin() || pointer >= text_slot_end()) return;
+    int ti = pointer - 1;
+    if (ti < 0 || ti >= (int)text.size()) return;
+    int idx = 0;
+    for (int i = 0; i < kGlyphCount; ++i)
+        if (kGlyphs[i] == text[ti]) { idx = i; break; }
+    idx = (idx + delta) % kGlyphCount;
+    if (idx < 0) idx += kGlyphCount;
+    text[ti] = kGlyphs[idx];
+    char_index = idx;
+}
+
+DialEditor::Result DialEditor::handle_key(int key, bool hold, uint32_t now_ms) {
+    if (!active) return Result::None;
+    if (key == KEY_BACK) { close(); return Result::Cancel; }
+    if (key == KEY_LEFT)  { if (pointer > 0) pointer--; return Result::None; }
+    if (key == KEY_RIGHT) { if (pointer < slot_count() - 1) pointer++; return Result::None; }
+    if (key == KEY_UP)    { cycle_char(+1); return Result::None; }
+    if (key == KEY_DOWN)  { cycle_char(-1); return Result::None; }
+
+    if (key == KEY_ENTER) {
+        if (now_ms - last_enter_ms < 400) enter_burst++;
+        else enter_burst = 1;
+        last_enter_ms = now_ms;
+        if (enter_burst >= 3) { close(); return Result::Commit; }
+
+        if (pointer == 0) {
+            if (!text.empty()) {
+                text.pop_back();
+                if (pointer > slot_count() - 1) pointer = slot_count() - 1;
+            }
+            return Result::None;
+        }
+        if (pointer >= text_slot_begin() && pointer < text_slot_end()) {
+            if (pointer < text_slot_end() - 1) pointer++;
+            else pointer = slot_plus();
+            return Result::None;
+        }
+        if (pointer == slot_plus()) {
+            if (text.size() < 32) {
+                text.push_back('a');
+                pointer = text_slot_end() - 1;
+            }
+            return Result::None;
+        }
+        if (pointer == slot_ok()) { close(); return Result::Commit; }
+        if (pointer == slot_x())  { close(); return Result::Cancel; }
+    }
+    (void)hold;
+    return Result::None;
+}
+
+void DialEditor::render(std::string& out) const {
+    out += "<|size=1|><|color=0xFFFF|>";
+    for (int s = 0; s < slot_count(); ++s) {
+        bool sel = (s == pointer);
+        out += sel ? "<|color=0xFFE0|>" : "<|color=0xAD55|>";
+        if (s == 0) {
+            out += sel ? "[-]" : "-";
+        } else if (s >= text_slot_begin() && s < text_slot_end()) {
+            char c = text[s - 1];
+            if (sel) { out += "["; out.push_back(c); out += "]"; }
+            else out.push_back(c);
+        } else if (s == slot_plus()) {
+            out += sel ? "[+]" : "+";
+        } else if (s == slot_ok()) {
+            out += sel ? "[ok]" : "ok";
+        } else if (s == slot_x()) {
+            out += sel ? "[x]" : "x";
+        }
+    }
+    out += "<|n|><|color=0x07FF|>";
+    for (int s = 0; s < pointer; ++s) {
+        if (s == 0) out += "  ";
+        else if (s >= text_slot_begin() && s < text_slot_end()) out += " ";
+        else if (s == slot_plus()) out += "  ";
+        else out += "   ";
+    }
+    out += "^<|n|><|color=0x8888|>L/R pos  U/D char  ENT act  3xENT=ok  BACK=x<|n|>";
+}
+
+// ===================================================================
+
+File_Viewer_App::File_Viewer_App(const ApplicationConfig& cfg) : AppBase(cfg) {
+    appTickRateHZ = 12;
+}
+
+bool File_Viewer_App::ensure_sd_mounted() {
+    // Fast path: already usable
+    DIR* probe = opendir("/sdcard");
+    if (probe) {
+        closedir(probe);
+        sd_ready = true;
+        return true;
+    }
+
+    ESP_LOGW(TAG, "/sdcard not openable – attempting sd_remount()");
+    // Best-effort: unmount stale state then remount
+    (void)sd_unmount();
+    esp_err_t err = sd_remount();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "sd_remount failed: %s", esp_err_to_name(err));
+        sd_ready = false;
+        return false;
+    }
+
+    probe = opendir("/sdcard");
+    if (probe) {
+        closedir(probe);
+        sd_ready = true;
+        ESP_LOGI(TAG, "SD remounted OK");
+        return true;
+    }
+    sd_ready = false;
+    ESP_LOGE(TAG, "SD remount returned OK but /sdcard still unreadable");
+    return false;
+}
+
+void File_Viewer_App::on_start() {
+    ESP_LOGI(TAG, "File Viewer started");
+    // Lean startup: window + placeholder only. SD mount/list runs on first tick
+    // so a stack spike cannot corrupt appManager while open_app is still on
+    // the input task stack.
     fv_app_window = std::make_shared<Window>(
         WindowCfg{
             .Posx = 0, .Posy = 0, .Layer = 0, .renderPriority = 0,
@@ -41,167 +180,160 @@ void File_Viewer_App::on_start()
             .BorderColor = 0x12FF, .BgColor = 0x0021,
             .Bg_secondaryColor = 0xFF34, .WinTextColor = 0xFFFF,
             .backgroundType = BgFillType::Solid,
-            .UpdateRate = 1.0f
+            .UpdateRate = 0.5f
         },
         "FileViewer"
     );
-
     WindowManager::getInstance().registerWindow(fv_app_window);
     bind_main_window(fv_app_window);
 
     current_path = "/sdcard";
-    refresh_directory(current_path);
+    directory_entries.clear();
+    directory_entries.push_back(DirEntry{"[Create]", false, OFV_TXT, 0});
+    directory_entries.push_back(DirEntry{"[Search]", false, OFV_TXT, 0});
+    directory_entries.push_back(DirEntry{"..", true, OFV_TXT, 0});
+    directory_entries.push_back(DirEntry{"(loading...)", false, OFV_RAW, 0});
+    apply_filter();
+    selected_index = 0;
+    scroll_offset = 0;
+    sd_ready = false;
+    initial_list_done = false;
     on_draw();
 }
 
-void File_Viewer_App::on_stop()
-{
+void File_Viewer_App::on_stop() {
     if (fv_app_window) {
         WindowManager::getInstance().unregisterWindow(fv_app_window);
         fv_app_window.reset();
     }
     text_buffer.clear();
     directory_entries.clear();
+    filtered_entries.clear();
+    sd_ready = false;
+    initial_list_done = false;
 }
 
 void File_Viewer_App::on_pause()  {}
 void File_Viewer_App::on_resume() { on_draw(); }
 
-// ===================================================================
-// Markup-safe text (prevents tokenizer eating filenames / file bodies)
-// ===================================================================
-
-void File_Viewer_App::append_safe(std::string& out, const std::string& s)
-{
+void File_Viewer_App::append_safe(std::string& out, const std::string& s) {
     for (char c : s) {
-        if (c == '<') {
-            // Break potential <| sequences; show a stand-in
-            out += "{lt}";
-        } else if (c == '>') {
-            out += "{gt}";
-        } else if (c == '\r') {
-            continue;
-        } else if (c == '\n') {
-            out += "<|n|>";
-        } else if ((unsigned char)c < 0x20 && c != '\t') {
-            out.push_back('?');
-        } else {
-            out.push_back(c);
-        }
+        if (c == '<') out += "{lt}";
+        else if (c == '>') out += "{gt}";
+        else if (c == '\r') continue;
+        else if (c == '\n') out += "<|n|>";
+        else if ((unsigned char)c < 0x20 && c != '\t') out.push_back('?');
+        else out.push_back(c);
     }
 }
 
-// ===================================================================
-// Path helpers
-// ===================================================================
-
-std::string File_Viewer_App::join_path(const std::string& base, const std::string& name) const
-{
+std::string File_Viewer_App::join_path(const std::string& base, const std::string& name) const {
     if (base.empty() || base.back() == '/') return base + name;
     return base + "/" + name;
 }
 
-std::string File_Viewer_App::parent_path(const std::string& path) const
-{
+std::string File_Viewer_App::parent_path(const std::string& path) const {
     if (path == "/sdcard" || path == "/" || path.empty()) return "/sdcard";
     size_t pos = path.find_last_of('/');
     if (pos == std::string::npos || pos == 0) return "/sdcard";
     std::string p = path.substr(0, pos);
-    if (p.empty()) p = "/sdcard";
-    return p;
+    return p.empty() ? "/sdcard" : p;
 }
 
-bool File_Viewer_App::path_is_dir(const std::string& path) const
-{
+bool File_Viewer_App::path_is_dir(const std::string& path) const {
     struct stat st{};
-    if (stat(path.c_str(), &st) != 0) return false;
-    return S_ISDIR(st.st_mode);
+    return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
 
-// ===================================================================
-// Directory listing
-// ===================================================================
-
-void File_Viewer_App::refresh_directory(const std::string& path)
-{
+void File_Viewer_App::refresh_directory(const std::string& path) {
     directory_entries.clear();
     selected_index = 0;
-    scroll_offset  = 0;
-
-    // Synthetic top entries
-    directory_entries.push_back(DirEntry{ "[Create]", false, OFV_TXT });
-    directory_entries.push_back(DirEntry{ "..", true, OFV_TXT });
+    scroll_offset = 0;
+    directory_entries.push_back(DirEntry{"[Create]", false, OFV_TXT, 0});
+    directory_entries.push_back(DirEntry{"[Search]", false, OFV_TXT, 0});
+    directory_entries.push_back(DirEntry{"..", true, OFV_TXT, 0});
 
     DIR* dir = opendir(path.c_str());
     if (!dir) {
-        ESP_LOGW(TAG, "opendir('%s') failed", path.c_str());
+        // Card may have been ejected / never mounted – try once
+        if (ensure_sd_mounted())
+            dir = opendir(path.c_str());
+    }
+    if (!dir) {
+        ESP_LOGW(TAG, "opendir('%s') failed (sd_ready=%d)", path.c_str(), (int)sd_ready);
+        // Synthetic error row so the UI is not a blank list
+        directory_entries.push_back(DirEntry{"! SD not mounted", false, OFV_RAW, 0});
+        apply_filter();
         return;
     }
 
-    std::vector<DirEntry> dirs;
-    std::vector<DirEntry> files;
-
+    std::vector<DirEntry> dirs, files;
     struct dirent* ent;
     while ((ent = readdir(dir)) != nullptr) {
         const char* n = ent->d_name;
-        if (!n || n[0] == '\0') continue;
-        if (strcmp(n, ".") == 0 || strcmp(n, "..") == 0) continue;
-
+        if (!n || !n[0] || strcmp(n, ".") == 0 || strcmp(n, "..") == 0) continue;
         std::string full = join_path(path, n);
         DirEntry e;
         e.name = n;
-
+        e.depth = 1;
         struct stat st{};
         if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
             e.is_dir = true;
-            e.type = OFV_TXT;
             dirs.push_back(std::move(e));
         } else {
             e.is_dir = false;
-            const char* ext = OFV_GetExtension(n);
-            e.type = OFV_GetModeFromExt(ext);
+            e.type = OFV_GetModeFromExt(OFV_GetExtension(n));
             files.push_back(std::move(e));
         }
     }
     closedir(dir);
-
     auto by_name = [](const DirEntry& a, const DirEntry& b) {
         return strcasecmp(a.name.c_str(), b.name.c_str()) < 0;
     };
     std::sort(dirs.begin(), dirs.end(), by_name);
     std::sort(files.begin(), files.end(), by_name);
-
-    for (auto& d : dirs)  directory_entries.push_back(std::move(d));
-    for (auto& f : files)  directory_entries.push_back(std::move(f));
-
-    ESP_LOGI(TAG, "Listed %s – %d entries", path.c_str(), (int)directory_entries.size());
+    for (auto& d : dirs) directory_entries.push_back(std::move(d));
+    for (auto& f : files) directory_entries.push_back(std::move(f));
+    apply_filter();
 }
 
-// ===================================================================
-// Colors / labels
-// ===================================================================
-
-uint16_t File_Viewer_App::color_for_type(OFV_Mode m) const
-{
-    switch (m) {
-        case OFV_TXT:              return 0xFFFF;
-        case OFV_WEBPAGE:          return 0x07FF;
-        case OFV_IMG:              return 0xF81F;
-        case OFV_AUDIO:            return 0xFFE0;
-        case OFV_VIDEO:            return 0xF800;
-        case OFV_STREAMED_AUDIO:   return 0xFD20;
-        case OFV_STREAMED_VIDEO:   return 0xF800;
-        case OFV_3DOBJ:            return 0x07E0;
-        case OFV_XR:               return 0xAFE5;
-        case OFV_CANVAS_ANIM_REPLAY: return 0x8410;
-        case OFV_RAW:              return 0xAD55;
-        case OFV_RSHELL_SPECIAL:   return 0x001F;
-        default:                   return 0xC618;
+void File_Viewer_App::apply_filter() {
+    filtered_entries.clear();
+    if (search_query.empty()) {
+        filtered_entries = directory_entries;
+        return;
+    }
+    std::string q = search_query;
+    for (char& c : q) c = (char)tolower((unsigned char)c);
+    for (const auto& e : directory_entries) {
+        if (e.name == "[Create]" || e.name == "[Search]" || e.name == "..") {
+            filtered_entries.push_back(e);
+            continue;
+        }
+        std::string n = e.name;
+        for (char& c : n) c = (char)tolower((unsigned char)c);
+        if (n.find(q) != std::string::npos) filtered_entries.push_back(e);
     }
 }
 
-const char* File_Viewer_App::label_for_type(OFV_Mode m) const
-{
+const std::vector<DirEntry>& File_Viewer_App::active_list() const {
+    return filtered_entries.empty() ? directory_entries : filtered_entries;
+}
+
+uint16_t File_Viewer_App::color_for_type(OFV_Mode m) const {
+    switch (m) {
+        case OFV_TXT: return 0xFFFF;
+        case OFV_WEBPAGE: return 0x07FF;
+        case OFV_IMG: return 0xF81F;
+        case OFV_AUDIO: return 0xFFE0;
+        case OFV_VIDEO: return 0xF800;
+        case OFV_3DOBJ: return 0x07E0;
+        case OFV_RSHELL_SPECIAL: return 0x001F;
+        default: return 0xC618;
+    }
+}
+
+const char* File_Viewer_App::label_for_type(OFV_Mode m) const {
     switch (m) {
         case OFV_TXT: return "TXT";
         case OFV_WEBPAGE: return "WEB";
@@ -210,329 +342,251 @@ const char* File_Viewer_App::label_for_type(OFV_Mode m) const
         case OFV_VIDEO: return "VID";
         case OFV_3DOBJ: return "3D";
         case OFV_RSHELL_SPECIAL: return "RSH";
-        case OFV_RAW: return "RAW";
         default: return "???";
     }
 }
 
-// ===================================================================
-// Text load / save
-// ===================================================================
-
-bool File_Viewer_App::load_text_file(const std::string& path)
-{
+bool File_Viewer_App::load_text_file(const std::string& path) {
     FILE* f = fopen(path.c_str(), "rb");
-    if (!f) {
-        ESP_LOGE(TAG, "fopen('%s') failed", path.c_str());
-        return false;
-    }
+    if (!f) return false;
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
     fseek(f, 0, SEEK_SET);
     if (sz < 0) sz = 0;
     if (sz > 64 * 1024) sz = 64 * 1024;
-
     text_buffer.assign((size_t)sz, '\0');
-    if (sz > 0) {
-        size_t n = fread(text_buffer.data(), 1, (size_t)sz, f);
-        text_buffer.resize(n);
-    }
+    if (sz > 0) text_buffer.resize(fread(text_buffer.data(), 1, (size_t)sz, f));
     fclose(f);
-    text_path   = path;
+    text_path = path;
     text_cursor = 0;
     text_view_origin = 0;
-    text_dirty  = false;
-    ESP_LOGI(TAG, "Loaded text %s (%d bytes)", path.c_str(), (int)text_buffer.size());
+    text_dirty = false;
     return true;
 }
 
-bool File_Viewer_App::save_text_file(const std::string& path)
-{
+bool File_Viewer_App::save_text_file(const std::string& path) {
     FILE* f = fopen(path.c_str(), "wb");
-    if (!f) {
-        ESP_LOGE(TAG, "save fopen('%s') failed", path.c_str());
-        return false;
-    }
-    if (!text_buffer.empty())
-        fwrite(text_buffer.data(), 1, text_buffer.size(), f);
+    if (!f) return false;
+    if (!text_buffer.empty()) fwrite(text_buffer.data(), 1, text_buffer.size(), f);
     fclose(f);
     text_dirty = false;
-    ESP_LOGI(TAG, "Saved %s (%d bytes)", path.c_str(), (int)text_buffer.size());
     return true;
 }
 
-bool File_Viewer_App::create_file_from_cells()
-{
+bool File_Viewer_App::create_file_from_cells() {
     if (create_name.empty()) create_name = "file";
     const char* ext = kExts[create_ext_index % kExtCount];
     std::string full = join_path(current_path, create_name + ext);
-
     FILE* f = fopen(full.c_str(), "wb");
-    if (!f) {
-        ESP_LOGE(TAG, "create failed: %s", full.c_str());
-        return false;
-    }
+    if (!f) return false;
     const char* seed = "# new file\n";
     fwrite(seed, 1, strlen(seed), f);
     fclose(f);
-    ESP_LOGI(TAG, "Created %s", full.c_str());
     return true;
 }
 
-// ===================================================================
-// Image
-// ===================================================================
-
-bool File_Viewer_App::show_image(const std::string& path)
-{
+bool File_Viewer_App::show_image(const std::string& path) {
     image_path = path;
     const char* ext = OFV_GetExtension(path.c_str());
     fb_clear(0x0000);
-
     bool ok = false;
-    if (strcasecmp(ext, ".bmp") == 0) {
-        if (bmp_decode_file)
-            ok = bmp_decode_file(path.c_str(), framebuffer, SCREEN_W, SCREEN_H);
-    } else if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0) {
-        if (jpeg_decode_file)
-            ok = jpeg_decode_file(path.c_str(), framebuffer, SCREEN_W, SCREEN_H);
-    }
-
+    if (strcasecmp(ext, ".bmp") == 0 && bmp_decode_file)
+        ok = bmp_decode_file(path.c_str(), framebuffer, SCREEN_W, SCREEN_H);
+    else if ((strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0) && jpeg_decode_file)
+        ok = jpeg_decode_file(path.c_str(), framebuffer, SCREEN_W, SCREEN_H);
     if (!ok) {
-        std::string msg =
-            "<|size=1|><|color=0xF800|>Image decode unavailable<|n|>";
+        std::string msg = "<|size=1|><|color=0xF800|>Image decode unavailable<|n|>";
         append_safe(msg, path);
-        msg += "<|n|><|color=0x8888|>Link jpeg/bmp decoder";
         fv_app_window->SetText(msg.c_str());
         fv_app_window->dirty = true;
         return false;
     }
-
     g_display_dirty = true;
     if (core2TaskHandle) xTaskNotifyGive(core2TaskHandle);
     return true;
 }
 
-// ===================================================================
-// Open
-// ===================================================================
-
-void File_Viewer_App::open_selected()
-{
-    if (selected_index < 0 || selected_index >= (int)directory_entries.size())
-        return;
-
-    const DirEntry& e = directory_entries[selected_index];
-
+void File_Viewer_App::open_selected() {
+    const auto& list = active_list();
+    if (selected_index < 0 || selected_index >= (int)list.size()) return;
+    const DirEntry& e = list[selected_index];
     if (e.name == "[Create]") {
         create_cell = FCELL_NAME;
         create_name = "note";
         create_ext_index = 0;
-        create_name_cursor = (int)create_name.size() - 1;
-        if (create_name_cursor < 0) create_name_cursor = 0;
         current_mode = FV_CREATE;
         return;
     }
-
+    if (e.name == "[Search]") {
+        dial.open(DIAL_TARGET_SEARCH, search_query);
+        current_mode = FV_DIAL_EDIT;
+        return;
+    }
     if (e.name == "..") {
         current_path = parent_path(current_path);
+        search_query.clear();
         refresh_directory(current_path);
         current_mode = FV_MAIN;
         return;
     }
-
     std::string full = join_path(current_path, e.name);
-
     if (e.is_dir) {
         current_path = full;
+        search_query.clear();
         refresh_directory(current_path);
         current_mode = FV_MAIN;
         return;
     }
-
     switch (e.type) {
-        case OFV_TXT:
-        case OFV_WEBPAGE:
-        case OFV_RSHELL_SPECIAL:
-            if (load_text_file(full))
-                current_mode = FV_VIEW_TEXT;
+        case OFV_TXT: case OFV_WEBPAGE: case OFV_RSHELL_SPECIAL:
+            if (load_text_file(full)) current_mode = FV_VIEW_TEXT;
             break;
         case OFV_IMG:
             current_mode = FV_VIEW_IMAGE;
             show_image(full);
             break;
-        default:
-            ESP_LOGI(TAG, "No handler for type %d (%s)", (int)e.type, e.name.c_str());
-            break;
+        default: break;
     }
 }
 
-// ===================================================================
-// Drawing
-// ===================================================================
-
-void File_Viewer_App::draw_browser()
-{
+void File_Viewer_App::draw_browser() {
     std::string text;
-    text.reserve(1024);
+    text.reserve(1200);
+    text += "<|size=1|><|color=0x07FF|>SD";
+    {
+        std::string rest = current_path;
+        if (rest.rfind("/sdcard", 0) == 0) rest = rest.substr(7);
+        if (rest.empty() || rest == "/") text += "<|color=0x8410|> /";
+        else {
+            size_t i = 0;
+            while (i < rest.size()) {
+                if (rest[i] == '/') { ++i; continue; }
+                size_t j = i;
+                while (j < rest.size() && rest[j] != '/') ++j;
+                text += "<|color=0x8410|> / <|color=0xFFFF|>";
+                append_safe(text, rest.substr(i, j - i));
+                i = j;
+            }
+        }
+    }
+    if (!search_query.empty()) {
+        text += "<|n|><|color=0xF81F|>filter: ";
+        append_safe(text, search_query);
+    }
+    text += "<|n|><|color=0x5A6B|>---------------------------<|n|>";
 
-    // Fixed size=1 for the whole browser list (size leak was the main bug)
-    text += "<|size=1|><|color=0x07FF|>Files  ";
-    text += "<|color=0x8410|>";
-    append_safe(text, current_path);
-    text += "<|n|>";
-
+    const auto& list = active_list();
     int start = scroll_offset;
-    int end   = std::min(start + kVisibleRows, (int)directory_entries.size());
-
+    int end = std::min(start + kVisibleRows, (int)list.size());
     for (int i = start; i < end; ++i) {
-        const DirEntry& e = directory_entries[i];
+        const DirEntry& e = list[i];
         bool sel = (i == selected_index);
-
-        if (sel)
-            text += "<|color=0xFFE0|>";
-        else if (e.name == "[Create]")
-            text += "<|color=0x07E0|>";
-        else if (e.is_dir)
-            text += "<|color=0x07E0|>";
+        if (sel) text += "<|color=0xFFE0|>";
+        else if (e.name == "[Create]" || e.name == "[Search]") text += "<|color=0x07E0|>";
+        else if (e.is_dir) text += "<|color=0x07E0|>";
         else {
             char cbuf[24];
-            snprintf(cbuf, sizeof(cbuf), "<|color=0x%04X|>",
-                     (unsigned)color_for_type(e.type));
+            snprintf(cbuf, sizeof(cbuf), "<|color=0x%04X|>", (unsigned)color_for_type(e.type));
             text += cbuf;
         }
-
-        text += sel ? "> " : "  ";
-
-        if (e.name == "[Create]") {
-            text += "[+] Create file";
-        } else if (e.is_dir) {
-            text += "[";
-            append_safe(text, e.name);
-            text += "]";
-        } else {
-            append_safe(text, e.name);
+        text += sel ? ">" : " ";
+        if (e.depth > 0) {
             text += " ";
-            text += label_for_type(e.type);
+            for (int d = 0; d < e.depth; ++d) text += (d == e.depth - 1) ? "+-" : "| ";
         }
+        if (e.name == "[Create]") text += "[+] Create";
+        else if (e.name == "[Search]") text += "[?] Search";
+        else if (e.is_dir) { text += "["; append_safe(text, e.name); text += "]/"; }
+        else { append_safe(text, e.name); text += " "; text += label_for_type(e.type); }
         text += "<|n|>";
     }
-
-    text += "<|color=0x8888|>UP/DN ENTER  HOLD-ENT=create  BACK";
-
+    text += "<|color=0x8888|>";
+    text += sd_ready ? "SD ok  " : "SD ?  ";
+    text += "U/D ENT  L=search  HOLD=create  BACK";
     fv_app_window->SetText(text.c_str());
     fv_app_window->dirty = true;
 }
 
-void File_Viewer_App::draw_text_view()
-{
+void File_Viewer_App::draw_text_view() {
     std::string text;
-    text.reserve(kTextWindowChars * 2 + 128);
-
     text += "<|size=1|><|color=0x07FF|>";
     append_safe(text, text_path);
     if (text_dirty) text += " *";
-    text += "<|n|>";
-
-    // Keep cursor in window
-    if (text_cursor < text_view_origin)
-        text_view_origin = text_cursor;
+    text += "<|n|><|color=0xFFFF|>";
+    if (text_cursor < text_view_origin) text_view_origin = text_cursor;
     if (text_cursor >= text_view_origin + kTextWindowChars)
         text_view_origin = text_cursor - kTextWindowChars + 1;
     if (text_view_origin < 0) text_view_origin = 0;
-
     int start = text_view_origin;
-    int end   = std::min((int)text_buffer.size(), start + kTextWindowChars);
-
-    text += "<|color=0xFFFF|>";
-
-    // Draw window with a box around the cursor character (classic editor style)
+    int end = std::min((int)text_buffer.size(), start + kTextWindowChars);
     for (int i = start; i < end; ++i) {
         char c = text_buffer[i];
         bool at = (i == text_cursor);
-
-        if (at) text += "<|color=0x0000|><|color=0xFFE0|>";  // highlight via bright bg-ish color
-        // MWenv has no true bg-per-glyph; use brackets as the "box"
-        if (at) text += "[";
-
+        if (at) text += "<|color=0xFFE0|>[";
         if (c == '<') text += "{lt}";
         else if (c == '>') text += "{gt}";
-        else if (c == '\n') text += (at ? "\\n" : "<|n|>");
-        else if (c == '\r') continue;
+        else if (c == '\n') text += at ? "\\n" : "<|n|>";
         else if ((unsigned char)c < 0x20) text.push_back('?');
         else text.push_back(c);
-
-        if (at) {
-            text += "]";
-            text += "<|color=0xFFFF|>";
-        }
+        if (at) text += "]<|color=0xFFFF|>";
     }
-
-    // Cursor past end
-    if (text_cursor >= (int)text_buffer.size()) {
+    if (text_cursor >= (int)text_buffer.size())
         text += "<|color=0xFFE0|>[_]<|color=0xFFFF|>";
-    }
-
-    char foot[64];
+    char foot[80];
     snprintf(foot, sizeof(foot),
-             "<|n|><|color=0x8888|>pos %d/%d  L/R move  HOLD-ENT=save  BACK",
+             "<|n|><|color=0x8888|>%d/%d L/R  ENT=type  HOLD=save BACK",
              text_cursor, (int)text_buffer.size());
     text += foot;
-
     fv_app_window->SetText(text.c_str());
     fv_app_window->dirty = true;
 }
 
-void File_Viewer_App::draw_create()
-{
+void File_Viewer_App::draw_create() {
     const char* ext = kExts[create_ext_index % kExtCount];
-
-    auto cell = [&](FV_CreateCell which, const std::string& label, const std::string& value) {
-        std::string s;
-        if (create_cell == which)
-            s += "<|color=0xFFE0|>[";
-        else
-            s += "<|color=0xAD55|> ";
-        s += label;
-        s += ":";
-        // name cell: box the active character
-        if (which == FCELL_NAME && create_cell == FCELL_NAME) {
-            for (int i = 0; i < (int)value.size(); ++i) {
-                if (i == create_name_cursor) s += "[";
-                s.push_back(value[i]);
-                if (i == create_name_cursor) s += "]";
-            }
-            if (value.empty()) s += "[_]";
-        } else {
-            append_safe(s, value);
-        }
-        if (create_cell == which) s += "]";
-        else s += " ";
-        s += "<|n|>";
-        return s;
-    };
-
     std::string text = "<|size=1|><|color=0x07FF|>Create file<|n|>";
-    text += cell(FCELL_DIR,  "dir ", current_path);
-    text += cell(FCELL_NAME, "name", create_name);
-    text += cell(FCELL_EXT,  "ext ", ext);
-
-    text += "<|n|><|color=0xFFFF|>=> ";
+    auto cell = [&](FV_CreateCell which, const char* label, const std::string& value) {
+        text += (create_cell == which) ? "<|color=0xFFE0|>[" : "<|color=0xAD55|> ";
+        text += label;
+        text += " ";
+        append_safe(text, value);
+        if (create_cell == which) text += "]";
+        text += "<|n|>";
+    };
+    cell(FCELL_DIR,  "dir ", current_path);
+    cell(FCELL_NAME, "name", create_name);
+    cell(FCELL_EXT,  "ext ", ext);
+    text += "<|color=0xFFFF|>=> ";
     append_safe(text, join_path(current_path, create_name + ext));
-    text += "<|n|>";
-    text += "<|color=0x8888|>L/R=cell  U/D=edit  ENT=add-char  HOLD-ENT=make  BACK";
-
+    text += "<|n|><|color=0x8888|>L/R cell  U/D ext  ENT=type name  HOLD=make BACK";
     fv_app_window->SetText(text.c_str());
     fv_app_window->dirty = true;
 }
 
-void File_Viewer_App::on_draw()
-{
+void File_Viewer_App::draw_search() { draw_browser(); }
+
+void File_Viewer_App::draw_dial_overlay() {
+    std::string text = "<|size=1|><|color=0x07FF|>";
+    switch (dial.target) {
+        case DIAL_TARGET_CREATE_NAME: text += "Name editor<|n|>"; break;
+        case DIAL_TARGET_SEARCH:      text += "Search filter<|n|>"; break;
+        case DIAL_TARGET_TEXT_INSERT: text += "Insert text<|n|>"; break;
+    }
+    dial.render(text);
+    fv_app_window->SetText(text.c_str());
+    fv_app_window->dirty = true;
+}
+
+void File_Viewer_App::on_draw() {
     if (!fv_app_window) return;
+    if (dial.active || current_mode == FV_DIAL_EDIT) {
+        draw_dial_overlay();
+        return;
+    }
     switch (current_mode) {
-        case FV_MAIN:       draw_browser();   break;
-        case FV_VIEW_TEXT:  draw_text_view(); break;
-        case FV_CREATE:     draw_create();    break;
+        case FV_MAIN:      draw_browser(); break;
+        case FV_VIEW_TEXT: draw_text_view(); break;
+        case FV_CREATE:    draw_create(); break;
+        case FV_SEARCH:    draw_browser(); break;
         case FV_VIEW_IMAGE: {
             std::string cap = "<|size=1|><|color=0xFFFF|>";
             append_safe(cap, image_path);
@@ -541,124 +595,115 @@ void File_Viewer_App::on_draw()
             fv_app_window->dirty = true;
             break;
         }
-        default:
-            draw_browser();
-            break;
+        default: draw_browser(); break;
     }
 }
 
-// ===================================================================
-// Create cell editing
-// ===================================================================
-
-void File_Viewer_App::cycle_name_char(int delta)
-{
-    if (create_name.empty()) {
-        create_name = "a";
-        create_name_cursor = 0;
-        return;
-    }
-    if (create_name_cursor < 0) create_name_cursor = 0;
-    if (create_name_cursor >= (int)create_name.size())
-        create_name_cursor = (int)create_name.size() - 1;
-
-    // Allowed: a-z 0-9 _
-    static const char alphabet[] =
-        "abcdefghijklmnopqrstuvwxyz0123456789_";
-    const int alen = (int)sizeof(alphabet) - 1;
-
-    char& c = create_name[create_name_cursor];
-    int idx = 0;
-    for (int i = 0; i < alen; ++i) {
-        if (alphabet[i] == c) { idx = i; break; }
-    }
-    idx = (idx + delta) % alen;
-    if (idx < 0) idx += alen;
-    c = alphabet[idx];
-}
-
-void File_Viewer_App::cycle_ext(int delta)
-{
+void File_Viewer_App::cycle_ext(int delta) {
     create_ext_index = (create_ext_index + delta) % kExtCount;
     if (create_ext_index < 0) create_ext_index += kExtCount;
 }
 
-// ===================================================================
-// Tick / input
-// ===================================================================
-
-void File_Viewer_App::tick_app(uint32_t delta_ms)
-{
-    static uint32_t accum = 0;
-    accum += delta_ms;
-    if (accum >= 400) {
-        accum = 0;
-        if (current_mode != FV_VIEW_IMAGE)
-            on_draw();
+void File_Viewer_App::on_dial_commit() {
+    switch (dial.target) {
+        case DIAL_TARGET_CREATE_NAME:
+            create_name = dial.text.empty() ? "file" : dial.text;
+            current_mode = FV_CREATE;
+            break;
+        case DIAL_TARGET_SEARCH:
+            search_query = dial.text;
+            apply_filter();
+            selected_index = 0;
+            scroll_offset = 0;
+            current_mode = FV_MAIN;
+            break;
+        case DIAL_TARGET_TEXT_INSERT:
+            if (!dial.text.empty()) {
+                text_buffer.insert((size_t)text_cursor, dial.text);
+                text_cursor += (int)dial.text.size();
+                text_dirty = true;
+            }
+            current_mode = FV_VIEW_TEXT;
+            break;
     }
 }
 
-void File_Viewer_App::receive_event_input(const void* event)
-{
+void File_Viewer_App::tick_app(uint32_t delta_ms) {
+    (void)delta_ms;
+    if (!initial_list_done && fv_app_window) {
+        initial_list_done = true;
+        ensure_sd_mounted();
+        refresh_directory(current_path);
+        on_draw();
+    }
+    if (fv_app_window) fv_app_window->dirty = true;
+}
+
+void File_Viewer_App::receive_event_input(const void* event) {
     if (!event) return;
     const InputEvent* ev = static_cast<const InputEvent*>(event);
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    bool hold = (ev->action == KeyAction::Hold);
 
-    // ---- Hold ENTER ----
-    if (ev->action == KeyAction::Hold && ev->key == KEY_ENTER) {
+    if (dial.active || current_mode == FV_DIAL_EDIT) {
+        if (ev->action != KeyAction::Tap && !hold) return;
+        auto r = dial.handle_key(ev->key, hold, now);
+        if (r == DialEditor::Result::Commit) on_dial_commit();
+        else if (r == DialEditor::Result::Cancel) {
+            if (dial.target == DIAL_TARGET_TEXT_INSERT) current_mode = FV_VIEW_TEXT;
+            else if (dial.target == DIAL_TARGET_CREATE_NAME) current_mode = FV_CREATE;
+            else current_mode = FV_MAIN;
+        }
+        on_draw();
+        return;
+    }
+
+    if (hold && ev->key == KEY_ENTER) {
         if (current_mode == FV_MAIN) {
             create_cell = FCELL_NAME;
             create_name = "note";
             create_ext_index = 0;
-            create_name_cursor = (int)create_name.size() - 1;
             current_mode = FV_CREATE;
             on_draw();
             return;
         }
-        if (current_mode == FV_VIEW_TEXT) {
-            save_text_file(text_path);
-            on_draw();
-            return;
-        }
+        if (current_mode == FV_VIEW_TEXT) { save_text_file(text_path); on_draw(); return; }
         if (current_mode == FV_CREATE) {
             if (create_file_from_cells()) {
                 refresh_directory(current_path);
                 current_mode = FV_MAIN;
-                // Select the new file if present
-                std::string want = create_name + kExts[create_ext_index % kExtCount];
-                for (size_t i = 0; i < directory_entries.size(); ++i) {
-                    if (directory_entries[i].name == want) {
-                        selected_index = (int)i;
-                        break;
-                    }
-                }
             }
             on_draw();
             return;
         }
     }
 
-    if (ev->action != KeyAction::Tap && ev->action != KeyAction::Hold)
-        return;
+    if (ev->action != KeyAction::Tap && !hold) return;
 
     switch (current_mode) {
-
     case FV_MAIN:
         switch (ev->key) {
             case KEY_UP:
                 if (selected_index > 0) {
                     selected_index--;
-                    if (selected_index < scroll_offset)
-                        scroll_offset = selected_index;
+                    if (selected_index < scroll_offset) scroll_offset = selected_index;
                     on_draw();
                 }
                 break;
-            case KEY_DOWN:
-                if (selected_index < (int)directory_entries.size() - 1) {
+            case KEY_DOWN: {
+                const auto& list = active_list();
+                if (selected_index < (int)list.size() - 1) {
                     selected_index++;
                     if (selected_index >= scroll_offset + kVisibleRows)
                         scroll_offset = selected_index - kVisibleRows + 1;
                     on_draw();
                 }
+                break;
+            }
+            case KEY_LEFT:
+                dial.open(DIAL_TARGET_SEARCH, search_query);
+                current_mode = FV_DIAL_EDIT;
+                on_draw();
                 break;
             case KEY_ENTER:
                 open_selected();
@@ -667,6 +712,7 @@ void File_Viewer_App::receive_event_input(const void* event)
             case KEY_BACK:
                 if (current_path != "/sdcard" && current_path != "/") {
                     current_path = parent_path(current_path);
+                    search_query.clear();
                     refresh_directory(current_path);
                     on_draw();
                 } else {
@@ -687,23 +733,10 @@ void File_Viewer_App::receive_event_input(const void* event)
                 if (text_cursor < (int)text_buffer.size()) text_cursor++;
                 on_draw();
                 break;
-            case KEY_UP:
-                // Jump ~one "line" back (to previous \n or window)
-                {
-                    int i = text_cursor - 1;
-                    while (i > 0 && text_buffer[i] != '\n') --i;
-                    text_cursor = std::max(0, i);
-                    on_draw();
-                }
-                break;
-            case KEY_DOWN:
-                {
-                    int i = text_cursor;
-                    while (i < (int)text_buffer.size() && text_buffer[i] != '\n') ++i;
-                    if (i < (int)text_buffer.size()) ++i;
-                    text_cursor = i;
-                    on_draw();
-                }
+            case KEY_ENTER:
+                dial.open(DIAL_TARGET_TEXT_INSERT, "");
+                current_mode = FV_DIAL_EDIT;
+                on_draw();
                 break;
             case KEY_BACK:
                 text_buffer.clear();
@@ -734,42 +767,23 @@ void File_Viewer_App::receive_event_input(const void* event)
                 on_draw();
                 break;
             case KEY_UP:
-                if (create_cell == FCELL_NAME) cycle_name_char(+1);
-                else if (create_cell == FCELL_EXT) cycle_ext(+1);
-                // dir cell is read-only (current folder)
+                if (create_cell == FCELL_EXT) cycle_ext(+1);
                 on_draw();
                 break;
             case KEY_DOWN:
-                if (create_cell == FCELL_NAME) cycle_name_char(-1);
-                else if (create_cell == FCELL_EXT) cycle_ext(-1);
+                if (create_cell == FCELL_EXT) cycle_ext(-1);
                 on_draw();
                 break;
             case KEY_ENTER:
-                // Append a character to the name (+), or advance name cursor
                 if (create_cell == FCELL_NAME) {
-                    if (ev->action == KeyAction::Hold) {
-                        // already handled above
-                    } else {
-                        // + char
-                        if (create_name.size() < 24) {
-                            create_name.push_back('a');
-                            create_name_cursor = (int)create_name.size() - 1;
-                        }
-                    }
+                    dial.open(DIAL_TARGET_CREATE_NAME, create_name);
+                    current_mode = FV_DIAL_EDIT;
                 }
                 on_draw();
                 break;
             case KEY_BACK:
-                // If name cell and length>1, delete last char (minus); else cancel
-                if (create_cell == FCELL_NAME && create_name.size() > 1) {
-                    create_name.pop_back();
-                    if (create_name_cursor >= (int)create_name.size())
-                        create_name_cursor = (int)create_name.size() - 1;
-                    on_draw();
-                } else {
-                    current_mode = FV_MAIN;
-                    on_draw();
-                }
+                current_mode = FV_MAIN;
+                on_draw();
                 break;
             default: break;
         }
@@ -780,19 +794,20 @@ void File_Viewer_App::receive_event_input(const void* event)
     }
 }
 
-void register_fileviewer()
-{
+void register_fileviewer() {
     AppManifest m;
     m.name = "FileViewerApp";
     m.display_name = "File Viewer";
-    m.description = "Browse SD, view text/images, create notes";
+    m.description = "Browse SD, dial text entry, search";
     m.capabilities =
         static_cast<uint32_t>(AppCapability::FULLSCREEN) |
         static_cast<uint32_t>(AppCapability::NEEDS_WINDOW) |
         static_cast<uint32_t>(AppCapability::USES_SD_CARD);
-    m.stack_size_bytes = 12288;
+    // SD + path strings + dial editor need headroom; 14K was overflowing into
+    // appManager::open_app and corrupting unordered_map hashing.
+    m.stack_size_bytes = 32768;  // VFS + dial strings + markup
     m.priority = 5;
-    m.tick_rate_hz = 10;
+    m.tick_rate_hz = 12;
     m.create = [](const ApplicationConfig& cfg) {
         return std::make_shared<File_Viewer_App>(cfg);
     };

@@ -9,6 +9,14 @@ idf_component_register(
 
         # I2C drivers
         "hardware/drivers/devices_i2c/i2cHelpers.c"
+        
+        
+        #misc random drivers
+        "hardware/drivers/heartMonitor/heartrate_sensor.h"
+        
+        
+        
+        
 
         # LCD drivers
         "hardware/drivers/lcd/fonts/font_basic_types.c"

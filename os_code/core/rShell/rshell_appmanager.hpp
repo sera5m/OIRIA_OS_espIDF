@@ -55,7 +55,7 @@ public:
    std::shared_ptr<DataPool> establish_pool(size_t bytes, e_type_storage stype);
     bool create_pipe(std::shared_ptr<AppBase> source, const std::vector<PipeTarget>& targets, Rshell_pipe_flowType flow);
     void force_check_pools();
-    void close_current_and_open(const std::string& name);
+    void close_current_and_open(std::string name);  // not const std::string&
     void swap_to_app(std::shared_ptr<AppBase> new_app);
     bool is_app_running(const std::string& name);
     bool establish_outlet(std::shared_ptr<AppBase> app, size_t bytes, e_type_storage stype);

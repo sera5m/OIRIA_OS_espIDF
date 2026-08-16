@@ -4,6 +4,15 @@
 #include <string.h>
 #include <algorithm>
 
+// Optional: real WiFi status when the component is linked
+#if __has_include("esp_wifi.h")
+#include "esp_wifi.h"
+#include "esp_netif.h"
+#define BROWSER_HAS_WIFI 1
+#else
+#define BROWSER_HAS_WIFI 0
+#endif
+
 static const char* TAG = "BrowserApp";
 
 static constexpr uint16_t COL_BG = 0x10A2;
@@ -12,13 +21,26 @@ static constexpr uint16_t COL_BG = 0x10A2;
 // Built-in HTML pages (subset understood by html_to_mwenv)
 // ---------------------------------------------------------------------------
 
+const char* BrowserApp::page_wifi() {
+    return R"HTML(<html><head><title>WiFi</title></head><body>
+<h1>WiFi required</h1>
+<p>HTTP pages need a network. Connect WiFi from
+<b>Wireless</b> in the main menu, then return here.</p>
+<p>Built-in pages work offline:</p>
+<ul>
+  <li><a href="about:home">Home</a></li>
+  <li><a href="about:kernel">Kernel</a></li>
+  <li><a href="about:help">Help</a></li>
+</ul>
+</body></html>)HTML";
+}
+
 const char* BrowserApp::page_home() {
     return R"HTML(<!DOCTYPE html>
 <html><head><title>Home</title></head>
 <body>
 <h1>rShell Browser</h1>
-<p>Constrained HTML viewer for the watch. Pages are converted to
-<b>MWenv</b> markup via <code>html_to_mwenv</code>.</p>
+<p>Constrained HTML viewer. Pages convert via <code>html_to_mwenv</code>.</p>
 <hr>
 <h2>Pages</h2>
 <ul>
@@ -26,9 +48,9 @@ const char* BrowserApp::page_home() {
   <li><a href="about:kernel">Kernel notes</a></li>
   <li><a href="about:help">Help</a></li>
   <li><a href="about:about">About</a></li>
+  <li><a href="about:wifi">WiFi status</a></li>
 </ul>
-<p style="color:#888">Network fetch is optional later (esp_http_client).
-Today: built-in <code>about:</code> documents only.</p>
+<p style="color:#888">http:// needs WiFi. Offline: about: pages only.</p>
 </body></html>)HTML";
 }
 
@@ -104,6 +126,16 @@ BrowserApp::BrowserApp(const ApplicationConfig& cfg) : AppBase(cfg) {
     appTickRateHZ = 15;
 }
 
+void BrowserApp::refresh_wifi_status() {
+    wifi_ok = false;
+#if BROWSER_HAS_WIFI
+    wifi_ap_record_t ap{};
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        wifi_ok = true;
+    }
+#endif
+}
+
 void BrowserApp::on_start() {
     ESP_LOGI(TAG, "Browser starting");
 
@@ -124,28 +156,50 @@ void BrowserApp::on_start() {
             .Bg_secondaryColor = 0x2104,
             .WinTextColor = 0xFFFF,
             .backgroundType = BgFillType::Solid,
-            .UpdateRate = 0.5f
+            .UpdateRate = 0.25f
         },
         "Browser"
     );
 
     WindowManager::getInstance().registerWindow(win);
     bind_main_window(win);
+    WindowManager::getInstance().make_window_fullscreen(win);
+    WindowManager::getInstance().SetToolbarActive(false);
+
+    // Keep redrawing so the page does not vanish under other WM activity
+    win->enable_refresh_override = true;
+    win->dirty = true;
 
     history.clear();
     hist_pos = -1;
-    navigate("about:home", true);
+    refresh_wifi_status();
+    // Land on WiFi help first when offline so the prompt is impossible to miss
+    if (!wifi_ok) {
+        navigate("about:wifi", true);
+    } else {
+        navigate("about:home", true);
+    }
+    // Force a full WM pass so the first frame is not blank
+    WindowManager::getInstance().UpdateAll(true, true, false, false);
 }
 
 void BrowserApp::on_stop() {
     if (win) {
+        win->enable_refresh_override = false;
+        WindowManager::getInstance().restore_from_fullscreen();
         WindowManager::getInstance().unregisterWindow(win);
         win.reset();
     }
 }
 
 void BrowserApp::on_pause()  {}
-void BrowserApp::on_resume() {}
+void BrowserApp::on_resume() {
+    refresh_wifi_status();
+    if (win) {
+        win->dirty = true;
+        rebuild_viewport();
+    }
+}
 
 // ---------------------------------------------------------------------------
 
@@ -155,6 +209,7 @@ void BrowserApp::load_builtin(const std::string& name) {
     else if (name == "about")  html = page_about();
     else if (name == "help")   html = page_help();
     else if (name == "kernel") html = page_kernel();
+    else if (name == "wifi")   html = page_wifi();
     else {
         // unknown about: → simple error page
         static char err[512];
@@ -184,15 +239,21 @@ void BrowserApp::navigate(const std::string& target, bool push_hist) {
     if (url.rfind("about:", 0) == 0) {
         load_builtin(url.substr(6));
     } else if (url.rfind("http://", 0) == 0 || url.rfind("https://", 0) == 0) {
-        // Stub — real fetch would use esp_http_client into a PSRAM buffer
-        const char* stub =
-            "<html><head><title>HTTP</title></head><body>"
-            "<h2>HTTP not wired</h2>"
-            "<p>Hook <code>esp_http_client</code> here, write body to PSRAM, "
-            "then <code>html_to_mwenv</code>.</p>"
-            "<p><a href=\"about:home\">Home</a></p>"
-            "</body></html>";
-        doc = html_to_mwenv(stub, strlen(stub));
+        refresh_wifi_status();
+        if (!wifi_ok) {
+            load_builtin("wifi");
+            url = "about:wifi";
+        } else {
+            // Stub until esp_http_client is hooked
+            const char* stub =
+                "<html><head><title>HTTP</title></head><body>"
+                "<h2>HTTP not wired yet</h2>"
+                "<p>WiFi is up. Hook <code>esp_http_client</code> → PSRAM → "
+                "<code>html_to_mwenv</code>.</p>"
+                "<p><a href=\"about:home\">Home</a></p>"
+                "</body></html>";
+            doc = html_to_mwenv(stub, strlen(stub));
+        }
     } else {
         // Treat bare words as about:
         load_builtin(url);
@@ -244,15 +305,21 @@ void BrowserApp::rebuild_viewport() {
     std::string body;
     body.reserve(2048);
 
-    // Title bar
-    char chrome[160];
+    // Title bar + WiFi banner
+    char chrome[220];
+    refresh_wifi_status();
     snprintf(chrome, sizeof(chrome),
-             "<|size=1|><|color=0x07FF|>%s<|n|>"
+             "<|size=1|><|color=0x07FF|>%s  <|color=%s|>[%s]<|n|>"
              "<|color=0x8410|>%s<|n|>"
              "<|color=0x5A6B|>---------------------------<|n|>",
              doc.title.c_str(),
+             wifi_ok ? "0x07E0" : "0xF800",
+             wifi_ok ? "WiFi OK" : "No WiFi",
              url.c_str());
     body += chrome;
+    if (!wifi_ok && show_wifi_banner) {
+        body += "<|color=0xF800|>Connect WiFi in Wireless app for http://<|n|>";
+    }
 
     // Content window
     int end = std::min((int)lines.size(), scroll + visible_lines);
@@ -358,7 +425,7 @@ void register_browser() {
     m.description = "Constrained HTML viewer (html_to_mwenv → MWenv)";
     m.capabilities = static_cast<uint32_t>(AppCapability::FULLSCREEN) |
                      static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
-    m.stack_size_bytes = 16384;  // converter uses std::string temp space
+    m.stack_size_bytes = 32768;  // html_to_mwenv + viewport strings
     m.priority = 5;
     m.tick_rate_hz = 15;
     m.create = [](const ApplicationConfig& cfg) {

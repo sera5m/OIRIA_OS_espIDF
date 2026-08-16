@@ -264,7 +264,10 @@ bool app_launcher_menu::appmenu_launch_app(uint16_t index)
         return false;
     }
 
-    appManager::instance().close_current_and_open(item.app_name);
+    // MUST copy before close — kill_app destroys this MenuItem (and app_name).
+    // Passing a dangling const-ref into open_app → strlen/hash of freed memory.
+    std::string target = item.app_name;
+    appManager::instance().close_current_and_open(std::move(target));
     return true;
 }
 
