@@ -5,9 +5,16 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <algorithm>   // for std::clamp, std::max, std::min
-
+#include "boot_role.hpp"
+#include "os_code/core/rShell/enviroment/env_vars.h"
+#include "os_code/core/window_env/MWenv.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
+#include "esp_log.h"
+#include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/FreeRTOS.h"
+
 #include "esp_log.h"
 #include "esp_err.h"
 #include "hal/i2c_types.h"
@@ -293,110 +300,114 @@ WindowManager::getInstance().UpdateAll(false, true, true, true);
 }//end task
 
 
-
-
+//we might havea to
+//extern "C" void rs_dom_link_start_tx(void);  // puppet
+//extern "C" void rs_dom_link_start_rx(void);  // tyrant
 
 //handles some boot stuff and will also update sensors (not input, it's got it's own task)
 static void bootloader_final_app() {
-	
+    vTaskDelay(pdMS_TO_TICKS(50));
 
+    const boot_role_t role = boot_role_resolve();
+    // Mirror into env so apps can branch without including boot_role.h
+    v_env.headless = !boot_has_display(role);
 
-	
-	//added delays to stop weird timing from causing crashes
-	vTaskDelay(50);
-    screen_set_driver(&onboard_screen_driver);
-    vTaskDelay(50);
-	   //moved framebuffer alloc earlier to not interfere with spi
-	   ESP_LOGI(TAG, "attempting lcd init");
-   lcd_init_simple();
-vTaskDelay(100);
-ESP_LOGI(TAG, "invoking fb clear");
- fb_clear(0x0000);
-  fb_draw_text(4, 20, 80, "booting", 0xFFFF, 2,
-   0, true, 0x0000,
-    40,ft_AVR_classic_6x8 );
-  	ESP_LOGI(TAG, "invoking fb display framebuffer -total mode");
-  	vTaskDelay(50);
-  	refreshScreen();
-    //lcd_fb_display_framebuffer(false, false);
+    ESP_LOGI(TAG, "=== final boot role: %s (headless=%d) ===",
+             boot_role_name(role), (int)v_env.headless);
 
-    
-    
+    // -------------------------------------------------------------------------
+    // Display stack — only if this node owns a panel
+    // -------------------------------------------------------------------------
+    if (boot_has_display(role)) {
+        screen_set_driver(&onboard_screen_driver);
+        vTaskDelay(pdMS_TO_TICKS(50));
+        ESP_LOGI(TAG, "LCD init");
+        lcd_init_simple();
+        vTaskDelay(pdMS_TO_TICKS(100));
+        fb_clear(0x0000);
+        fb_draw_text(4, 20, 80, "booting", 0xFFFF, 2,
+                     0, true, 0x0000, 40, ft_AVR_classic_6x8);
+        vTaskDelay(pdMS_TO_TICKS(50));
+        refreshScreen();
+        vTaskDelay(pdMS_TO_TICKS(50));
+        fb_clear(0x0000);
 
- //section: load window manager components and start the DE
-   vTaskDelay(pdMS_TO_TICKS(50));
-    fb_clear(0x0000);
-        // Initialize WindowManager
-    auto& wm = WindowManager::getInstance();
-ESP_LOGI(TAG, "WindowManager init-d");
-    
+        auto& wm = WindowManager::getInstance();
+        (void)wm;
+        ESP_LOGI(TAG, "WindowManager ready");
 
-    
-	//load msc vars	
-	    //added dynamic throttle because display overperforms above target to ease cpu
-	const TickType_t targetTicks = pdMS_TO_TICKS(1000 / v_env.fpsTarget);
-
-	TickType_t lastWakeTime = xTaskGetTickCount();
-	//esp_task_wdt_add(NULL); //null means this task. as this task is the heavy refresh one, we need to add it so we can manually feed watchdog
-	//esp_task_wdt_set_timeout(6); //default five, i think? 
-
-	//Increase watchdog timeout
-	// In app_main() or bootloader_final_app() before creating tasks:
-	esp_task_wdt_config_t wdt_config = {
-	    .timeout_ms = 10000,  // 10 seconds instead of 5
-	    .idle_core_mask = (1 << 0) | (1 << 1),  // monitor both idle tasks
-	    .trigger_panic = true
-	};
-	esp_task_wdt_reconfigure(&wdt_config);
-
-
-	g_display_mutex = xSemaphoreCreateMutex();//this is specifically for the core 2 display pusher, so we init it before the task is made itself and then use it
-
-
-	//create new tasks for proscessing loop-needed for video
-	xTaskCreatePinnedToCore(core1_createData, "core1", 8192, NULL, 5, &core1TaskHandle, 1);
-	launchTHESTUPIDMOTHERFUCKINGPEICEOFSHITDISPLAYPUSHTASKFUCKYOU();
-//end sector for de init
-
-	
-//boot appmanager and further shell components which might rely on this. bit abckwards but okay
-   
-	auto& manager = appManager::instance();
-	appManager::instance().start_manager_task();
-    vTaskDelay(8);
-    
-        v_env.CurrentHIDTarget=(HIDTarget)HIDTarget::toTaskAndDebug; //for now we'll use debug too. this is position 7. see hid_t.h if this doesn't work right
-
-    
-    //man this section is so stupid and i want to change it
-    // Create or get the instance first
-    register_watch();
-    register_menu();
-	register_fileviewer();
-	
-    register_pong();
-    register_snake();
-	register_2048();
-	
-	register_browser();
-
-
-// Register MenuApp
-//register apps here
-// Static registrations[LOAD DYNAMIC REGISTER NEXT!]
-    
-
-    // Launch the watch app
-    auto watchapp = appManager::instance().open_app("WatchApp");
-    if (!watchapp) {
-        ESP_LOGE(TAG, "Failed to launch WatchApp!");
+        g_display_mutex = xSemaphoreCreateMutex();
+        launchTHESTUPIDMOTHERFUCKINGPEICEOFSHITDISPLAYPUSHTASKFUCKYOU();
+    } else {
+        ESP_LOGI(TAG, "headless: skip LCD / WindowManager display path");
+        // Still construct WM if apps create Windows for DOM packing —
+        // windows exist as data, WinDraw is simply never called / no-ops
+        // when headless (see MWenv WinDraw early-out on headless if you add it).
+        (void)WindowManager::getInstance();
     }
 
+    // -------------------------------------------------------------------------
+    // WDT + shared services
+    // -------------------------------------------------------------------------
+    esp_task_wdt_config_t wdt_config = {
+        .timeout_ms = 10000,
+        .idle_core_mask = (1 << 0) | (1 << 1),
+        .trigger_panic = true
+    };
+    esp_task_wdt_reconfigure(&wdt_config);
 
-	vTaskDelay(8);
-	//end bootloader
-vTaskDelete(NULL); //KILL YOURSELF, BOOTLOADER! 
+    // core1 data task — useful on both roles
+    xTaskCreatePinnedToCore(core1_createData, "core1", 8192, NULL, 5, &core1TaskHandle, 1);
+
+    // -------------------------------------------------------------------------
+    // UART collaborative link
+    // -------------------------------------------------------------------------
+    if (boot_sends_dom(role)) {
+        ESP_LOGI(TAG, "starting DOM TX (puppet → tyrant)");
+        rs_dom_link_start_tx();
+    }
+    if (boot_receives_dom(role)) {
+        ESP_LOGI(TAG, "starting DOM RX (tyrant ← puppets)");
+        rs_dom_link_start_rx();
+    }
+
+    // -------------------------------------------------------------------------
+    // App manager + registrations
+    // -------------------------------------------------------------------------
+    auto& manager = appManager::instance();
+    manager.start_manager_task();
+    vTaskDelay(pdMS_TO_TICKS(8));
+
+    v_env.CurrentHIDTarget = (HIDTarget)HIDTarget::toTaskAndDebug;
+
+    // Always register factories — cheap; open only what the role needs
+    register_watch();
+    register_menu();
+    register_fileviewer();
+    register_pong();
+    register_snake();
+    register_2048();
+    register_browser();
+
+    if (boot_runs_apps_locally(role)) {
+        // SOLO + PUPPET: real app tasks. Puppet apps mark windows dirty;
+        // a small DomEmit task packs and UART-sends each frame.
+        auto watchapp = manager.open_app("WatchApp");
+        if (!watchapp) {
+            ESP_LOGE(TAG, "Failed to launch WatchApp");
+        }
+    } else {
+        // TYRANT: no local game/watch — display is driven by incoming DomFrames.
+        // Optional: open a minimal "DomViewer" app that owns one fullscreen window
+        // and applies RX frames into it.
+        ESP_LOGI(TAG, "tyrant: waiting for puppet DOM (no local WatchApp)");
+        // manager.open_app("DomViewerApp");  // when you add it
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(8));
+    vTaskDelete(NULL);
 }
+
 
 
 

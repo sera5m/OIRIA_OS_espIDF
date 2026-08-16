@@ -700,15 +700,21 @@ void File_Viewer_App::receive_event_input(const void* event) {
                 }
                 break;
             }
+
             case KEY_LEFT:
                 dial.open(DIAL_TARGET_SEARCH, search_query);
                 current_mode = FV_DIAL_EDIT;
                 on_draw();
-                break;
+            break;
+
+            
+
             case KEY_ENTER:
                 open_selected();
                 on_draw();
-                break;
+            break;
+
+
             case KEY_BACK:
                 if (current_path != "/sdcard" && current_path != "/") {
                     current_path = parent_path(current_path);
@@ -718,8 +724,11 @@ void File_Viewer_App::receive_event_input(const void* event) {
                 } else {
                     appManager::instance().close_current_and_open("MenuApp");
                 }
-                break;
-            default: break;
+            break;
+
+
+            default: 
+            break;
         }
         break;
 

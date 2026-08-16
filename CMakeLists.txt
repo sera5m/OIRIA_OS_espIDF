@@ -56,9 +56,14 @@ idf_component_register(
 "os_code/core/rShell/streams/rshell_streamdefs.c"	
 "os_code/core/rShell/streams/rshell_pump.cpp"
 
+#rshell multi device usage (i goon to paralellism)
+"os_code/core/com/boot_role.c"
+
+
         # Notification system
         "os_code/core/notification_sys/rs_notif_dispatcher.c"
 "Fboot/bootfunctions.cpp"
+
 "sss/shared_state.c"
 
         # Applications
