@@ -4,6 +4,7 @@ a custom smartwatch operating system designed to integrate with a variety of ext
 -remote controll and wide communication (lora/bt/wifi/infared/what you connect)
 -soon: external hardware support for random stuff+osciliscope+electronic toolkit
 -soon: shell cmds/elif/etc
+--soon: multi-esp32 colaboration over uart so you can be goated
 -partially working: microsd storage; will add unix-like cmd's soon?
 
 the general goal is to have a mini cyberdeck thingy/non shitty smartwatch.
@@ -16,5 +17,6 @@ lcd and window enviroment: benchmarked at 100fps on 240*280; limited to 45 fps v
 ....might need a minor revision (it is double buffered, which eats a whole megabyte of the 16mb psram) 
 i've done a lot of hacks to keep the ram free, but when i add the document viewer app i may try doing things like having a pointer to the document, and only loading what you see and then a little more, like swap space. or else this would be of very poor quality and lag. 
 
-applications: sorta works, it's a new system i'm still getting used to even though i just made it, huh
+applications: we are ALMOST there gng
 input handler: only buttons and knobs so far. keyboard/mouse/touchscreen/using your phone soon-ish
+
