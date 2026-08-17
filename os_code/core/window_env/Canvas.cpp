@@ -154,7 +154,6 @@ void Canvas::Draw() {
     }
 
     // 2) AnimWorld layer (pong / 2048 / etc.)
-        // 2) AnimWorld layer (pong / 2048 / etc.)
     if (m_auto_draw_world && m_world) {
         // Keep camera offset in sync with canvas position unless caller overrode
         AwCamera cam = m_cam;

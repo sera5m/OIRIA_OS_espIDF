@@ -1,39 +1,5 @@
-
-#include <stdint.h>
-#include <string>
-#include <memory>
-#include <sstream>
-#include <algorithm>
-#include <variant>
-#include <vector>
-#include <atomic>
-#include <string_view>
-
-#include "esp_timer.h"
-#include "esp_log.h"
-#include "esp_heap_caps.h"
-#include "esp_psram.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/semphr.h"
-
-#include "code_stuff/types.h"
-#include "hardware/drivers/lcd/fonts/font_basic_types.h"
-#include "hardware/drivers/lcd/fonts/font_avr_classics.h"
-#include "hardware/drivers/lcd/st7789v2/lcDriver.h"
-#include "hardware/drivers/lcd/st7789v2/lcdriverAddon.hpp"
-#include "hardware/drivers/lcd/st7789v2/t_shapes.h"
-#include "hardware/drivers/abstraction_layers/al_scr.h"
-#include "hardware/drivers/psram_std/psram_std.hpp"
-#include "os_code/core/rShell/enviroment/env_vars.h"
 #include "MWenv.hpp"
-#include "os_code/core/window_env/wenv_basicThemes.h"
 
-#include "os_code/core/window_env/AnimWorld.hpp"
-
-
-#include "PsramBackgroundTile.hpp"
-#include "Canvas.hpp"
 #include <math.h>
 #include <string.h>
 #include <algorithm>
@@ -41,7 +7,6 @@
 
 #include "esp_task_wdt.h"
 #include "hardware/wiring/wiring.h"
-
 
 static const char *TAG = "MWenv";
 
@@ -366,7 +331,7 @@ int safe_parse_int(std::string_view str, int default_val) {
     return digits_found ? result * sign : default_val;
 }
 
-uint16_t safe_parse_color(std::string_view str, uint16_t default_val) {
+uint16_t safe_parse_color(std::string_view str, uint16_t default_val ) {
     if (str.empty()) return default_val;
 
     size_t start = 0;
@@ -853,6 +818,11 @@ if (last_x != wi_sizing.Xpos || last_y != wi_sizing.Ypos) {
         }
     }
 
+    // === 4b. CANVAS / AnimWorld (after bg+text so game layer is visible) ===
+    // Must run here: if apps draw the canvas first and then we fill the
+    // window background on the next WinDraw, the sprites get wiped.
+    DrawCanvas();
+
     // === 5. HIGHLIGHT DASHED BORDER (ONLY if window is highlighted) ===
     if (window_highlighted) {
         // Only update the border color every 10 frames
@@ -879,12 +849,6 @@ if (last_x != wi_sizing.Xpos || last_y != wi_sizing.Ypos) {
         // no highlight today
     }
     
-
-    //============================6. warning experemental feature===========canvas===========
-DrawCanvas();
-
-
-
     // === FINISH ===
     currentPhysX = physX;
     currentPhysY = physY;

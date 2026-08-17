@@ -29,7 +29,6 @@
 #include "hardware/drivers/psram_std/psram_std.hpp"
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/core/window_env/wenv_basicThemes.h"
-#include "os_code/core/window_env/AnimWorld.hpp"
 
 #include "PsramBackgroundTile.hpp"
 #include "Canvas.hpp"
@@ -189,8 +188,8 @@ struct Win_MousePos {
 };
 
 // Helpers declared here, defined in MWenv.cpp
-int      safe_parse_int(std::string_view str, int default_val = 0);
-uint16_t safe_parse_color(std::string_view str, uint16_t default_val = 0xFFFF);
+int      safe_parse_int(std::string_view str, int default_val );
+uint16_t safe_parse_color(std::string_view str, uint16_t default_val );
 
 void CanvasForceParentUpdate(std::shared_ptr<Window> parent);
 void clearScreenEveryXCalls(uint16_t x);

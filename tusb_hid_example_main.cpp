@@ -5,7 +5,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <algorithm>   // for std::clamp, std::max, std::min
-#include "boot_role.hpp"
+#include "os_code/core/com/boot_role.hpp"
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "os_code/core/rShell/rshell_appmanager.hpp"
@@ -301,8 +301,8 @@ WindowManager::getInstance().UpdateAll(false, true, true, true);
 
 
 //we might havea to
-//extern "C" void rs_dom_link_start_tx(void);  // puppet
-//extern "C" void rs_dom_link_start_rx(void);  // tyrant
+extern "C" void rs_dom_link_start_tx(void);  // puppet
+extern "C" void rs_dom_link_start_rx(void);  // tyrant
 
 //handles some boot stuff and will also update sensors (not input, it's got it's own task)
 static void bootloader_final_app() {
