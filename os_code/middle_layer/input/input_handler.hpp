@@ -111,12 +111,15 @@ public:
 class ButtonDevice : public Device {
 public:
     struct Properties {
-        uint16_t press_key;
-        bool send_on_press = true;
-        bool send_on_release = false;
+        uint16_t press_key = 0;
+        bool     send_on_press   = false;  // legacy; hold path uses release/tap
+        bool     send_on_release = true;
+        uint32_t hold_ms         = 450;    // time before Hold is emitted
+        bool     hold_repeat     = false;  // if true, re-send Hold every hold_ms
     };
 
     Properties props;
+
     esp_err_t initialize(const button_config_t* cfg);
     ~ButtonDevice() override;
 
@@ -129,8 +132,19 @@ public:
 
 private:
     button_handle_t btn_handle = nullptr;
+
+    // Hold state (polled from update())
+    bool     pressed_ = false;
+    bool     hold_sent_ = false;
+    uint32_t press_start_ms_ = 0;
+    uint32_t last_hold_ms_ = 0;
+
+    void enqueue(KeyAction action);
+
     static void pressCallback(void* user_ctx, bool pressed);
+    static void releaseCallback(void* user_ctx, bool pressed);
 };
+
 
 void register_input_task_for_notifications(TaskHandle_t task);
 // KnobDevice class

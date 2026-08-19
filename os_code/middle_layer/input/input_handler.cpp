@@ -169,9 +169,14 @@ esp_err_t ButtonDevice::initialize(const button_config_t* cfg)
     if (!cfg) return ESP_ERR_INVALID_ARG;
 
     button_config_t local = *cfg;
-    local.on_press = pressCallback;
-    local.on_release = nullptr;
-    local.user_ctx = this;
+    local.on_press   = pressCallback;
+    local.on_release = releaseCallback;   // was nullptr — required for Tap/Hold
+    local.user_ctx   = this;
+
+    pressed_ = false;
+    hold_sent_ = false;
+    press_start_ms_ = 0;
+    last_hold_ms_ = 0;
 
     return button_new(&local, &btn_handle);
 }
@@ -181,9 +186,17 @@ ButtonDevice::~ButtonDevice()
     if (btn_handle) button_del(btn_handle);
 }
 
-void ButtonDevice::update()
+void ButtonDevice::enqueue(KeyAction action)
 {
-    if (btn_handle) button_poll(btn_handle);
+    InputEvent ev{};
+    ev.target = (HIDTarget)v_env.CurrentHIDTarget;
+    ev.source_device_type = HIDInputDeviceType::Button;
+    ev.key = props.press_key;
+    ev.action = action;
+    ev.timestamp = (uint32_t)(esp_timer_get_time() / 1000);
+    if (ProcInputQueTarget) {
+        xQueueSend(ProcInputQueTarget, &ev, pdMS_TO_TICKS(10));
+    }
 }
 
 void ButtonDevice::pressCallback(void* user_ctx, bool pressed)
@@ -191,19 +204,66 @@ void ButtonDevice::pressCallback(void* user_ctx, bool pressed)
     auto* self = static_cast<ButtonDevice*>(user_ctx);
     if (!self || !pressed) return;
 
-    InputEvent ev{};
-    ev.target = (HIDTarget)v_env.CurrentHIDTarget;
-    ev.source_device_type = HIDInputDeviceType::Button;
-    ev.key = self->props.press_key;
-    ev.action = KeyAction::Tap;
-    ev.timestamp = (uint32_t)(esp_timer_get_time() / 1000);
+    self->pressed_ = true;
+    self->hold_sent_ = false;
+    self->press_start_ms_ = (uint32_t)(esp_timer_get_time() / 1000);
+    self->last_hold_ms_ = self->press_start_ms_;
 
-    if (ProcInputQueTarget) {
-        xQueueSend(ProcInputQueTarget, &ev, pdMS_TO_TICKS(10));
+    // Optional immediate Press for apps that want edge-down
+    if (self->props.send_on_press) {
+        self->enqueue(KeyAction::Press);
     }
 }
 
-void ButtonDevice::interact(Device& other) { /* not used */ }
+void ButtonDevice::releaseCallback(void* user_ctx, bool /*pressed*/)
+{
+    auto* self = static_cast<ButtonDevice*>(user_ctx);
+    if (!self) return;
+
+    const bool was_held = self->hold_sent_;
+    self->pressed_ = false;
+
+    if (!was_held) {
+        // Short click → Tap (what most menu / nav code expects)
+        self->enqueue(KeyAction::Tap);
+    } else {
+        // Long press ending
+        self->enqueue(KeyAction::Release);
+    }
+    self->hold_sent_ = false;
+}
+
+void ButtonDevice::update()
+{
+    if (btn_handle) button_poll(btn_handle);
+
+    if (!pressed_ || hold_sent_) {
+        // still poll for release; if hold_repeat, allow re-fire below
+        if (!(pressed_ && props.hold_repeat && hold_sent_))
+            return;
+    }
+
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    uint32_t held = now - press_start_ms_;
+
+    if (!hold_sent_ && held >= props.hold_ms) {
+        hold_sent_ = true;
+        last_hold_ms_ = now;
+        enqueue(KeyAction::Hold);
+        return;
+    }
+
+    if (props.hold_repeat && hold_sent_ &&
+        (now - last_hold_ms_) >= props.hold_ms) {
+        last_hold_ms_ = now;
+        enqueue(KeyAction::Hold);
+    }
+}
+
+void ButtonDevice::interact(Device& other) { (void)other; }
+
+
+
 
 // ===================================================================
 // KnobDevice
