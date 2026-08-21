@@ -49,6 +49,12 @@ idf_component_register(
          "os_code/core/rShell/rshell_appmanager.cpp"
          
         
+        
+    #vulcan lang core elements    
+    "os_code/applications/vulcanApp/MS_vulcanapp.cpp"
+        
+        
+        
          
        #rshell ipc and storage
 "os_code/core/rShell/streams/rshell_pool.cpp"
@@ -85,6 +91,9 @@ idf_component_register(
 			"os_code/applications/pong/MS_pongapp.cpp" #pong gap deez nuts
 			"os_code/applications/snake/MS_snakeapp.cpp"
 			"os_code/applications/2048/MS_2048app.cpp"
+
+
+
 
 
 #"os_code/core/rShell/streams/rshell_filter.cpp"
