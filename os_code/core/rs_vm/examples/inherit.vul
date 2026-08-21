@@ -1,0 +1,42 @@
+// inherit.vul — C++-style inheritance + @compose composition
+
+struct Animal {
+  i32 legs;
+}
+
+// Inheritance: Cat gets Animal.legs, then adds lives
+struct Cat : Animal {
+  i32 lives;
+}
+
+struct Engine {
+  i32 hp;
+}
+
+// Composition: Car owns an Engine (auto-allocated on new Car)
+struct Car {
+  @compose Engine engine;
+  i32 wheels;
+}
+
+fn main in[] out[] {
+  // --- inheritance ---
+  Cat c = new Cat;
+  c.legs = 4;       // base field
+  c.lives = 9;      // derived field
+  print("cat legs:");
+  print(c.legs);
+  print("cat lives:");
+  print(c.lives);
+
+  // --- composition ---
+  Car car = new Car;
+  car.wheels = 4;
+  car.engine.hp = 120;   // chained through composed object
+  print("car wheels:");
+  print(car.wheels);
+  print("engine hp:");
+  print(car.engine.hp);
+
+  return;
+}

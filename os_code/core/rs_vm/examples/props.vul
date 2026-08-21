@@ -1,0 +1,35 @@
+// function properties + shared/mut + FlowMap + thread sugar (sequential)
+FlowMap Route {
+  a = b;
+  x = y;
+}
+
+struct Vec2 ~packed {
+  i32 x;
+  i32 y;
+}
+
+fn pure_add in[i32 a, i32 b] out[i32 r] {
+  a + b = r;
+  return r;
+}@immut @property;
+
+fn thread_example in[i32 desired_threads] out[] {
+  ```ifsingle=true```
+  ```thread_sequencing=true```
+  `thread_0 {
+    print("seq block 0");
+  }
+  ``thread_parallel {
+    print("parallel fallback");
+  }``
+  return;
+}@threaded;
+
+fn main in[] out[] {
+  @shared i32 s = 10;
+  @mut i32 m = 3;
+  print(pure_add(s, m));
+  thread_example(2);
+  return;
+}

@@ -1,11 +1,20 @@
 #include "os_code/core/rShell/rshell_appmanager.hpp"
 #include "esp_log.h"
+#include <cstdio>
+#include <cstring>
+#include <cstdlib>
 #include "esp_task_wdt.h"
 #include "os_code/core/notification_sys/rs_notif_dispatcher.h"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "os_code/middle_layer/input/hid_t.h"
 //#include "os_code/middle_layer/input/input_handler.hpp" 
 #include "os_code/middle_layer/input/hid_t.h"
+
+
+
+
+
+
 static const char* TAG = "AppManager";
 
 // =======================================================
@@ -238,9 +247,20 @@ void appManager::route_input_to_focused(const InputEvent& ev) {
 }
 
 void appManager::close_current_and_open(std::string name) {
+    // `name` is by-value — safe after kill_app destroys the previous app / menu.
     if (focused_app) {
-        std::string current_name = focused_app->get_app_name();
-        kill_app(current_name);
+        const char* cn = focused_app->get_app_name();
+        std::string current_name = cn ? cn : std::string{};
+        if (!current_name.empty()) {
+            kill_app(current_name);
+        } else {
+            auto doomed = focused_app;
+            focused_app.reset();
+            if (doomed) {
+                doomed->request_stop();
+                cleanup_old_app(doomed);
+            }
+        }
     }
     open_app(name);
 }
@@ -366,4 +386,200 @@ void appManager::force_check_pools() {
             }
         }
     }
+}
+
+
+// =============================================================================
+// Vulcan secondary mode + serial teletype (fused from patches)
+// Enable full RS-VM path by defining RSVM_IN_FIRMWARE in the component build.
+// =============================================================================
+
+#ifndef RSVM_IN_FIRMWARE
+// Stubs so the tree links before rs_vm is wired into CMake.
+
+int appManager::run_vulcan_script(const char* path) {
+    if (!path || !path[0]) return -1;
+    ESP_LOGW(TAG, "run_vulcan_script(%s): RS-VM not in build (define RSVM_IN_FIRMWARE)", path);
+    return -1;
+}
+
+int appManager::send_vulcan_uart(uint8_t type, const uint8_t* payload, uint16_t len) {
+    (void)type; (void)payload; (void)len;
+    ESP_LOGW(TAG, "send_vulcan_uart: RS-VM/UART DOM not in build");
+    return -1;
+}
+
+bool appManager::vulcan_mode_enabled() const {
+    return false;
+}
+
+#else  // RSVM_IN_FIRMWARE
+
+#include "os_code/core/rs_vm/vm/rs_vm.hpp"
+#include "os_code/core/rs_vm/vm/rs_vm_parse.hpp"
+#include "os_code/core/window_env/rs_dom_link.hpp"
+
+extern "C" void rsvm_install_esp_host(rsvm_t* vm);
+
+int appManager::run_vulcan_script(const char* path) {
+    if (!path || !path[0]) return -1;
+    rsvm_t vm;
+    rsvm_init(&vm);
+    rsvm_install_esp_host(&vm);
+    rsvm_parse_err_t err{};
+    rsvm_status_t st = rsvm_eval_file(&vm, path, &err);
+    if (st != RSVM_OK) {
+        ESP_LOGE(TAG, "vulcan %s: %s L%d", path, err.message, err.line);
+        return (int)st;
+    }
+    return 0;
+}
+
+int appManager::send_vulcan_uart(uint8_t type, const uint8_t* payload, uint16_t len) {
+    uint8_t pkt[1024];
+    static uint16_t seq;
+    size_t n = rsdom_pack(pkt, sizeof pkt, type, RSDOM_FLAG_LOGIC, seq++, payload, len);
+    if (!n) return -1;
+    // Wire to the collective UART when pins are configured:
+    // uart_write_bytes(UART_NUM_x, pkt, n);
+    ESP_LOGI(TAG, "send_vulcan_uart type=0x%02X len=%u pkt=%u", type, (unsigned)len, (unsigned)n);
+    return (int)n;
+}
+
+bool appManager::vulcan_mode_enabled() const {
+    return true;
+}
+
+#endif  // RSVM_IN_FIRMWARE
+
+// ----- Serial terminal (always present; uses run_vulcan_script / feed) -----
+
+void appManager::start_serial_terminal() {
+    if (terminal_task_) return;
+    isConnectedToSerialMonitor = true;
+    BaseType_t ok = xTaskCreate(terminal_task_fn, "terminal", 8192, this, 5, &terminal_task_);
+    if (ok != pdPASS) {
+        terminal_task_ = nullptr;
+        isConnectedToSerialMonitor = false;
+        ESP_LOGE(TAG, "terminal task create failed");
+        return;
+    }
+    ESP_LOGI(TAG, "serial terminal started (isConnectedToSerialMonitor=1)");
+}
+
+void appManager::stop_serial_terminal() {
+    isConnectedToSerialMonitor = false;
+    if (terminal_task_) {
+        TaskHandle_t t = terminal_task_;
+        terminal_task_ = nullptr;
+        vTaskDelete(t);
+    }
+}
+
+int appManager::load_serial_script(const char* path) {
+    if (!path || serial_script_busy_) return -1;
+    FILE* f = fopen(path, "rb");
+    if (!f) {
+        ESP_LOGE(TAG, "load_serial_script: cannot open %s", path);
+        return -1;
+    }
+    size_t n = fread(serial_script_buf_, 1, kSerialScriptMax - 1, f);
+    fclose(f);
+    serial_script_buf_[n] = 0;
+    serial_script_len_ = n;
+    return feed_serial_source(serial_script_buf_, n);
+}
+
+int appManager::feed_serial_source(const char* src, size_t len) {
+    if (!src || serial_script_busy_) return -1;
+    serial_script_busy_ = true;
+    int rc = -1;
+#if defined(RSVM_IN_FIRMWARE)
+    rsvm_t vm;
+    rsvm_init(&vm);
+    rsvm_install_esp_host(&vm);
+    rsvm_parse_err_t err{};
+    char* copy = (char*)malloc(len + 1);
+    if (!copy) {
+        serial_script_busy_ = false;
+        return -1;
+    }
+    memcpy(copy, src, len);
+    copy[len] = 0;
+    rsvm_status_t st = rsvm_eval(&vm, copy, &err);
+    free(copy);
+    if (st != RSVM_OK) {
+        ESP_LOGE(TAG, "serial vulcan err L%d: %s", err.line, err.message);
+        rc = (int)st;
+    } else {
+        rc = 0;
+    }
+#else
+    (void)len;
+    ESP_LOGW(TAG, "feed_serial_source: RS-VM not in build, %u bytes ignored", (unsigned)len);
+    rc = -1;
+#endif
+    serial_script_busy_ = false;
+    return rc;
+}
+
+void appManager::terminal_task_fn(void* arg) {
+    auto* self = static_cast<appManager*>(arg);
+    char line[256];
+    size_t li = 0;
+    char accum[kSerialScriptMax];
+    size_t ai = 0;
+
+    while (self && self->isConnectedToSerialMonitor) {
+#if defined(RSVM_IN_FIRMWARE) && defined(CONFIG_ESP_CONSOLE_UART_NUM)
+        // Prefer real UART when available
+        uint8_t c = 0;
+        int n = uart_read_bytes((uart_port_t)CONFIG_ESP_CONSOLE_UART_NUM, &c, 1, pdMS_TO_TICKS(50));
+        if (n <= 0) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+#else
+        // No UART driver in this TU — idle until stopped (host can still feed_serial_source)
+        vTaskDelay(pdMS_TO_TICKS(200));
+        continue;
+#endif
+        if (c == '\r') continue;
+        if (c != '\n') {
+            if (li + 1 < sizeof line) line[li++] = (char)c;
+            continue;
+        }
+        line[li] = 0;
+        li = 0;
+        if (line[0] == 0) continue;
+
+        if (strncmp(line, "run ", 4) == 0) {
+            self->load_serial_script(line + 4);
+            ai = 0;
+            continue;
+        }
+        if (strcmp(line, ".") == 0) {
+            accum[ai] = 0;
+            self->feed_serial_source(accum, ai);
+            ai = 0;
+            continue;
+        }
+        if (strcmp(line, "clear") == 0) {
+            ai = 0;
+            continue;
+        }
+
+        size_t L = strlen(line);
+        if (ai + L + 2 < sizeof accum) {
+            memcpy(accum + ai, line, L);
+            ai += L;
+            accum[ai++] = '\n';
+            accum[ai] = 0;
+        }
+        if (L > 0 && line[L - 1] == ';') {
+            self->feed_serial_source(line, L);
+            ai = 0;
+        }
+    }
+    vTaskDelete(nullptr);
 }

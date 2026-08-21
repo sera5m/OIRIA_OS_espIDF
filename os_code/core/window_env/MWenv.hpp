@@ -188,8 +188,8 @@ struct Win_MousePos {
 };
 
 // Helpers declared here, defined in MWenv.cpp
-int      safe_parse_int(std::string_view str, int default_val =0);
-uint16_t safe_parse_color(std::string_view str, uint16_t default_val =0xFFFF);
+int      safe_parse_int(std::string_view str, int default_val = 0);
+uint16_t safe_parse_color(std::string_view str, uint16_t default_val = 0xFFFF);
 
 void CanvasForceParentUpdate(std::shared_ptr<Window> parent);
 void clearScreenEveryXCalls(uint16_t x);

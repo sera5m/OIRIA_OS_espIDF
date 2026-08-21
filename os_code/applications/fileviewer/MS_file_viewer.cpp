@@ -11,9 +11,10 @@
 #include "os_code/middle_layer/input/input_handler.hpp"
 #include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
 #include "hardware/drivers/lcd/st7789v2/lcDriver.h"
-#include "Fboot/bootfunctions.hpp"
-// Provided by hardware/drivers/sd_card (d_sdc)
 
+// Provided by hardware/drivers/sd_card (d_sdc)
+extern "C" esp_err_t sd_unmount(void);
+extern "C" esp_err_t sd_remount(void);
 
 extern "C" bool jpeg_decode_file(const char* path, uint16_t* fb, int fb_w, int fb_h) __attribute__((weak));
 extern "C" bool bmp_decode_file(const char* path, uint16_t* fb, int fb_w, int fb_h) __attribute__((weak));
@@ -700,21 +701,15 @@ void File_Viewer_App::receive_event_input(const void* event) {
                 }
                 break;
             }
-
             case KEY_LEFT:
                 dial.open(DIAL_TARGET_SEARCH, search_query);
                 current_mode = FV_DIAL_EDIT;
                 on_draw();
-            break;
-
-            
-
+                break;
             case KEY_ENTER:
                 open_selected();
                 on_draw();
-            break;
-
-
+                break;
             case KEY_BACK:
                 if (current_path != "/sdcard" && current_path != "/") {
                     current_path = parent_path(current_path);
@@ -724,11 +719,8 @@ void File_Viewer_App::receive_event_input(const void* event) {
                 } else {
                     appManager::instance().close_current_and_open("MenuApp");
                 }
-            break;
-
-
-            default: 
-            break;
+                break;
+            default: break;
         }
         break;
 

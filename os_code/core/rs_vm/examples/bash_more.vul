@@ -1,0 +1,10 @@
+// bash_more.vul — grep / echo / wc / sh helpers (single-line haystack ok)
+string blob = "alpha beta line gamma beta2";
+print(grep(blob, "beta"));
+print(wc(blob));
+echo("hello-echo");
+print(sh("help"));
+print(sh("mkdir /sdcard/apps"));
+print(sh("nano /sdcard/note.txt"));
+print(sh("rm /tmp/x"));
+// head with explicit newlines via printc is out of scope; use sh for file tools

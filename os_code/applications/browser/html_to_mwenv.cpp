@@ -262,8 +262,8 @@ struct Conv {
     bool in_script = false;
     bool in_style = false;
     bool in_title = false;
-    int skip_depth = 0; // nested ignored regions
-    int list_depth = 0;
+    int  skip_depth = 0; // nested ignored regions (script/style/svg/…)
+    int  list_depth = 0;
     int ol_counter[8] = {0};
     bool pending_space = false;
 

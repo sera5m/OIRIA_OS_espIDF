@@ -1,0 +1,19 @@
+// cats.vul — shared ASCII cat helpers (included by other programs)
+
+struct AsciiCat {
+  i32 id;
+}
+
+fn drawCat in[] out[] {
+  print("/\_/\");
+  print("| o.o |");
+  print("> ^ <");
+  return;
+}
+
+fn fancyCat in[i32 catamount] out[] {
+  do n[catamount] {
+    drawCat();
+  }
+  return;
+}@monitor_execs @monitor_time_highres;

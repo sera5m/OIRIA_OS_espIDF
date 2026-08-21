@@ -32,6 +32,11 @@
 #define RSDOM_TYPE_HOLD     0x03   // flow control (maps to RS_HoldState)
 #define RSDOM_TYPE_HELLO    0x04   // capability / role announce
 #define RSDOM_TYPE_PING     0x05
+#define RSDOM_TYPE_VM       0x10   // RSV1 bytecode image (rs_vm)
+#define RSDOM_TYPE_VM_SRC   0x11   // UTF-8 Vulcan source
+#define RSDOM_TYPE_VM_OUT   0x12   // print capture reply
+#define RSDOM_TYPE_VM_ERR   0x13   // error text
+#define RSDOM_TYPE_VM_ACK   0x14   // silent OK + steps
 
 #define RSDOM_FLAG_NEED_ACK 0x01
 #define RSDOM_FLAG_PUPPET   0x02   // sender is worker

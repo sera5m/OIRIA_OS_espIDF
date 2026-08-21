@@ -16,8 +16,7 @@
 #include "os_code/middle_layer/input/hid_t.h"
 #include "os_code/middle_layer/input/input_handler.hpp"
 #include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
-#include "os_code/applications/game_stats.hpp"
-
+#include "game_stats.hpp"
 
 // ---------------------------------------------------------------------------
 // 2048 – welded text-on-tile squares via AnimWorld

@@ -1,0 +1,27 @@
+// abracadabra.vul — phrase cycle + included cat library
+set_step_depth 2000000;
+set_output_bytecode "examples/abracadabra.bvul";
+
+include "cats.vul";
+
+string phrase = "meow";
+
+fn main in[] out[] {
+  i32 plen = strlen(phrase);
+  i32 endAt = 12;
+  i32 idx = 0;
+
+  do n[endAt] {
+    i32 lim = idx + 1;
+    i32 j = 0;
+    do n[lim] {
+      printc(phrase[j % plen]);
+      j = j + 1;
+    }
+    printnl();
+    idx = idx + 1;
+  }
+
+  fancyCat(2);
+  return;
+}@monitor_time @monitor_time_highres @monitor_ram @monitor_execs;

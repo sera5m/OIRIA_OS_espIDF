@@ -1,0 +1,12 @@
+// shell_demo.vul — bash-like OS surface (host-backed)
+print(sh("help"));
+print(pwd());
+cd("/sdcard/apps");
+print(pwd());
+print(ls("."));
+print(env("ROLE"));
+mw_text(0, "hello from vulcan");
+open_app("Pong");
+uart_send(0x11, "print(1);");
+pool("scores", 0, "");
+sh("echo integrated");

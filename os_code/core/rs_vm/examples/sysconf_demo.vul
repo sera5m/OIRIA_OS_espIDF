@@ -1,0 +1,9 @@
+// sysconf_demo.vul — read/write mock v_env fields
+print(sysconf("brightness"));
+sysconf_set("brightness", 128);
+print(sysconf("brightness"));
+print(sysconf("fpsTarget"));
+sysconf_set("headless", 1);
+print(sysconf("headless"));
+print(sysconf("ROLE"));
+print(sysconf("screen_dim_w"));
