@@ -4,7 +4,7 @@
 // Tracks per-slot property flags and provides a central registry of the
 // property enum used by the VM.
 // =============================================================================
-#include "rs_vm.hpp"
+#include "os_code/core/rs_vm/vm/rs_vm.hpp"
 
 #ifdef __cplusplus
 extern "C" {

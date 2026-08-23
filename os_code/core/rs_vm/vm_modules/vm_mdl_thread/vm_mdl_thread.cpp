@@ -1,5 +1,5 @@
 // vm_mdl_thread – sequential fallback + config for FreeRTOS later
-#include "vm_mdl_thread.h"
+#include "os_code/core/rs_vm/vm_modules/vm_mdl_thread/vm_mdl_thread.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>

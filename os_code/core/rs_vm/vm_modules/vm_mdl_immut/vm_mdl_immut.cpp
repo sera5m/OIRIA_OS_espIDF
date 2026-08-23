@@ -1,5 +1,5 @@
 // vm_mdl_immut – enforces @immut functions cannot write external slots
-#include "vm_mdl_immut.h"
+#include "os_code/core/rs_vm/vm_modules/vm_mdl_immut/vm_mdl_immut.h"
 #include <stdio.h>
 #include <string.h>
 

@@ -3,8 +3,8 @@
 // =============================================================================
 // VulcanApp – minimal RS-VM runner for the watch (ESP32-S3 / AppBase)
 // =============================================================================
-// Shows VM print output on a scrollable text window. Runs an embedded sample
-// (or SD script later). BACK exits; ENTER re-runs the sample.
+// Shows VM print output via Window::SetText. ENTER re-runs sample; BACK exits.
+// Call register_vulcan() from boot / menu init (same as register_pong).
 // =============================================================================
 
 #include <stdint.h>
@@ -19,9 +19,7 @@
 #include "os_code/core/window_env/MWenv.hpp"
 #include "os_code/middle_layer/input/hid_t.h"
 #include "os_code/middle_layer/input/input_handler.hpp"
-#include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
 
-// RS-VM (watch tree path — adjust if your layout differs)
 #include "os_code/core/rs_vm/vm/rs_vm.hpp"
 #include "os_code/core/rs_vm/vm/rs_vm_parse.hpp"
 
@@ -38,13 +36,11 @@ public:
     void on_pause() override;
     void on_resume() override;
 
-    // Called from ESP host print hooks (user pointer → this)
     void append_log(const char* s, int len);
     void append_char(char c);
 
 private:
     static constexpr int LOG_CAP = 2048;
-    static constexpr int LINE_H  = 14;
     static constexpr int MAX_LINES_VISIBLE = 12;
 
     std::shared_ptr<Window> win;
@@ -56,14 +52,14 @@ private:
 
     char     log_buf[LOG_CAP] = {0};
     int      log_len = 0;
-    int      scroll  = 0;   // line offset from bottom
+    int      scroll  = 0;
 
     void clear_log();
     void run_embedded_sample();
     void redraw_text();
 };
 
-// ESP host install (defined in rs_vm_host_esp.cpp)
+void register_vulcan();
+
 extern "C" void rsvm_install_esp_host(rsvm_t* vm);
-// Optional: install host with app-backed print sink
 void rsvm_install_esp_host_ui(rsvm_t* vm, VulcanApp* app);

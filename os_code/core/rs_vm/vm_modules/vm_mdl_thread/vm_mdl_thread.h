@@ -10,7 +10,7 @@
 // On hosts without true multi-threading (desktop test, or ESP when
 // ```ifsingle=true```) blocks run in source order.
 // =============================================================================
-#include "rs_vm.hpp"
+#include "os_code/core/rs_vm/vm/rs_vm.hpp"
 
 #ifdef __cplusplus
 extern "C" {

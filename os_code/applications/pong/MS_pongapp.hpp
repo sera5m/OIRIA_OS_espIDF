@@ -18,7 +18,7 @@
 // Do not rely only on the opaque forward typedef in rshell_streamdefs.h.
 #include "os_code/middle_layer/input/input_handler.hpp"
 #include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
-#include "game_stats.hpp"
+#include "os_code/applications/game_stats.hpp"
 
 // ---------------------------------------------------------------------------
 // Pong – AnimWorld + Canvas mini-game

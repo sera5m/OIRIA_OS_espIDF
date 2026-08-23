@@ -308,7 +308,7 @@ inline void ui8Tostr(uint8_t v, std::string& out, size_t pos = std::string::npos
 
 // ====================== FASTER PARSERS ======================
 
-int safe_parse_int(std::string_view str, int default_val = 0) {
+int safe_parse_int(std::string_view str, int default_val) {
     if (str.empty()) return default_val;
 
     int sign = 1;
@@ -331,7 +331,7 @@ int safe_parse_int(std::string_view str, int default_val = 0) {
     return digits_found ? result * sign : default_val;
 }
 
-uint16_t safe_parse_color(std::string_view str, uint16_t default_val = 0xFFFF) {
+uint16_t safe_parse_color(std::string_view str, uint16_t default_val) {
     if (str.empty()) return default_val;
 
     size_t start = 0;

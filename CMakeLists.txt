@@ -2,7 +2,7 @@ idf_component_register(
     SRCS
         # Main
         "tusb_hid_example_main.cpp"
-
+        "os_code/core/com/rs_autoconnect.cpp"
         # Helper code
         "code_stuff/helperfunctions.cpp"
         "code_stuff/types.c"
@@ -12,10 +12,10 @@ idf_component_register(
         
         
         #misc random drivers
-        "hardware/drivers/heartMonitor/heartrate_sensor.h"
+        # "hardware/drivers/heartMonitor/heartrate_sensor.c"
         
-        
-        
+        "os_code/applications/discord/discord_rpc.cpp"
+     
         
 
         # LCD drivers
@@ -51,6 +51,17 @@ idf_component_register(
         
         
     #vulcan lang core elements    
+    "os_code/core/rs_vm/vm/rs_vm.cpp"
+  "os_code/core/rs_vm/vm/rs_vm_parse.cpp"
+  "os_code/core/rs_vm/vm/rs_vm_host_esp.cpp"
+  "os_code/core/rs_vm/debugger/rs_dbg.cpp"
+  "os_code/core/rs_vm/vm_modules/vm_mdl_immut/vm_mdl_immut.cpp"
+  "os_code/core/rs_vm/vm_modules/vm_mdl_thread/vm_mdl_thread.cpp"
+  "os_code/core/rs_vm/vm_modules/vm_mdl_property/vm_mdl_property.cpp"
+  "os_code/core/rs_vm/vm_modules/vm_mdl_flowmap/vm_mdl_flowmap.cpp"
+  "os_code/core/rs_vm/vm_modules/vm_mdl_shell/vm_mdl_shell.cpp"
+ #"os_code/core/rs_vm/vm_modules/vm_mdl_espidf/vm_mdl_espidf.cpp"
+    #
     "os_code/applications/vulcanApp/MS_vulcanapp.cpp"
         
         
@@ -96,10 +107,14 @@ idf_component_register(
 
 
 
-#"os_code/core/rShell/streams/rshell_filter.cpp"
+             
+        EMBED_TXTFILES
+         "os_code/core/com/autoconnect.conf"
+        
 		
     INCLUDE_DIRS
         "."
+        "os_code/core/com" 
         "code_stuff"
         "hardware/drivers/devices_i2c"
         "hardware/drivers/lcd/fonts"
@@ -133,12 +148,16 @@ PRIV_REQUIRES
         log
         esp_netif
         esp_wifi
+        esp_event
+        fatfs
+        sdmmc
         freertos
         tinyusb
         esp_http_server
         esp_psram
         esp_timer
         esp_driver_i2c
+        esp_http_client
         
     REQUIRES
      ulp        
@@ -155,6 +174,7 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
     -Wno-error=missing-field-initializers 
     -Wno-format-truncation
     -Wno-error=reorder #SHUT THE FUCK UP
+    -Wno-error=array-compare
 )
 
 

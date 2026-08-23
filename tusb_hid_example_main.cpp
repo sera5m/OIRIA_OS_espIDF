@@ -74,7 +74,7 @@
 #include "tusb.h"
 #include "class/hid/hid.h"
 
-
+#include "os_code/applications/discord/discord_rpc.h"
 //==============================================================apps
 #include  "os_code/applications/fileviewer/MS_file_viewer.hpp"
 
@@ -85,11 +85,14 @@
 #include "os_code/applications/snake/MS_snakeapp.hpp"
 #include"os_code/applications/2048/MS_2048app.hpp"
 #include "os_code/applications/browser/MS_browserapp.hpp"
+#include "os_code/applications/vulcanApp/MS_vulcanapp.hpp"
 //==============================================================apps
 
+#include "app_registerTable.h" //master list of all baked in apps
 
-
-
+#include "esp_http_client.h"
+#include "esp_crt_bundle.h"
+#include "os_code/core/com/rs_autoconnect.hpp"
 #include "os_code/core/notification_sys/rs_notif_dispatcher.h"
 #include "ulp_riscv.h"
 //#include "ulp_riscv/ulp_riscv.h"
@@ -99,7 +102,8 @@
 
 #include "Fboot/bootfunctions.hpp"
 
-
+#include "os_code/core/com/rs_autoconnect.hpp"
+#include "os_code/core/rShell/enviroment/env_vars.h"
 // Known devices (fill in your full list)
 typedef struct {
     uint8_t addr;
@@ -232,6 +236,14 @@ startInputTask();
 
 load_ulp();
     
+
+//
+// Quick test without files (replace YOUR_*):
+ 
+// Optional: start serial teletype after app manager is up (in bootloader_final_app):
+//   appManager::instance().start_serial_terminal();
+
+
     bootloader_final_app();   // sd_ok was false anyway
     
     
@@ -303,6 +315,47 @@ WindowManager::getInstance().UpdateAll(false, true, true, true);
 //we might havea to
 extern "C" void rs_dom_link_start_tx(void);  // puppet
 extern "C" void rs_dom_link_start_rx(void);  // tyrant
+
+
+
+
+extern  const char* kTestSsid;
+extern  const char* kTestPass;
+extern  const char* kDefaultWebhook;
+extern  const char* kDefaultMsg;
+
+// ---------------------------------------------------------------------------
+// Discord webhook test (inline in main for now)
+// ---------------------------------------------------------------------------
+
+
+
+
+static bool ensure_wifi(void) {
+    ESP_LOGI(TAG, "wifi: preparing STA (ssid='%s')", kTestSsid);
+
+    rs_ac_table_t tab{};
+    rs_ac_set_test_wifi(&tab, kTestSsid, kTestPass);
+    rs_ac_sync_to_env(&tab);
+
+    ESP_LOGI(TAG, "wifi: connecting (timeout 15s, WPA2/WPA3)...");
+    int64_t t0 = esp_timer_get_time();
+    bool ok = rs_ac_wifi_connect(&tab, 25000);
+    int64_t ms = (esp_timer_get_time() - t0) / 1000;
+
+    if (ok) {
+        ESP_LOGI(TAG, "wifi: CONNECTED ssid='%s' in %lld ms", kTestSsid, (long long)ms);
+    } else {
+        ESP_LOGW(TAG, "wifi: FAILED ssid='%s' after %lld ms — POST may still work if already online",
+                 kTestSsid, (long long)ms);
+    }
+    return ok;
+}
+
+
+
+
+
 
 //handles some boot stuff and will also update sensors (not input, it's got it's own task)
 static void bootloader_final_app() {
@@ -381,13 +434,8 @@ static void bootloader_final_app() {
     v_env.CurrentHIDTarget = (HIDTarget)HIDTarget::toTaskAndDebug;
 
     // Always register factories — cheap; open only what the role needs
-    register_watch();
-    register_menu();
-    register_fileviewer();
-    register_pong();
-    register_snake();
-    register_2048();
-    register_browser();
+    //registry
+	Register_appTable();
 
     if (boot_runs_apps_locally(role)) {
         // SOLO + PUPPET: real app tasks. Puppet apps mark windows dirty;
@@ -403,6 +451,11 @@ static void bootloader_final_app() {
         ESP_LOGI(TAG, "tyrant: waiting for puppet DOM (no local WatchApp)");
         // manager.open_app("DomViewerApp");  // when you add it
     }
+	
+	
+	
+	send_discord_rpc_msg("THEY GLOW YOU SHINE");
+	
 
     vTaskDelay(pdMS_TO_TICKS(8));
     vTaskDelete(NULL);

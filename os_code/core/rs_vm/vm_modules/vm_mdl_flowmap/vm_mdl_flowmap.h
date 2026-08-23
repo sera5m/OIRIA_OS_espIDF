@@ -3,7 +3,7 @@
 // vm_mdl_flowmap – FlowMap Route { x = y; … } data-routing DSL
 // At compile time routes are stored; at runtime OP_FLOW can apply them.
 // =============================================================================
-#include "rs_vm.hpp"
+#include "os_code/core/rs_vm/vm/rs_vm.hpp"
 
 #ifdef __cplusplus
 extern "C" {

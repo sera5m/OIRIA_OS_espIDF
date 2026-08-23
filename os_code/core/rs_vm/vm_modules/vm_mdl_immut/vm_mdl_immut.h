@@ -4,7 +4,7 @@
 // Restricts writes to external (non-local) slots when a function is marked
 // @immut. On single-threaded / desktop builds this is a soft check.
 // =============================================================================
-#include "rs_vm.hpp"
+#include "os_code/core/rs_vm/vm/rs_vm.hpp"
 
 #ifdef __cplusplus
 extern "C" {

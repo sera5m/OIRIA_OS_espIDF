@@ -1,6 +1,6 @@
-#include "rs_vm_parse.hpp"
-#include "vm_modules/vm_mdl_property/vm_mdl_property.h"
-#include "vm_modules/vm_mdl_thread/vm_mdl_thread.h"
+#include "os_code/core/rs_vm/vm/rs_vm_parse.hpp"
+#include "os_code/core/rs_vm/vm_modules/vm_mdl_property/vm_mdl_property.h"
+#include "os_code/core/rs_vm/vm_modules/vm_mdl_thread/vm_mdl_thread.h"
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>

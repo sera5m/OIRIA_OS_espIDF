@@ -95,7 +95,9 @@ struct DialEditor {
 
 class File_Viewer_App : public AppBase {
 public:
-    explicit File_Viewer_App(const ApplicationConfig& cfg);
+    explicit File_Viewer_App(const ApplicationConfig& cfg) : AppBase(cfg) {
+        appTickRateHZ = 12;
+    }
 
     void tick_app(uint32_t delta_ms) override;
     void receive_event_input(const void* event) override;

@@ -1,5 +1,5 @@
 // vm_mdl_flowmap – simple rename / data-flow routes
-#include "vm_mdl_flowmap.h"
+#include "os_code/core/rs_vm/vm_modules/vm_mdl_flowmap/vm_mdl_flowmap.h"
 #include <string.h>
 
 static void on_enter(rsvm_t* vm, uint8_t func_id) {

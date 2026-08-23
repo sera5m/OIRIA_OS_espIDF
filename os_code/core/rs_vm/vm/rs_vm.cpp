@@ -1,8 +1,8 @@
-#include "rs_vm.hpp"
-#include "vm_modules/vm_mdl_immut/vm_mdl_immut.h"
-#include "vm_modules/vm_mdl_thread/vm_mdl_thread.h"
-#include "vm_modules/vm_mdl_property/vm_mdl_property.h"
-#include "vm_modules/vm_mdl_flowmap/vm_mdl_flowmap.h"
+#include "os_code/core/rs_vm/vm/rs_vm.hpp"
+#include "os_code/core/rs_vm/vm_modules/vm_mdl_immut/vm_mdl_immut.h"
+#include "os_code/core/rs_vm/vm_modules/vm_mdl_thread/vm_mdl_thread.h"
+#include "os_code/core/rs_vm/vm_modules/vm_mdl_property/vm_mdl_property.h"
+#include "os_code/core/rs_vm/vm_modules/vm_mdl_flowmap/vm_mdl_flowmap.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -573,12 +573,12 @@ rsvm_status_t rsvm_step(rsvm_t* vm) {
                     if (props & RSVM_PROP_MON_TIME) {
                         uint32_t ms = (uint32_t)(dt / 1000000ull);
                         vm->func_last_ms[fr.func_id] = ms;
-                        printf("[monitor_time] %s: %u ms\n", fname, ms);
+                        printf("[monitor_time] %s: %lu ms\n", fname, ms);
                     }
                     if (props & RSVM_PROP_MON_TIME_HI) {
                         uint32_t us = (uint32_t)(dt / 1000ull);
                         vm->func_last_us[fr.func_id] = us;
-                        printf("[monitor_time_highres] %s: %u us\n", fname, us);
+                        printf("[monitor_time_highres] %s: %lu us\n", fname, us);
                     }
                 }
                 if (props & RSVM_PROP_MON_RAM) {
@@ -586,10 +586,10 @@ rsvm_status_t rsvm_step(rsvm_t* vm) {
                         (uint32_t)vm->heap_used + (uint32_t)vm->str_pool_used;
                     uint32_t delta = now_ram - vm->func_enter_ram[fr.func_id];
                     vm->func_last_ram[fr.func_id] = delta;
-                    printf("[monitor_ram] %s: +%u bytes (heap+str)\n", fname, delta);
+                    printf("[monitor_ram] %s: +%lu bytes (heap+str)\n", fname, delta);
                 }
                 if (props & RSVM_PROP_MON_EXECS) {
-                    printf("[monitor_execs] call %u of %s\n",
+                    printf("[monitor_execs] call %lu of %s\n",
                            vm->func_execs[fr.func_id], fname);
                 }
             }

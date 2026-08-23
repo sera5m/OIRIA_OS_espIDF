@@ -16,7 +16,7 @@
 #include "os_code/middle_layer/input/hid_t.h"
 #include "os_code/middle_layer/input/input_handler.hpp"
 #include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
-#include "game_stats.hpp"
+#include "os_code/applications/game_stats.hpp"
 
 // ---------------------------------------------------------------------------
 // Snake – one-dial friendly (UP/DOWN = turn left/right relative to heading)

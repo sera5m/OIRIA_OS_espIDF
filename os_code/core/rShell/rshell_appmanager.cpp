@@ -257,7 +257,7 @@ void appManager::close_current_and_open(std::string name) {
             auto doomed = focused_app;
             focused_app.reset();
             if (doomed) {
-                doomed->request_stop();
+                doomed->force_close();
                 cleanup_old_app(doomed);
             }
         }
@@ -531,16 +531,19 @@ void appManager::terminal_task_fn(void* arg) {
     size_t ai = 0;
 
     while (self && self->isConnectedToSerialMonitor) {
-#if defined(RSVM_IN_FIRMWARE) && defined(CONFIG_ESP_CONSOLE_UART_NUM)
-        // Prefer real UART when available
         uint8_t c = 0;
+        bool got = false;
+#if defined(RSVM_IN_FIRMWARE) && defined(CONFIG_ESP_CONSOLE_UART_NUM)
         int n = uart_read_bytes((uart_port_t)CONFIG_ESP_CONSOLE_UART_NUM, &c, 1, pdMS_TO_TICKS(50));
-        if (n <= 0) {
+        got = (n > 0);
+        if (!got) {
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
 #else
-        // No UART driver in this TU — idle until stopped (host can still feed_serial_source)
+        // No UART driver in this TU — idle (host can still call feed_serial_source)
+        (void)c;
+        (void)got;
         vTaskDelay(pdMS_TO_TICKS(200));
         continue;
 #endif
@@ -583,3 +586,4 @@ void appManager::terminal_task_fn(void* arg) {
     }
     vTaskDelete(nullptr);
 }
+

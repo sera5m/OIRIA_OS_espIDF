@@ -12,9 +12,13 @@
 #include "os_code/middle_layer/input/inputProscessorTask/ipt_x.hpp"
 #include "hardware/drivers/lcd/st7789v2/lcDriver.h"
 
-// Provided by hardware/drivers/sd_card (d_sdc)
-extern "C" esp_err_t sd_unmount(void);
-extern "C" esp_err_t sd_remount(void);
+// Optional SD driver hooks. Weak stubs if d_sdc is not linked.
+extern "C" esp_err_t __attribute__((weak)) sd_unmount(void) {
+    return ESP_ERR_NOT_SUPPORTED;
+}
+extern "C" esp_err_t __attribute__((weak)) sd_remount(void) {
+    return ESP_ERR_NOT_SUPPORTED;
+}
 
 extern "C" bool jpeg_decode_file(const char* path, uint16_t* fb, int fb_w, int fb_h) __attribute__((weak));
 extern "C" bool bmp_decode_file(const char* path, uint16_t* fb, int fb_w, int fb_h) __attribute__((weak));
@@ -129,10 +133,6 @@ void DialEditor::render(std::string& out) const {
 
 // ===================================================================
 
-File_Viewer_App::File_Viewer_App(const ApplicationConfig& cfg) : AppBase(cfg) {
-    appTickRateHZ = 12;
-}
-
 bool File_Viewer_App::ensure_sd_mounted() {
     // Fast path: already usable
     DIR* probe = opendir("/sdcard");
@@ -143,11 +143,12 @@ bool File_Viewer_App::ensure_sd_mounted() {
     }
 
     ESP_LOGW(TAG, "/sdcard not openable – attempting sd_remount()");
-    // Best-effort: unmount stale state then remount
+    // Best-effort: unmount stale state then remount (weak stubs if no d_sdc)
     (void)sd_unmount();
     esp_err_t err = sd_remount();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "sd_remount failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "sd_remount failed: %s (link d_sdc or mount before open)",
+                 esp_err_to_name(err));
         sd_ready = false;
         return false;
     }

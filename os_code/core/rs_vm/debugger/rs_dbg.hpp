@@ -2,7 +2,7 @@
 // =============================================================================
 // debugger/rs_dbg – stats dump, error messenger, ref-table printer
 // =============================================================================
-#include "rs_vm.hpp"
+#include "os_code/core/rs_vm/vm/rs_vm.hpp"
 #include <stdio.h>
 
 #ifdef __cplusplus

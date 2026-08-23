@@ -1,112 +1,74 @@
-//#include <stdint.h>
+
+
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdbool.h>
 #include "os_code/core/rShell/enviroment/env_vars.h"
-#include <stdint.h>
-#include <stdbool.h>
 #include <time.h>
 #include "esp_timer.h"
 #include "code_stuff/types.h"
-//#include "os_code/middle_layer/input/input_handler.hpp"
 #include "os_code/middle_layer/input/hid_t.h"
 
 const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May",
-     "Jun", //i miss when we had pride month but nooo conservitard cult-ure war. they hate you being yourself huh
+     "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
+// Autoconnect token tables (filled by rs_ac_sync_to_env)
+Credential g_wifi_credentials[ENV_WIFI_CRED_MAX];
+int        g_wifi_credentials_count = 0;
+BLEProfile g_ble_profiles[ENV_BLE_PROF_MAX];
+int        g_ble_profiles_count = 0;
 
-    
-
-EnvConfig v_env = { //vars_env
-
-
-    
-    // =========================
-    // SYSTEM / TEMPERATURE
-    // =========================
+EnvConfig v_env = {
     .temperature = 0.0f,
     .userTemperature = 0.0f,
     .cpuTemp = 0.0f,
 
-    // =========================
-    // CPU CONTROL
-    // =========================
     .cpuMhzTarget = 240,
     .cpuMhzMin = 160,
-    .cpuMhzMax=240, //hardware max 240
+    .cpuMhzMax=240,
     .enableCpuScaling = true,
     .overclockUnlocked = false,
     .cpuLoadPercent = 0,
 
-    // =========================
-    // DISPLAY
-    // =========================
     .brightness = 128,
     .fpsTarget = 45,
     .framethrottle_target=5,
     .headless=false,
     .UseFrameThrottle=false,
-    //change this to the actual screen size in the driver, retard
-    //but i do not want to load drivers for screens dynamically rn because i have bigger towers to topple
-    .screen_dim_w=280, 
+    .screen_dim_w=280,
     .screen_dim_h=240,
-    //these two variables may change at any time, but screen dim basics won't, so cope harder LLLLIBERRUUUULLLL
-    .clamped_screen_dim_w=280, 
-    .clamped_screen_dim_h=240, 
-    // =========================
-    // STORAGE
-    // =========================
+    .clamped_screen_dim_w=280,
+    .clamped_screen_dim_h=240,
+
     .hasMicroSD = false,
     .extStorageSizeKb = 0,
     .flashSizeKb = 0,
     .freeSpaceKb = 0,
 
-    // =========================
-    // POWER / BATTERY
-    // =========================
     .batteryPercent = 100,
     .charging = false,
     .inputVoltage = 5.0f,
     .systemVoltage = 3.3f,
 
-    // =========================
-    // INPUT / UI STATE
-    // =========================
-    .CurrentHIDTarget = 5, 
-     // debug_log is the 6th item (debug_log=5) because computers start at 0.
-    
-    // =========================
-    // SYSTEM FLAGS
-   // =========================
+    .CurrentHIDTarget = 5,
+
     .safeMode = true,
     .debugMode = false,
     .factoryMode = false,
 
-    // =========================
-    // VERSIONING / DEBUG
-    // =========================
     .bootCount = 0,
     .lastCrashCode = 0,
     .firmwareVersion = 1,
 
-    // =========================
-    // CALIBRATION / OFFSETS
-    // =========================
     .tempOffset = 0.0f,
     .screenGamma = 2.2f,
 
-
-    
-    .displayTime={0} //fuck you mcgee we set this null init, it's set in main
-
+    .displayTime={0}
 };
 
 uint16_t GetFrameRateTarget() {
 return (v_env.UseFrameThrottle ? v_env.framethrottle_target : v_env.fpsTarget);
 }
-
-
 
 void update_display_time(s_displayTime *t) {
     time_t now;
