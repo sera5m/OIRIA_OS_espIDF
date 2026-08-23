@@ -110,7 +110,7 @@ idf_component_register(
              
         EMBED_TXTFILES
          "os_code/core/com/autoconnect.conf"
-        
+        "os.conf"
 		
     INCLUDE_DIRS
         "."
@@ -188,7 +188,7 @@ set(ulp_exp_dep_srcs
     "sss/shared_state.c"
     "ulp/ulp_main.h"
 )
-
+target_add_binary_data(${COMPONENT_LIB} "os.conf" TEXT)
 ulp_embed_binary(${ulp_app_name} "${ulp_sources}" "${ulp_exp_dep_srcs}")
 
 
