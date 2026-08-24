@@ -98,15 +98,28 @@ idf_component_register(
 	#experemental
 	"os_code/applications/browser/MS_browserapp.cpp"
 	
+	
+	
+	
+	
 			#fun apps
 			"os_code/applications/pong/MS_pongapp.cpp" #pong gap deez nuts
 			"os_code/applications/snake/MS_snakeapp.cpp"
 			"os_code/applications/2048/MS_2048app.cpp"
 
 
+#signal generation components
 
-
-
+"code_stuff/signal_gen/siggen_wavetable.cpp"
+"code_stuff/signal_gen/siggen_ledc.cpp"
+"code_stuff/signal_gen/siggen_i2s_pdm.cpp"
+"code_stuff/signal_gen/siggen_ctrl.cpp"
+"code_stuff/signal_gen/siggen_adc_cal.cpp"
+"code_stuff/signal_gen/sig_protocol.cpp"
+"code_stuff/signal_gen/sig_insn.cpp"
+             
+             
+             
              
         EMBED_TXTFILES
          "os_code/core/com/autoconnect.conf"
