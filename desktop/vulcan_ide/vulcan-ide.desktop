@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Vulcan IDE
+Comment=Edit Vulcan and send it to the OIRIA watch over USB-C serial
+Exec=python3 __DIR__/vulcan_ide.py %f
+Terminal=false
+Type=Application
+Categories=Development;IDE;
+MimeType=text/x-vulcan;
+StartupNotify=true
+Keywords=vulcan;esp32;oiria;

@@ -1,0 +1,10 @@
+struct AsciiCat {
+  i32 id;
+}
+
+fn drawCat in[] out[] {
+  print("/\\_/");
+  print("| o.o |");
+  print("> ^ <");
+  return;
+}

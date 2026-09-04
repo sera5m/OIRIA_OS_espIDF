@@ -1,0 +1,11 @@
+set_dom 1;
+set_step_depth 20000;
+
+fn main in[] out[] {
+  dom_enable();
+  dom_clear(0);
+  dom_win(0, 0, 0, 240, 280);
+  dom_text(0, "hello from vulcan");
+  dom_flush();
+  return;
+}

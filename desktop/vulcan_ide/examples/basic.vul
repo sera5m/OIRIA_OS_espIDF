@@ -1,0 +1,6 @@
+i32 x = 3;
+i32 y;
+x * 2 + 1 = y;
+print(y);
+if[y > 5]{ print("big"); } else { print("small"); }
+do n[3]{ x = x + 1; print(x); }
