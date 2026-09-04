@@ -50,17 +50,20 @@ idf_component_register(
          
         
         
-    #vulcan lang core elements    
+    # vulcan language: interpreter + parser + bytecode opt (NOT a JIT)
     "os_code/core/rs_vm/vm/rs_vm.cpp"
-  "os_code/core/rs_vm/vm/rs_vm_parse.cpp"
-  "os_code/core/rs_vm/vm/rs_vm_host_esp.cpp"
-  "os_code/core/rs_vm/debugger/rs_dbg.cpp"
-  "os_code/core/rs_vm/vm_modules/vm_mdl_immut/vm_mdl_immut.cpp"
-  "os_code/core/rs_vm/vm_modules/vm_mdl_thread/vm_mdl_thread.cpp"
-  "os_code/core/rs_vm/vm_modules/vm_mdl_property/vm_mdl_property.cpp"
-  "os_code/core/rs_vm/vm_modules/vm_mdl_flowmap/vm_mdl_flowmap.cpp"
-  "os_code/core/rs_vm/vm_modules/vm_mdl_shell/vm_mdl_shell.cpp"
- #"os_code/core/rs_vm/vm_modules/vm_mdl_espidf/vm_mdl_espidf.cpp"
+    "os_code/core/rs_vm/vm/rs_vm_parse.cpp"
+    "os_code/core/rs_vm/vm/rs_vm_host_esp.cpp"
+    "os_code/core/rs_vm/vm/rs_vm_opt.cpp"
+    "os_code/core/rs_vm/vm/rs_vm_struct.cpp"
+    "os_code/core/rs_vm/debugger/rs_dbg.cpp"
+    "os_code/core/rs_vm/vm_modules/vm_mdl_immut/vm_mdl_immut.cpp"
+    "os_code/core/rs_vm/vm_modules/vm_mdl_thread/vm_mdl_thread.cpp"
+    "os_code/core/rs_vm/vm_modules/vm_mdl_property/vm_mdl_property.cpp"
+    "os_code/core/rs_vm/vm_modules/vm_mdl_flowmap/vm_mdl_flowmap.cpp"
+    "os_code/core/rs_vm/vm_modules/vm_mdl_shell/vm_mdl_shell.cpp"
+    # "os_code/core/rs_vm/vm_modules/vm_mdl_espidf/vm_mdl_espidf.cpp"
+    # ikitaku AI / AOT-C (gcc) stay out of firmware — desktop-only in the zip
     #
     "os_code/applications/vulcanApp/MS_vulcanapp.cpp"
         
@@ -140,6 +143,9 @@ idf_component_register(
         "os_code/core/rShell"
         "os_code/core/rShell/enviroment"
         "os_code/core/window_env"
+        "os_code/core/rs_vm"
+        "os_code/core/rs_vm/vm"
+        "os_code/applications/vulcanApp"
         "os_code/applications/watch"
         "hardware/wiring"
         "hardware/drivers/psram_std"
@@ -179,6 +185,9 @@ PRIV_REQUIRES
     freertos
 )
 
+
+# Turn on appManager vulcan eval path (run_vulcan_script / serial feed).
+target_compile_definitions(${COMPONENT_LIB} PRIVATE RSVM_IN_FIRMWARE=1)
 
 target_compile_options(${COMPONENT_LIB} PRIVATE 
     -Wno-unused 
