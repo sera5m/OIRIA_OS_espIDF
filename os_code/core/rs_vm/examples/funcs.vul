@@ -5,6 +5,6 @@ fn double in[i32 a] out[i32 r] {
 
 fn main in[] out[] {
   print("double:");
-  print(double(21));
+  double in[21] out[here];
   return;
 }
