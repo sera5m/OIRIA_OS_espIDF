@@ -1,0 +1,5 @@
+#!/bin/sh
+# Launch on Wayland. Falls back if GDK_BACKEND is forced elsewhere.
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export GDK_BACKEND="${GDK_BACKEND:-wayland}"
+exec python3 "$DIR/vulcan_ide.py" "$@"

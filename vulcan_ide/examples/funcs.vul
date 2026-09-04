@@ -1,0 +1,10 @@
+fn double in[i32 a] out[i32 r] {
+  a * 2 = r;
+  return r;
+}
+
+fn main in[] out[] {
+  print("double:");
+  double in[21] out[here];
+  return;
+}
