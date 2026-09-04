@@ -1,0 +1,8 @@
+// LUT sin: i32 degrees, wrap is free (720 == 360 == 0)
+print(sin(0));
+print(sin(90));
+print(sin(180));
+print(sin(360));
+print(sin(720));
+print(cos(0));
+print(sin_amp(90, 32767));
