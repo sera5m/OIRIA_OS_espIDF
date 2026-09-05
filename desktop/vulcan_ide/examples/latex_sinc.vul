@@ -1,0 +1,5 @@
+fn sinc in[x] out[here] @latex_internal {
+  \frac{\sin x}{x}
+}
+
+print(sinc in[90] out[here]);
