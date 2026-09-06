@@ -1,14 +1,12 @@
-# Module graph
+# What this repo is
+
+The watch **virtual machine implementation**.
+
+Depends on **vulcan-lang BASE** (parse, bytecode, rules — shared C++).
+Local to this tree: ESP host (pins, display, UART, IDF build).
 
 ```
-vulcan-lang                 BASE + desktop VM
-  https://github.com/sera5m/vulcan-lang
-
-     +-- vulcan-ide         https://github.com/sera5m/vulcan-ide
-     |     BASE + desktop VM
-     |     NOT a firmware dependency
-     |
-     `-- watch VM           THIS REPO  os_code/core/rs_vm
-           BASE only
-           C interpreter, same standard
+BASE libs  →  watch VM  →  firmware
 ```
+
+Not the IDE. Not a second language.
