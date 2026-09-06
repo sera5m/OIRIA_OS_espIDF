@@ -1,12 +1,8 @@
-# What this repo is
-
-The watch **virtual machine implementation**.
-
-Depends on **vulcan-lang BASE** (parse, bytecode, rules — shared C++).
-Local to this tree: ESP host (pins, display, UART, IDF build).
+# Watch VM implementation of BASE
 
 ```
-BASE libs  →  watch VM  →  firmware
+vulcan-lang BASE     shared C++ parse/bytecode/rules
+      |
+      +-- vulcan-ide + rsvm (desktop host)
+      `-- this repo: same vm/*.cpp + ESP host
 ```
-
-Not the IDE. Not a second language.

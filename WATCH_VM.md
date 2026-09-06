@@ -1,16 +1,11 @@
-# Watch VM — BASE standard
+# Watch VM implementation
 
-Implementation: `os_code/core/rs_vm/`
-Standard: https://github.com/sera5m/vulcan-lang/blob/main/STANDARD.md
+BASE libs (parse, bytecode, opcodes): `os_code/core/rs_vm/vm/`
+Same files desktop links via `vulcan-lang/cpp_vm` + `-DOIRIA_ROOT`.
 
-The watch is a **second interpreter** of the same language, not a consumer of `vulcan_run.py`.
+Local to the watch only:
+- `rs_vm_host_esp.cpp`
+- IDF CMake, GPIO, LCD, UART
 
-| BASE rule | Watch |
-|-----------|--------|
-| `.vul` source | `rsvm_compile` / `rsvm_eval` |
-| LUT sin/cos/tan degrees + wrap | `RSVM_OP_SIN` … `SIN_AMP`, Q15 table |
-| `@latex_internal` | `RSVM_PROP_LATEX_INT` + `rs_vm_latex.c` |
-| `@sig_gen_graph_preview` | ignored on device |
-| IDE | not linked |
-
-ESP-IDF SRCS are the C VM only.
+Desktop host is `vulcan-lang/cpp_vm/rsvm_host_desktop.cpp`.
+Do not fork parse/opcodes for the watch.
