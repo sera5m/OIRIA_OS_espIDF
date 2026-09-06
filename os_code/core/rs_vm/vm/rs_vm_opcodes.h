@@ -91,6 +91,8 @@ typedef enum {
     RSVM_PROP_AUTOUNROLL   = 1 << 11,
     RSVM_PROP_UNLIMITED    = 1 << 12,
     RSVM_PROP_UNSPEC_OUT  = 1 << 13,
+    RSVM_PROP_LATEX_INT   = 1 << 14,
+    RSVM_PROP_MEMORY_HARD = 1 << 15,
 } rsvm_prop_t;
 #ifndef RSVM_MAX_REFS
 #define RSVM_MAX_REFS       128

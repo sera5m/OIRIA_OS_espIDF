@@ -22,11 +22,18 @@ uint16_t rsvm_prop_from_name(const char* name) {
     return RSVM_PROP_NONE;
 }
 
-static void on_enter(rsvm_t* vm, uint8_t func_id) { (void)vm; (void)func_id; }
-static void on_exit(rsvm_t* vm, uint8_t func_id) { (void)vm; (void)func_id; }
-static void on_store(rsvm_t* vm, uint8_t slot) { (void)vm; (void)slot; }
+static void on_enter(rsvm_t* vm, uint8_t func_id) {
+    (void)vm; (void)func_id;
+}
+static void on_exit(rsvm_t* vm, uint8_t func_id) {
+    (void)vm; (void)func_id;
+}
+static void on_store(rsvm_t* vm, uint8_t slot) {
+    (void)vm; (void)slot;
+}
 static int configure(rsvm_t* vm, const char* key, const char* val) {
-    (void)vm; (void)key; (void)val; return 0;
+    (void)vm; (void)key; (void)val;
+    return 0;
 }
 const rsvm_mdl_vtbl_t rsvm_mdl_property = {
     "property", on_enter, on_exit, on_store, configure,

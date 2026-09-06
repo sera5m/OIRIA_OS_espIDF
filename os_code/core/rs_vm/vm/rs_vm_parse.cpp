@@ -444,7 +444,20 @@ static void primary(P* p) {
             return;
         }
         // builtins as primary
-        
+        if (peek(p) == '(' &&
+            (strcmp(id, "sin") == 0 || strcmp(id, "cos") == 0 ||
+             strcmp(id, "tan") == 0 || strcmp(id, "sin_amp") == 0)) {
+            getc_(p);
+            expr(p);
+            if (strcmp(id, "sin_amp") == 0) { expect(p, ","); expr(p); }
+            expect(p, ")");
+            if (strcmp(id, "sin") == 0) emit_u8(p, RSVM_OP_SIN);
+            else if (strcmp(id, "cos") == 0) emit_u8(p, RSVM_OP_COS);
+            else if (strcmp(id, "tan") == 0) emit_u8(p, RSVM_OP_TAN);
+            else emit_u8(p, RSVM_OP_SIN_AMP);
+            return;
+        }
+
         if (strcmp(id, "file_write") == 0 && peek(p) == '(') {
             getc_(p); expr(p); expect(p, ","); expr(p); expect(p, ")");
             emit_u8(p, RSVM_OP_FWRITE);
@@ -1462,6 +1475,40 @@ static void statement(P* p) {
             uint8_t s = slot_of(p,id,true);
             if (s < RSVM_MAX_SLOTS && decl_props)
                 p->vm->slot_props[s] |= decl_props;
+            skip_ws(p);
+            /* C-style: i32 a[2][3]; → arr_newd */
+            if (peek(p) == '[') {
+                int ndim = 0;
+                while (peek(p) == '[') {
+                    getc_(p);
+                    skip_ws(p);
+                    expr(p);
+                    expect(p, "]");
+                    ndim++;
+                    if (ndim >= 4) break;
+                    skip_ws(p);
+                }
+                if (ndim <= 1) emit_u8(p, RSVM_OP_ARR_NEW);
+                else { emit_u8(p, RSVM_OP_ARR_NEWD); emit_u8(p, (uint8_t)ndim); }
+                emit_u8(p, RSVM_OP_STORE); emit_u8(p, s);
+                if (match(p, "=")) {
+                    /* brace init skipped on device (use indexed stores); consume until ; */
+                    skip_ws(p);
+                    if (peek(p) == '{') {
+                        int d = 0;
+                        do {
+                            char c = getc_(p);
+                            if (c == '{') d++;
+                            else if (c == '}') d--;
+                        } while (d > 0 && peek(p));
+                    } else {
+                        expr(p);
+                        emit_u8(p, RSVM_OP_STORE); emit_u8(p, s);
+                    }
+                }
+                expect(p, ";");
+                return;
+            }
             if (match(p,"=")) { expr(p); emit_u8(p,RSVM_OP_STORE); emit_u8(p,s); }
             else { emit_u8(p,RSVM_OP_LDI); emit_u8(p,s); emit_i32(p,0); }
             expect(p,";");
