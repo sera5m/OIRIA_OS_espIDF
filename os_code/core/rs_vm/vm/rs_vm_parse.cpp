@@ -699,11 +699,33 @@ static void statement(P* p) {
         return;
     }
     // program-wide config: set_step_depth n;
-    if (match(p, "set_step_depth")) {
+    if (match(p, "set_step_depth") || match(p, "set_max_run")) {
         int32_t n = 0;
-        if (!parse_int(p, &n) || n < 0) { fail(p, "set_step_depth n"); return; }
+        if (!parse_int(p, &n) || n < 0) { fail(p, "set_max_run n"); return; }
         expect(p, ";");
         p->vm->step_limit = (uint32_t)n;
+        return;
+    }
+    if (match(p, "set_ram")) {
+        int32_t n = 0;
+        if (!parse_int(p, &n) || n < 0) { fail(p, "set_ram n"); return; }
+        expect(p, ";");
+        p->vm->ram_limit = (uint32_t)n;
+        return;
+    }
+    if (match(p, "set_storage")) {
+        int32_t n = 0;
+        if (!parse_int(p, &n) || n < 0) { fail(p, "set_storage n"); return; }
+        expect(p, ";");
+        p->vm->storage_limit = (uint32_t)n;
+        return;
+    }
+    if (match(p, "set_threads")) {
+        int32_t n = 0;
+        if (!parse_int(p, &n) || n < 0) { fail(p, "set_threads n"); return; }
+        expect(p, ";");
+        p->vm->thread_cap = (uint8_t)(n > 255 ? 255 : n);
+        p->vm->thread_desired = p->vm->thread_cap;
         return;
     }
     if (match(p, "set_loops_trapdoor")) {
@@ -1410,6 +1432,14 @@ static void statement(P* p) {
                     pre_unroll = (int)n;
                     expect(p, ")");
                 }
+            }
+            if (bit == RSVM_PROP_THREADED && match(p, "(")) {
+                int32_t n = 1;
+                if (!parse_int(p, &n) || n < 1) { fail(p, "parallel n"); return; }
+                expect(p, ")");
+                p->vm->thread_desired = (uint8_t)(n > 255 ? 255 : n);
+                if (p->vm->thread_cap && p->vm->thread_desired > p->vm->thread_cap)
+                    p->vm->thread_desired = p->vm->thread_cap;
             }
             skip_ws(p);
         }

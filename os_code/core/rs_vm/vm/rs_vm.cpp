@@ -42,6 +42,9 @@ void rsvm_init(rsvm_t* vm) {
     if (!vm) return;
     memset(vm, 0, sizeof(*vm));
     vm->step_limit = RSVM_MAX_STEPS;
+    vm->ram_limit = RSVM_HEAP_BYTES;
+    vm->storage_limit = 0;
+    vm->thread_cap = 1;
     vm->last_status = RSVM_OK;
     rsvm_register_modules(vm);
 }
@@ -788,7 +791,8 @@ rsvm_status_t rsvm_step(rsvm_t* vm) {
         size_t meta = 1 + RSVM_ARR_MAX_DIM; // ndim + dims[4]
         size_t need = sizeof(rsvm_obj_hdr_t) + meta + (size_t)len * sizeof(rsvm_val_t);
         need = (need + 3u) & ~3u;
-        if ((uint16_t)(vm->heap_used + need) > RSVM_HEAP_BYTES) {
+        if ((uint16_t)(vm->heap_used + need) > RSVM_HEAP_BYTES ||
+            (vm->ram_limit && (uint32_t)(vm->heap_used + need) > vm->ram_limit)) {
             vm->last_status = RSVM_ERR_HEAP; break;
         }
         int16_t off = (int16_t)vm->heap_used;
@@ -820,7 +824,8 @@ rsvm_status_t rsvm_step(rsvm_t* vm) {
         size_t meta = 1 + RSVM_ARR_MAX_DIM;
         size_t need = sizeof(rsvm_obj_hdr_t) + meta + (size_t)total * sizeof(rsvm_val_t);
         need = (need + 3u) & ~3u;
-        if ((uint16_t)(vm->heap_used + need) > RSVM_HEAP_BYTES) {
+        if ((uint16_t)(vm->heap_used + need) > RSVM_HEAP_BYTES ||
+            (vm->ram_limit && (uint32_t)(vm->heap_used + need) > vm->ram_limit)) {
             vm->last_status = RSVM_ERR_HEAP; break;
         }
         int16_t off = (int16_t)vm->heap_used;

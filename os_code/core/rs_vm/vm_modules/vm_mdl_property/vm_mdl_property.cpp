@@ -5,7 +5,8 @@
 uint16_t rsvm_prop_from_name(const char* name) {
     if (!name) return RSVM_PROP_NONE;
     if (strcmp(name, "immut") == 0)         return RSVM_PROP_IMMUT;
-    if (strcmp(name, "threaded") == 0)      return RSVM_PROP_THREADED;
+    if (strcmp(name, "threaded") == 0 || strcmp(name, "parallel") == 0)
+        return RSVM_PROP_THREADED;
     if (strcmp(name, "property") == 0)      return RSVM_PROP_PROPERTY;
     if (strcmp(name, "shared") == 0)        return RSVM_PROP_SHARED;
     if (strcmp(name, "mut") == 0)           return RSVM_PROP_MUT;

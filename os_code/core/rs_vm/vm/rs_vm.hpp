@@ -159,7 +159,10 @@ struct rsvm_s {
     // Thread module config (```key=val```)
     bool     thread_ifsingle;      // force sequential
     bool     thread_sequencing;    // honor `n`thread order
-    uint8_t  thread_desired;       // from desired_threads
+    uint8_t  thread_desired;       // from desired_threads / @parallel(n)
+    uint32_t ram_limit;            // heap cap (bytes); 0 = RSVM_HEAP_BYTES
+    uint32_t storage_limit;        // @memory_hard host files; 0 = none on watch
+    uint8_t  thread_cap;           // hard cap; watch=1, desktop host may raise
 
     rsvm_host_t   host;
     rsvm_status_t last_status;
