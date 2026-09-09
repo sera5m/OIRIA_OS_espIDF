@@ -547,8 +547,7 @@ WindowManager::getInstance().UpdateAll(false, true, true, true);
 
 
 //we might havea to
-extern "C" void rs_dom_link_start_tx(void);  // puppet
-extern "C" void rs_dom_link_start_rx(void);  // tyrant
+extern "C" void rs_dom_link_start_listen(void);
 
 
 
@@ -645,14 +644,10 @@ static void bootloader_final_app() {
 
     xTaskCreatePinnedToCore(core1_createData, "core1", 8192, NULL, 5, &core1TaskHandle, 1);
 
-    if (boot_sends_dom(role)) {
-        ESP_LOGI(TAG, "starting DOM TX (puppet → tyrant)");
-        rs_dom_link_start_tx();
-    }
-    if (boot_receives_dom(role)) {
-        ESP_LOGI(TAG, "starting DOM RX (tyrant ← puppets)");
-        rs_dom_link_start_rx();
-    }
+    /* Collective UART: everyone listens. Puppet evals VM blobs/streams;
+     * tyrant still receives DOM frames on the same RX task. */
+    rs_dom_link_start_listen();
+    ESP_LOGI(TAG, "collective UART listen (blob / start-end sequence)");
 
     auto& manager = appManager::instance();
     manager.start_manager_task();

@@ -78,6 +78,7 @@ idf_component_register(
 
 #rshell multi device usage (i goon to paralellism)
 "os_code/core/com/boot_role.c"
+"os_code/core/com/rs_collective_uart.c"
 "os_code/core/window_env/rs_dom_link.cpp"
 #  pack real frames:
 "os_code/core/window_env/mwenv_dom.cpp"
@@ -183,6 +184,8 @@ PRIV_REQUIRES
      esp_driver_pcnt
     esp_timer
     freertos
+    driver
+    vfs
 )
 
 

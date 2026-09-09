@@ -32,11 +32,18 @@
 #define RSDOM_TYPE_HOLD     0x03   // flow control (maps to RS_HoldState)
 #define RSDOM_TYPE_HELLO    0x04   // capability / role announce
 #define RSDOM_TYPE_PING     0x05
-#define RSDOM_TYPE_VM       0x10   // RSV1 bytecode image (rs_vm)
-#define RSDOM_TYPE_VM_SRC   0x11   // UTF-8 Vulcan source
+#define RSDOM_TYPE_VM       0x10   // RSV2 bytecode image (blob)
+#define RSDOM_TYPE_VM_SRC   0x11   // UTF-8 Vulcan source blob (.vul)
 #define RSDOM_TYPE_VM_OUT   0x12   // print capture reply
 #define RSDOM_TYPE_VM_ERR   0x13   // error text
 #define RSDOM_TYPE_VM_ACK   0x14   // silent OK + steps
+#define RSDOM_TYPE_STREAM_BEGIN 0x15  // start sequence (slave accum)
+#define RSDOM_TYPE_STREAM_CHUNK 0x16  // sequential command chunk
+#define RSDOM_TYPE_STREAM_END   0x17  // end sequence → eval accum
+#define RSDOM_TYPE_CMD      0x20
+#define RSDOM_TYPE_RESULT   0x21
+#define RSDOM_TYPE_IO       0x22
+#define RSDOM_TYPE_CANCEL   0x23
 
 #define RSDOM_FLAG_NEED_ACK 0x01
 #define RSDOM_FLAG_PUPPET   0x02   // sender is worker
@@ -202,6 +209,9 @@ void   rs_dom_link_start_rx(void);   // tyrant: begin DOM receive path
 bool   rs_dom_link_tx_active(void);
 bool   rs_dom_link_rx_active(void);
 size_t rs_dom_link_send_frame(const uint8_t* frame, uint16_t frame_len);
+size_t rs_dom_link_send(uint8_t type, const uint8_t* payload, uint16_t len);
+void   rs_dom_link_start_listen(void);  /* puppet/slave RX + eval */
+int    rs_coll_eval_src(const char* src, size_t len);
 
 #ifdef __cplusplus
 }

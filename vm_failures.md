@@ -1,50 +1,30 @@
-# Watch VM failures (audit 2026-09-06)
+# Watch VM failures (audit 2026-09-09)
 
-Check only. Host/OS wiring is **not** patched here.
+Host I/O was unwired as of 2026-09-06. **Native host is now installed** (`rs_vm_host_esp.cpp` + collective UART listen). Remaining gaps:
 
-## What runs on device
+| Item | Status |
+|------|--------|
+| file / ls / cd / pwd / cat / mkdir / rm | wired → `/sdcard` VFS (`d_sdc` mount) |
+| `sh` subset | wired (`help`, `role`, `env`, `ls`…) |
+| `exec(".vul")` | nested `rsvm_eval_file` |
+| `open_app` | `appManager::close_current_and_open` |
+| `mw_text` | toolbar text (no per-window id yet) |
+| UART blob + stream | `rs_dom_link` RX task; types 0x10–0x17, ASCII `start sequence:` / `end sequence.` |
+| DataPool | file-backed `/sdcard/rpool/<name>.rpool` (not live kernel heap) |
+| env / sysconf | `ROLE`, `v_env` fields via `env_vars.h` |
+| `native()` C | still `-1` (no TF / libc on device) |
+| ADC | still 0 |
+| `@parallel` | still sequential (`thread_cap=1`) |
+| `rs_vm_latex.c` | still not in CMake SRCS |
 
-- `rsvm_compile` + `rsvm_run` (`RSVM_IN_FIRMWARE=1` in CMakeLists).
-- Print, GPIO, delay_ms.
-- Array opcodes: `arr_new` / `arr_newd` (4 dims), `a[i]`, `a[i,j]`.
-- `include` / `import` in the parser.
-- Shell *opcodes* 0xE0–F0 exist in `rs_vm.cpp`.
+## Pins
 
-## Native features that do not work (host NULL)
+Collective UART1: **TX GPIO7, RX GPIO18**, 921600. GPIO8 is I2C SCL — do not use.
 
-`rs_vm_host_esp.cpp` only fills print + GPIO + delay + stub ADC.
+## Listen (slave / puppet)
 
-| Feature | Hook / opcode | Result |
-|---------|----------------|--------|
-| File read/write | `file_read` / `file_write` | no-op |
-| ls / cd / pwd | `sys_ls` / `sys_cd` / `sys_pwd` | nil |
-| sh / sys | `sys_cmd` | nil |
-| exec(.vul) | `sys_exec` | unwired |
-| open_app | `sys_open_app` | unwired |
-| Screen / mw_text | `mw_set_text` (0xE6) | no draw |
-| UART VM | `uart_send` | NULL; RSDOM types exist |
-| DataPool | `pool_op` | unwired |
-| env / sysconf | `sys_env` / sysconf_* | unwired |
-| native() | `native_call` | unwired |
-| ADC | `adc_read` | 0 |
+Same firmware. `boot_role` PUPPET/SOLO/TYRANT all start `rs_dom_link_start_listen()`.
 
-`vm_mdl_shell.cpp` is a stub. `VULCAN_SHELL.md` is aspirational.
-
-## Screen DOM
-
-No `RSVM_OP_DOM`. `RSDOM_TYPE_DOM` is a UART frame, not a script opcode. `mw_text` needs `host.mw_set_text`.
-
-## Language (patched this pass)
-
-- `print(sin(90))` C-style primaries in `rs_vm_parse.cpp`
-- C-style `i32 a[2][3];` → ARR_NEW / ARR_NEWD
-- `@memory_hard` property bit (1<<15) — persist is host-side; bit is recognized
-- `rs_vm_latex.c` still **not** in CMake SRCS
-
-## UART exec
-
-`RSDOM_TYPE_VM` / `VM_SRC` → `rsvm_eval` on the collective link still unfinished. Serial `<<VUL` in appManager exists with RSVM_IN_FIRMWARE.
-
-## Not firmware (by design)
-
-ikitaku, gcc AOT, JIT.
+- **Blob:** RSDOM `VM_SRC` (0x11) or ASCII `run /sdcard/foo.vul`
+- **Stream:** `start sequence:` … lines … `end sequence.`  or `<<VUL` … `VUL>>`
+- Binary: `STREAM_BEGIN` 0x15 / `CHUNK` 0x16 / `END` 0x17

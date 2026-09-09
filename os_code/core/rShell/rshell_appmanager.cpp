@@ -436,14 +436,7 @@ int appManager::run_vulcan_script(const char* path) {
 }
 
 int appManager::send_vulcan_uart(uint8_t type, const uint8_t* payload, uint16_t len) {
-    uint8_t pkt[1024];
-    static uint16_t seq;
-    size_t n = rsdom_pack(pkt, sizeof pkt, type, RSDOM_FLAG_LOGIC, seq++, payload, len);
-    if (!n) return -1;
-    // Wire to the collective UART when pins are configured:
-    // uart_write_bytes(UART_NUM_x, pkt, n);
-    ESP_LOGI(TAG, "send_vulcan_uart type=0x%02X len=%u pkt=%u", type, (unsigned)len, (unsigned)n);
-    return (int)n;
+    return (int)rs_dom_link_send(type, payload, len);
 }
 
 bool appManager::vulcan_mode_enabled() const {
