@@ -6,8 +6,8 @@ There is **no JIT** on the ESP32-S3.
 |------|--------|-----------|
 | Bytecode interpreter (`rsvm_compile` + `rsvm_run`) | `vm/rs_vm.cpp` | **yes** — this is the runtime |
 | Parser (`.vul` → bytecode) | `vm/rs_vm_parse.cpp` | **yes** |
-| Superops / trapdoor loops / opt passes | `vm/rs_vm_opt.cpp` | **yes** (bytecode rewrite, still interpreted) |
-| Structure analysis | `vm/rs_vm_struct.cpp` | **yes** (analysis only) |
+| Superops / trapdoor loops | `vm/rs_vm.cpp` + parse emit `OP_TRAP_LOOP` | **yes** (bytecode rewrite, still interpreted) |
+| Structure tables | `vm/rs_vm.cpp` (`rsvm_struct_by_name`) | **yes** |
 | `.bvul` load/save | same interpreter, skip parse | **yes** |
 | AOT-C (`lang/codegen/rs_cgen` → gcc -O2) | zip / desktop only | **no** — no gcc on device |
 | ikitaku “AI / thinking layer” | zip `ikitaku/` | **no** — not in firmware |

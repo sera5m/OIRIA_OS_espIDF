@@ -50,14 +50,13 @@ idf_component_register(
          
         
         
-    # vulcan language: interpreter + parser + bytecode opt (NOT a JIT)
+    # vulcan language: interpreter + parser (NOT a JIT).
+    # trapdoor loops + struct tables live in rs_vm.cpp / rs_vm_parse.cpp
     "os_code/core/rs_vm/vm/rs_vm.cpp"
     "os_code/core/rs_vm/vm/rs_vm_parse.cpp"
     "os_code/core/rs_vm/vm/rs_vm_nseq.cpp"
     "os_code/core/rs_vm/vm/rs_vm_host_esp.cpp"
     "os_code/core/rs_vm/vm/rs_vm_host_siggen.cpp"
-    "os_code/core/rs_vm/vm/rs_vm_opt.cpp"
-    "os_code/core/rs_vm/vm/rs_vm_struct.cpp"
     "os_code/core/rs_vm/debugger/rs_dbg.cpp"
     "os_code/core/rs_vm/vm_modules/vm_mdl_immut/vm_mdl_immut.cpp"
     "os_code/core/rs_vm/vm_modules/vm_mdl_thread/vm_mdl_thread.cpp"
