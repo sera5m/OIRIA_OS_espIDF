@@ -11,6 +11,7 @@
 #include "rs_dom_link.hpp"
 #include "os_code/core/com/rs_collective_uart.h"
 #include "os_code/core/com/boot_role.hpp"
+#include "os_code/core/com/rs_vulcan_httpd.h"
 #include "os_code/core/rs_vm/vm/rs_vm.hpp"
 #include "os_code/core/rs_vm/vm/rs_vm_parse.hpp"
 
@@ -218,6 +219,8 @@ extern "C" void rs_dom_link_start_rx(void) {
 extern "C" void rs_dom_link_start_listen(void) {
     rs_dom_link_start_tx();
     rs_dom_link_start_rx();
+    /* Wi-Fi console: drop .vul / wave / scope. Head and puppet both serve. */
+    rs_vulcan_console_boot();
 }
 
 extern "C" bool rs_dom_link_tx_active(void) { return s_tx_started; }

@@ -12,6 +12,7 @@
 #include "os_code/core/window_env/rs_dom_link.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "os_code/core/rShell/rshell_appmanager.hpp"
+#include "code_stuff/signal_gen/siggen_play.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +23,9 @@
 
 static const char* TAG = "rs_vm";
 static char s_cwd[160] = "/sdcard";
+
+extern "C" int rsvm_host_siggen_native(const char* name, const int32_t* args, int nargs,
+                                       int32_t* out);
 
 static void join_path(char* out, size_t cap, const char* p) {
     if (!p || !p[0]) { strncpy(out, s_cwd, cap - 1); out[cap-1]=0; return; }
@@ -65,7 +69,9 @@ static void host_dig_write(uint8_t pin, uint8_t level, void*) {
 static int host_dig_read(uint8_t pin, void*) {
     return gpio_get_level((gpio_num_t)pin);
 }
-static int host_adc_read(uint8_t, void*) { return 0; }
+static int host_adc_read(uint8_t pin, void*) {
+    return siggen_adc_once((int)pin);
+}
 static uint32_t host_millis(void*) {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
 }
@@ -124,7 +130,7 @@ static int host_sys_cmd(const char* cmd, char* out, int out_max, void* user) {
     out[0] = 0;
     if (!strcmp(cmd, "help") || !strncmp(cmd, "help ", 5)) {
         return snprintf(out, out_max,
-            "ls cd pwd cat mkdir rm role env help run open_app\n");
+            "ls cd pwd cat mkdir rm role env help run open_app wave scope stop\n");
     }
     if (!strcmp(cmd, "pwd")) return host_sys_pwd(out, out_max, user);
     if (!strncmp(cmd, "ls", 2) && (cmd[2]==0 || cmd[2]==' ')) {
@@ -155,6 +161,12 @@ static int host_sys_cmd(const char* cmd, char* out, int out_max, void* user) {
     if (!strcmp(cmd, "env") || !strncmp(cmd, "env ", 4)) {
         return snprintf(out, out_max, "ROLE=%s cwd=%s",
                         boot_role_name(boot_role_resolve()), s_cwd);
+    }
+    if (!strncmp(cmd, "wave ", 5) || !strcmp(cmd, "wave") ||
+        !strncmp(cmd, "scope", 5) || !strcmp(cmd, "stop") ||
+        cmd[0]=='s' || cmd[0]=='r' || cmd[0]=='t' || cmd[0]=='p' || cmd[0]=='a' ||
+        cmd[0]=='.') {
+        return siggen_corz_cmd(!strncmp(cmd, "wave ", 5) ? cmd + 5 : cmd, out, out_max);
     }
     snprintf(out, out_max, "unknown cmd");
     return -1;
@@ -232,7 +244,10 @@ static int host_sys_env(const char* key, char* out, int out_max, void*) {
     return rsvm_sysconf_get_venv(key, out, out_max);
 }
 
-static int host_native(const char*, const int32_t*, int, int32_t*, void*) {
+static int host_native(const char* name, const int32_t* args, int nargs,
+                       int32_t* out, void*) {
+    int r = rsvm_host_siggen_native(name, args, nargs, out);
+    if (r != -2) return r;
     return -1;
 }
 

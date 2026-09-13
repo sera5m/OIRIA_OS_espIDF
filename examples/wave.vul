@@ -1,0 +1,3 @@
+// PWM function generator. S3 has no DAC — RC on GPIO 4.
+print("square 1k");
+print(native("wave", 1, 1000, 50, 4, 80));

@@ -54,6 +54,7 @@ idf_component_register(
     "os_code/core/rs_vm/vm/rs_vm.cpp"
     "os_code/core/rs_vm/vm/rs_vm_parse.cpp"
     "os_code/core/rs_vm/vm/rs_vm_host_esp.cpp"
+    "os_code/core/rs_vm/vm/rs_vm_host_siggen.cpp"
     "os_code/core/rs_vm/vm/rs_vm_opt.cpp"
     "os_code/core/rs_vm/vm/rs_vm_struct.cpp"
     "os_code/core/rs_vm/debugger/rs_dbg.cpp"
@@ -79,6 +80,7 @@ idf_component_register(
 #rshell multi device usage (i goon to paralellism)
 "os_code/core/com/boot_role.c"
 "os_code/core/com/rs_collective_uart.c"
+"os_code/core/com/rs_vulcan_httpd.cpp"
 "os_code/core/window_env/rs_dom_link.cpp"
 #  pack real frames:
 "os_code/core/window_env/mwenv_dom.cpp"
@@ -121,6 +123,7 @@ idf_component_register(
 "code_stuff/signal_gen/siggen_adc_cal.cpp"
 "code_stuff/signal_gen/sig_protocol.cpp"
 "code_stuff/signal_gen/sig_insn.cpp"
+"code_stuff/signal_gen/siggen_play.cpp"
              
              
              
@@ -133,6 +136,8 @@ idf_component_register(
         "."
         "os_code/core/com" 
         "code_stuff"
+        "code_stuff/signal_gen"
+        "code_stuff/precomputed_math"
         "hardware/drivers/devices_i2c"
         "hardware/drivers/lcd/fonts"
         "hardware/drivers/lcd/st7789v2"
@@ -159,6 +164,7 @@ idf_component_register(
     
     
 
+
     
 
 PRIV_REQUIRES
@@ -178,6 +184,7 @@ PRIV_REQUIRES
         esp_timer
         esp_driver_i2c
         esp_http_client
+        esp_adc
         
     REQUIRES
      ulp        
@@ -201,7 +208,6 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
     -Wno-error=reorder #SHUT THE FUCK UP
     -Wno-error=array-compare
 )
-
 
 
 # ==================== ULP ====================
