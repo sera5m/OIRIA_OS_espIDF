@@ -14,6 +14,7 @@
 #include "os_code/core/com/rs_vulcan_httpd.h"
 #include "os_code/core/rs_vm/vm/rs_vm.hpp"
 #include "os_code/core/rs_vm/vm/rs_vm_parse.hpp"
+#include "os_code/core/rs_vm/vm/rs_vm_nseq.h"
 
 static const char* TAG = "rs_dom_link";
 
@@ -27,6 +28,7 @@ static bool s_in_ascii_seq;
 static SemaphoreHandle_t s_eval_mu;
 
 extern "C" void rsvm_install_esp_host(rsvm_t* vm);
+extern "C" int rsvm_esp_nseq_exec(const rsvm_nstep_t* steps, int nsteps, int32_t* out);
 
 extern "C" int rs_coll_eval_src(const char* src, size_t len) {
     if (!src || !len) return -1;
@@ -117,6 +119,19 @@ static void handle_packet(RsDomRx* rx) {
         rs_coll_eval_src(s_stream, s_stream_n);
         s_stream_n = 0;
         break;
+    case RSDOM_TYPE_NSEQ: {
+        rsvm_nstep_t steps[RSVM_NSEQ_MAX];
+        int ns = rsvm_nseq_unpack((const uint8_t*)p, n, steps, RSVM_NSEQ_MAX);
+        if (ns >= 0) {
+            int32_t last = 0;
+            rsvm_esp_nseq_exec(steps, ns, &last);
+            char ack[16];
+            int an = snprintf(ack, sizeof ack, "%ld", (long)last);
+            rs_dom_link_send(RSDOM_TYPE_VM_ACK, (const uint8_t*)ack,
+                             (uint16_t)(an < 0 ? 0 : an));
+        }
+        break;
+    }
     case RSDOM_TYPE_CANCEL:
         s_stream_n = 0;
         break;

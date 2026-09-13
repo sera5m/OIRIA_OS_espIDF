@@ -1,5 +1,6 @@
 // ESP-IDF host: GPIO, SD (/sdcard), env, boot role, rpool files, UART, shell-ish.
 #include "rs_vm.hpp"
+#include "rs_vm_nseq.h"
 #include "rs_vm_parse.hpp"
 #include "rs_vm_sysconf_esp.hpp"
 #include "esp_log.h"
@@ -26,6 +27,8 @@ static char s_cwd[160] = "/sdcard";
 
 extern "C" int rsvm_host_siggen_native(const char* name, const int32_t* args, int nargs,
                                        int32_t* out);
+extern "C" int rsvm_host_siggen_nid(int nid, const int32_t* args, int nargs,
+                                    int32_t* out);
 
 static void join_path(char* out, size_t cap, const char* p) {
     if (!p || !p[0]) { strncpy(out, s_cwd, cap - 1); out[cap-1]=0; return; }
@@ -251,6 +254,56 @@ static int host_native(const char* name, const int32_t* args, int nargs,
     return -1;
 }
 
+static int host_native_id(int nid, const int32_t* args, int nargs,
+                          int32_t* out, void*) {
+    return rsvm_host_siggen_nid(nid, args, nargs, out);
+}
+
+static int nseq_step(int nid, const int32_t* a, int na, int32_t* out, void*) {
+    if (out) *out = 0;
+    int32_t d0 = (na > 0 && a) ? a[0] : 0;
+    int32_t d1 = (na > 1 && a) ? a[1] : 0;
+    switch (nid) {
+    case RSVM_NID_NOP:
+        return 0;
+    case RSVM_NID_DELAY:
+        host_delay_ms((uint32_t)(d0 < 0 ? 0 : d0), NULL);
+        return 0;
+    case RSVM_NID_PIN_MODE:
+        host_pin_mode((uint8_t)d0, (uint8_t)d1, NULL);
+        return 0;
+    case RSVM_NID_GPIO_WR:
+    case RSVM_NID_DIG_WR:
+        host_dig_write((uint8_t)d0, (uint8_t)d1, NULL);
+        return 0;
+    case RSVM_NID_GPIO_RD:
+    case RSVM_NID_DIG_RD:
+        if (out) *out = host_dig_read((uint8_t)d0, NULL);
+        return 0;
+    case RSVM_NID_ADC:
+        if (out) *out = host_adc_read((uint8_t)d0, NULL);
+        return 0;
+    default:
+        return rsvm_host_siggen_nid(nid, a, na, out);
+    }
+}
+
+extern "C" int rsvm_esp_nseq_exec(const rsvm_nstep_t* steps, int nsteps, int32_t* out) {
+    return rsvm_nseq_run(steps, nsteps, nseq_step, NULL, out);
+}
+
+static int host_nseq_run(const void* steps, int nsteps, int32_t* out, void* user) {
+    const rsvm_nstep_t* s = (const rsvm_nstep_t*)steps;
+    /* One blob. Not N sprintf-of-source translates. */
+    if (boot_role_resolve() == BOOT_ROLE_TYRANT) {
+        uint8_t blob[8 + sizeof(rsvm_nstep_t) * RSVM_NSEQ_MAX];
+        size_t n = rsvm_nseq_pack(s, nsteps, blob, sizeof blob);
+        if (n) rs_dom_link_send(RSDOM_TYPE_NSEQ, blob, (uint16_t)n);
+    }
+    (void)user;
+    return rsvm_esp_nseq_exec(s, nsteps, out);
+}
+
 static int host_sysconf_get(const char* key, char* out, int out_max, void*) {
     return rsvm_sysconf_get_venv(key, out, out_max);
 }
@@ -285,5 +338,7 @@ extern "C" void rsvm_install_esp_host(rsvm_t* vm) {
     h.sysconf_get = host_sysconf_get;
     h.sysconf_set = host_sysconf_set;
     h.native_call = host_native;
+    h.native_id   = host_native_id;
+    h.nseq_run    = host_nseq_run;
     rsvm_set_host(vm, &h);
 }

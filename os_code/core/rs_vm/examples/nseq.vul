@@ -1,0 +1,16 @@
+// One trapdoor, not N native() translates.
+// Compile-time constants pack into a nid array; the VM walks it in C.
+set_step_depth 50000;
+
+print(native_seq(
+  native("wave", 1, 1000, 50, 4, 80),
+  native("delay", 10),
+  native("wave_stop")
+));
+
+// Runtime: packed i32 stride 7 = nid, nargs, a0..a4
+i32 burst[7];
+burst[0] = 9;  // delay
+burst[1] = 1;
+burst[2] = 5;
+print(native_seq(burst));

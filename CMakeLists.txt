@@ -53,6 +53,7 @@ idf_component_register(
     # vulcan language: interpreter + parser + bytecode opt (NOT a JIT)
     "os_code/core/rs_vm/vm/rs_vm.cpp"
     "os_code/core/rs_vm/vm/rs_vm_parse.cpp"
+    "os_code/core/rs_vm/vm/rs_vm_nseq.cpp"
     "os_code/core/rs_vm/vm/rs_vm_host_esp.cpp"
     "os_code/core/rs_vm/vm/rs_vm_host_siggen.cpp"
     "os_code/core/rs_vm/vm/rs_vm_opt.cpp"

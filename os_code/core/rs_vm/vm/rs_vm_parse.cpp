@@ -1,4 +1,5 @@
 #include "os_code/core/rs_vm/vm/rs_vm_parse.hpp"
+#include "rs_vm_nseq.h"
 #include "os_code/core/rs_vm/vm_modules/vm_mdl_property/vm_mdl_property.h"
 #include "os_code/core/rs_vm/vm_modules/vm_mdl_thread/vm_mdl_thread.h"
 #include <string.h>
@@ -156,6 +157,59 @@ static uint8_t slot_of(P* p, const char* name, bool create) {
     return rsvm_slot_by_name(p->vm, name, create);
 }
 
+static int parse_str_lit(P* p, char* out, int cap) {
+    skip_ws(p);
+    if (peek(p) != '"') return 0;
+    getc_(p);
+    int n = 0;
+    while (peek(p) && peek(p) != '"' && n < cap - 1) out[n++] = getc_(p);
+    if (peek(p) != '"') { fail(p, "unterminated string"); return 0; }
+    getc_(p);
+    out[n] = 0;
+    return 1;
+}
+
+/* Compile-time native_seq step. Returns 1 ok, 0 not a step, -1 fail. */
+static int try_nseq_step(P* p, rsvm_nstep_t* st) {
+    skip_ws(p);
+    memset(st, 0, sizeof(*st));
+    if (match(p, "native") || match(p, "ccall")) {
+        if (!expect(p, "(")) return -1;
+        char name[64];
+        if (!parse_str_lit(p, name, (int)sizeof name)) {
+            fail(p, "nseq native(\"name\", ...)");
+            return -1;
+        }
+        int nid = rsvm_nid_from_name(name);
+        if (nid < 0) { fail(p, "unknown nseq nid"); return -1; }
+        int na = 0;
+        while (match(p, ",")) {
+            int32_t v = 0;
+            if (!parse_int(p, &v)) {
+                fail(p, "nseq args must be integer constants");
+                return -1;
+            }
+            if (na < RSVM_NSEQ_MAXARG) st->args[na] = v;
+            na++;
+        }
+        if (!expect(p, ")")) return -1;
+        st->nid = nid;
+        st->nargs = na;
+        return 1;
+    }
+    if (match(p, "delay") || match(p, "delay_ms") || match(p, "sleep")) {
+        if (!expect(p, "(")) return -1;
+        int32_t v = 0;
+        if (!parse_int(p, &v)) { fail(p, "nseq delay const ms"); return -1; }
+        if (!expect(p, ")")) return -1;
+        st->nid = RSVM_NID_DELAY;
+        st->nargs = 1;
+        st->args[0] = v;
+        return 1;
+    }
+    return 0;
+}
+
 static void expr(P* p);
 static void statement(P* p);
 static void parse_block(P* p);
@@ -258,6 +312,43 @@ static void primary(P* p) {
         // sysconf("key") as expr → GET
         expect(p, "("); expr(p); expect(p, ")");
         emit_u8(p, RSVM_OP_SYSCONF_GET);
+        return;
+    }
+    if (match(p, "native_seq") || match(p, "nseq")) {
+        // Trapdoor: pack constant native() calls, or walk a packed i32 array.
+        expect(p, "(");
+        skip_ws(p);
+        rsvm_nstep_t steps[RSVM_NSEQ_MAX];
+        int save = p->pos, sl = p->line, sc = p->col;
+        int r0 = try_nseq_step(p, &steps[0]);
+        if (r0 < 0) return;
+        if (r0 == 1) {
+            int n = 1;
+            while (match(p, ",")) {
+                if (n >= RSVM_NSEQ_MAX) { fail(p, "nseq too long"); return; }
+                if (try_nseq_step(p, &steps[n]) != 1) {
+                    if (!p->failed) fail(p, "nseq step");
+                    return;
+                }
+                n++;
+            }
+            expect(p, ")");
+            emit_u8(p, RSVM_OP_NATIVE_SEQ);
+            emit_u8(p, 0); /* immediate */
+            emit_u8(p, (uint8_t)n);
+            for (int i = 0; i < n; ++i) {
+                emit_i32(p, steps[i].nid);
+                emit_i32(p, steps[i].nargs);
+                for (int k = 0; k < RSVM_NSEQ_MAXARG; ++k)
+                    emit_i32(p, steps[i].args[k]);
+            }
+            return;
+        }
+        p->pos = save; p->line = sl; p->col = sc;
+        expr(p);
+        expect(p, ")");
+        emit_u8(p, RSVM_OP_NATIVE_SEQ);
+        emit_u8(p, 1); /* array on stack */
         return;
     }
     if (match(p, "native") || match(p, "ccall")) {

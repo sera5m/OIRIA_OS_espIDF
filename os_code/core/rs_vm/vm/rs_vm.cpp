@@ -1,4 +1,5 @@
 #include "os_code/core/rs_vm/vm/rs_vm.hpp"
+#include "rs_vm_nseq.h"
 #include "os_code/core/rs_vm/vm_modules/vm_mdl_immut/vm_mdl_immut.h"
 #include "os_code/core/rs_vm/vm_modules/vm_mdl_thread/vm_mdl_thread.h"
 #include "os_code/core/rs_vm/vm_modules/vm_mdl_property/vm_mdl_property.h"
@@ -1165,6 +1166,100 @@ rsvm_status_t rsvm_step(rsvm_t* vm) {
         break;
     }
 
+    case RSVM_OP_NATIVE_SEQ: {
+        /* mode 0 = immediate in bytecode; mode 1 = packed i32 array on stack */
+        uint8_t mode = rd_u8(vm);
+        rsvm_nstep_t steps[RSVM_NSEQ_MAX];
+        int nsteps = 0;
+        if (mode == 0) {
+            nsteps = (int)rd_u8(vm);
+            if (nsteps > RSVM_NSEQ_MAX) nsteps = RSVM_NSEQ_MAX;
+            for (int i = 0; i < nsteps; ++i) {
+                steps[i].nid   = rd_i32(vm);
+                steps[i].nargs = rd_i32(vm);
+                for (int k = 0; k < RSVM_NSEQ_MAXARG; ++k)
+                    steps[i].args[k] = rd_i32(vm);
+            }
+        } else {
+            rsvm_val_t arr = pop(vm);
+            int32_t flat[RSVM_NSEQ_MAX * RSVM_NSEQ_STRIDE];
+            int nflat = 0;
+            if (arr.ty == RSVM_TY_ARR && arr.v >= 0 &&
+                (uint16_t)arr.v < vm->heap_used) {
+                uint8_t* meta_p = vm->heap + arr.v + sizeof(rsvm_obj_hdr_t);
+                uint8_t ndim = meta_p[0] ? meta_p[0] : 1;
+                int32_t total = 1;
+                for (int d = 0; d < ndim && d < RSVM_ARR_MAX_DIM; ++d) {
+                    int32_t dim = meta_p[1 + d] ? meta_p[1 + d] : 1;
+                    total *= dim;
+                }
+                if (total > (int32_t)arr.aux && arr.aux) total = (int32_t)arr.aux;
+                if (total > RSVM_NSEQ_MAX * RSVM_NSEQ_STRIDE)
+                    total = RSVM_NSEQ_MAX * RSVM_NSEQ_STRIDE;
+                size_t meta = 1 + RSVM_ARR_MAX_DIM;
+                rsvm_val_t* el = (rsvm_val_t*)(vm->heap + arr.v +
+                                               sizeof(rsvm_obj_hdr_t) + meta);
+                nflat = total;
+                for (int i = 0; i < nflat; ++i) flat[i] = el[i].v;
+            }
+            nsteps = RSVM_NSEQ_MAX;
+            rsvm_nseq_from_i32(flat, nflat, steps, &nsteps);
+        }
+        int32_t out = 0;
+        if (vm->host.nseq_run) {
+            vm->host.nseq_run(steps, nsteps, &out, vm->host.user);
+        } else {
+            /* Default trapdoor: delay/gpio/adc via host hooks; else native_id/call. */
+            for (int i = 0; i < nsteps; ++i) {
+                int nid = (int)steps[i].nid;
+                int na  = (int)steps[i].nargs;
+                if (na < 0) na = 0;
+                if (na > RSVM_NSEQ_MAXARG) na = RSVM_NSEQ_MAXARG;
+                const int32_t* a = steps[i].args;
+                int32_t v = 0;
+                switch (nid) {
+                case RSVM_NID_NOP:
+                    break;
+                case RSVM_NID_DELAY:
+                    if (vm->host.delay_ms)
+                        vm->host.delay_ms((uint32_t)(a[0] < 0 ? 0 : a[0]),
+                                          vm->host.user);
+                    break;
+                case RSVM_NID_PIN_MODE:
+                    if (vm->host.pin_mode)
+                        vm->host.pin_mode((uint8_t)a[0], (uint8_t)a[1],
+                                          vm->host.user);
+                    break;
+                case RSVM_NID_GPIO_WR:
+                case RSVM_NID_DIG_WR:
+                    if (vm->host.dig_write)
+                        vm->host.dig_write((uint8_t)a[0], (uint8_t)a[1],
+                                           vm->host.user);
+                    break;
+                case RSVM_NID_GPIO_RD:
+                case RSVM_NID_DIG_RD:
+                    v = vm->host.dig_read
+                        ? vm->host.dig_read((uint8_t)a[0], vm->host.user) : 0;
+                    break;
+                case RSVM_NID_ADC:
+                    v = vm->host.adc_read
+                        ? vm->host.adc_read((uint8_t)a[0], vm->host.user) : 0;
+                    break;
+                default:
+                    if (vm->host.native_id)
+                        vm->host.native_id(nid, a, na, &v, vm->host.user);
+                    else if (vm->host.native_call)
+                        vm->host.native_call(rsvm_nid_name(nid), a, na, &v,
+                                             vm->host.user);
+                    break;
+                }
+                out = v;
+            }
+        }
+        push(vm, V_i32(out));
+        break;
+    }
+
     case RSVM_OP_IGNORE: {
         // soft pop – bare void calls (n_out==0) leave nothing on the stack
         if (vm->sp > 0) (void)pop(vm);
@@ -1279,6 +1374,12 @@ uint16_t rsvm_disasm(const rsvm_t* vm, uint16_t pc, char* buf, size_t buf_len) {
     case RSVM_OP_ADD:  snprintf(buf, buf_len, "ADD"); break;
     case RSVM_OP_LOAD: snprintf(buf, buf_len, "LOAD s%u", vm->code[pc]); pc++; break;
     case RSVM_OP_STORE:snprintf(buf, buf_len, "STORE s%u", vm->code[pc]); pc++; break;
+    case RSVM_OP_NATIVE_SEQ: {
+        uint8_t mode = vm->code[pc];
+        snprintf(buf, buf_len, "NSEQ mode%u", mode);
+        pc++;
+        break;
+    }
     default: snprintf(buf, buf_len, "OP_%02X", op); break;
     }
     return (uint16_t)(pc - start);

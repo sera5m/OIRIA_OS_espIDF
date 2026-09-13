@@ -60,6 +60,12 @@ typedef struct {
     // C interop: name is C function key; args[0..nargs); write result to *out; return 0 OK
     int  (*native_call)(const char* name, const int32_t* args, int nargs,
                         int32_t* out, void* user);
+    /* Fast path for native_seq: interned nid, no string. Optional. */
+    int  (*native_id)(int nid, const int32_t* args, int nargs,
+                      int32_t* out, void* user);
+    /* Optional whole-sequence hook (ESP tyrant: one UART blob then run).
+       steps is rsvm_nstep_t[nsteps]. Return 0; write last result to *out. */
+    int  (*nseq_run)(const void* steps, int nsteps, int32_t* out, void* user);
     void* user;
 } rsvm_host_t;
 

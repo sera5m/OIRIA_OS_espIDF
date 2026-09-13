@@ -40,3 +40,17 @@ end sequence.
 or `<<VUL` / `VUL>>`. Binary: 0x15 / 0x16 / 0x17.
 
 Frames interrupt the other ESP32 over UART1 (GPIO7/18 @ 921600).
+
+## native_seq (no N translates)
+
+Packed nid array, C trampoline, **one** `RSDOM_TYPE_NSEQ` (`0x18`, magic `NSQ1`) frame.
+
+```
+native_seq(
+  native("wave", 1, 1000, 50, 4, 80),
+  native("delay", 200),
+  native("wave_stop")
+);
+```
+
+See `NSEQ.md`.

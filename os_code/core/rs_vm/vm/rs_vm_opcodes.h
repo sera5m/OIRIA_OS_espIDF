@@ -222,6 +222,7 @@ typedef enum {
     RSVM_OP_SYSCONF_GET= 0xEF,
     RSVM_OP_SYSCONF_SET= 0xF0,
     RSVM_OP_NATIVE     = 0xF1,
+    RSVM_OP_NATIVE_SEQ = 0xF2,  /* trapdoor: packed nid array, C for-loop */
     RSVM_OP_END       = 0xFF,
 } rsvm_op_t;
 #pragma pack(push, 1)

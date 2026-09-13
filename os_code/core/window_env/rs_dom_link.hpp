@@ -40,6 +40,7 @@
 #define RSDOM_TYPE_STREAM_BEGIN 0x15  // start sequence (slave accum)
 #define RSDOM_TYPE_STREAM_CHUNK 0x16  // sequential command chunk
 #define RSDOM_TYPE_STREAM_END   0x17  // end sequence → eval accum
+#define RSDOM_TYPE_NSEQ     0x18  // packed native_seq blob (NSQ1)
 #define RSDOM_TYPE_CMD      0x20
 #define RSDOM_TYPE_RESULT   0x21
 #define RSDOM_TYPE_IO       0x22

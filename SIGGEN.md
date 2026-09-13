@@ -29,9 +29,14 @@ native("wave_freq", hz)
 native("wave_duty", pct)
 native("sweep", f0, f1, ms)
 native("adc", pin)                         // millivolts
+native_seq(native("wave", …), native("delay", ms), native("wave_stop"))
 ```
 
-Examples: `os_code/core/rs_vm/examples/wave.vul`
+`native_seq` is the trapdoor: interned nids in one array, C loop on-device,
+**one** `NSQ1` UART blob to the puppet instead of N sprintf-of-source
+translates. See `os_code/core/rs_vm/NSEQ.md`.
+
+Examples: `os_code/core/rs_vm/examples/wave.vul`, `nseq.vul`
 
 ## Corz → Vulcan
 

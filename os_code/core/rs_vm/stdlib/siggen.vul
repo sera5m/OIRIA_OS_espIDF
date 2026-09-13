@@ -1,9 +1,13 @@
-// Function generator — Corz commands as real Vulcan.
-// kind: 0 sine  1 square  2 triangle  3 saw  4 noise
-// PWM on gpio (default 4). Hang an RC (1k + 100nF) for analog-ish sine/tri.
-// Same script runs on head (solo/tyrant) or secondary (puppet).
-
 print("siggen lib");
 
-// square 1 kHz @ 50% on GPIO 4
+// square 1 kHz @ 50% on GPIO 4 — single call (still one UART translate on tyrant)
 print(native("wave", 1, 1000, 50, 4, 80));
+
+// burst: one NSQ1 blob, C trampoline on the device
+print(native_seq(
+  native("wave", 1, 1000, 50, 4, 80),
+  native("delay", 250),
+  native("wave", 0, 440, 50, 4, 80),
+  native("delay", 250),
+  native("wave_stop")
+));
