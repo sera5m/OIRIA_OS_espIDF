@@ -162,6 +162,9 @@ esp_err_t siggen_play_sweep(uint32_t f0, uint32_t f1, uint32_t ms) {
 
 const siggen_cfg_t* siggen_play_cfg(void) { return siggen_cfg_snapshot(); }
 int siggen_play_gpio(void) { return s_gpio; }
+int siggen_scope_gpio(void) {
+    return s_adc_gpio > 0 ? s_adc_gpio : SIGGEN_DEFAULT_SCOPE_GPIO;
+}
 
 static bool adc_ready(int gpio) {
     if (s_adc_gpio == gpio && s_adc.oneshot) return true;
@@ -261,6 +264,24 @@ int siggen_corz_cmd(const char* cmd, char* out, int out_max) {
         else if (lvl > 4 && lvl <= 100) amp = (uint8_t)lvl;
         siggen_play_set_amp(amp);
         say("amp"); return 0;
+    }
+    if (!strncasecmp(tmp, "scope", 5)) {
+        int pin = SIGGEN_DEFAULT_SCOPE_GPIO;
+        const char* p = tmp + 5;
+        while (*p == ' ') p++;
+        if (*p) pin = atoi(p);
+        int16_t buf[8];
+        int got = siggen_scope_cap(pin, 8, buf, NULL);
+        int last = got > 0 ? (int)buf[got - 1] : -1;
+        int mn = last, mx = last;
+        for (int i = 1; i < got; i++) {
+            if (buf[i] < mn) mn = buf[i];
+            if (buf[i] > mx) mx = buf[i];
+        }
+        if (out && out_max > 0)
+            snprintf(out, out_max, "scope GPIO%d n=%d last=%d min=%d max=%d mV",
+                     pin, got, last, mn, mx);
+        return got < 0 ? -1 : 0;
     }
     if (!strncasecmp(tmp, "sweep ", 6)) {
         char a[24], b[24], c[24];

@@ -133,7 +133,7 @@ static int host_sys_cmd(const char* cmd, char* out, int out_max, void* user) {
     out[0] = 0;
     if (!strcmp(cmd, "help") || !strncmp(cmd, "help ", 5)) {
         return snprintf(out, out_max,
-            "ls cd pwd cat mkdir rm role env help run open_app wave scope stop\n");
+            "ls cd pwd cat mkdir rm role env help run open_app apps wave scope stop\n");
     }
     if (!strcmp(cmd, "pwd")) return host_sys_pwd(out, out_max, user);
     if (!strncmp(cmd, "ls", 2) && (cmd[2]==0 || cmd[2]==' ')) {
@@ -164,6 +164,34 @@ static int host_sys_cmd(const char* cmd, char* out, int out_max, void* user) {
     if (!strcmp(cmd, "env") || !strncmp(cmd, "env ", 4)) {
         return snprintf(out, out_max, "ROLE=%s cwd=%s",
                         boot_role_name(boot_role_resolve()), s_cwd);
+    }
+    if (!strcmp(cmd, "apps")) {
+        auto list = appManager::instance().list_registered_apps();
+        auto foc = appManager::instance().get_focused_app();
+        int used = 0;
+        if (foc && foc->get_app_name())
+            used = snprintf(out, out_max, "focused %s\n", foc->get_app_name());
+        for (const auto& a : list) {
+            if (used + 2 >= out_max) break;
+            int n = snprintf(out + used, out_max - used, "%s\n", a.name.c_str());
+            if (n < 0) break;
+            used += n;
+        }
+        return used;
+    }
+    if (!strncmp(cmd, "open_app ", 9)) {
+        const char* n = cmd + 9;
+        while (*n == ' ') n++;
+        if (!n[0]) {
+            snprintf(out, out_max, "need name");
+            return -1;
+        }
+        if (!appManager::instance().is_app_registered(n)) {
+            snprintf(out, out_max, "unknown app");
+            return -1;
+        }
+        appManager::instance().close_current_and_open(n);
+        return snprintf(out, out_max, "open %s", n);
     }
     if (!strncmp(cmd, "wave ", 5) || !strcmp(cmd, "wave") ||
         !strncmp(cmd, "scope", 5) || !strcmp(cmd, "stop") ||

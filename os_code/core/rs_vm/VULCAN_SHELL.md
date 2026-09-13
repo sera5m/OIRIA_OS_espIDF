@@ -70,7 +70,10 @@ C++ apps remain the primary runtime. Vulcan is invoked **as needed** (menu, UART
 print(sh("help"));
 print(pwd());
 print(ls("/sdcard"));
-open_app("Snake");
+print(sh("apps"));
+open_app("SigGenApp");          // or sh("open_app ScopeApp")
+print(sh("wave 2k"));
+print(sh("scope 1"));
 mw_text(0, "scripted UI");
 uart_send(0x11, "print(42);");
 ```

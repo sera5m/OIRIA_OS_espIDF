@@ -27,6 +27,8 @@ esp_err_t siggen_play_sweep(uint32_t f0, uint32_t f1, uint32_t ms);
 
 const siggen_cfg_t* siggen_play_cfg(void);
 int                 siggen_play_gpio(void);
+int                 siggen_scope_gpio(void);  // last ADC pin, or default
+
 
 // ADC capture (Bojan-style oneshot). Returns count filled; mv may be NULL.
 int siggen_scope_cap(int gpio, int n, int16_t* mv, int16_t* raw);

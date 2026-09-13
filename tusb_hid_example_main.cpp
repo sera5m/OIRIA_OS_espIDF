@@ -63,6 +63,8 @@
 #include "os_code/applications/2048/MS_2048app.hpp"
 #include "os_code/applications/browser/MS_browserapp.hpp"
 #include "os_code/applications/vulcanApp/MS_vulcanapp.hpp"
+#include "os_code/applications/siggen/MS_siggenapp.hpp"
+#include "os_code/applications/scope/MS_scopeapp.hpp"
 
 #include "app_registerTable.h"
 

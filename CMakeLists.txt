@@ -113,6 +113,8 @@ idf_component_register(
 			"os_code/applications/pong/MS_pongapp.cpp" #pong gap deez nuts
 			"os_code/applications/snake/MS_snakeapp.cpp"
 			"os_code/applications/2048/MS_2048app.cpp"
+			"os_code/applications/siggen/MS_siggenapp.cpp"
+			"os_code/applications/scope/MS_scopeapp.cpp"
 
 
 #signal generation components

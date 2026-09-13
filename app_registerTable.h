@@ -9,6 +9,8 @@
     register_fileviewer(); \
     register_pong(); \
     register_vulcan(); \
+    register_siggen(); \
+    register_scope(); \
     register_snake(); \
     register_2048(); \
     register_browser();

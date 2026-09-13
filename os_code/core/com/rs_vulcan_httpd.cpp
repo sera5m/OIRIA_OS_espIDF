@@ -4,6 +4,7 @@
 #include "boot_role.hpp"
 #include "code_stuff/signal_gen/siggen_play.h"
 #include "os_code/core/window_env/rs_dom_link.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
 
 #include "esp_log.h"
 #include "esp_http_server.h"
@@ -34,25 +35,27 @@ static const char INDEX_HTML[] =
 "<title>OIRIA Vulcan</title>"
 "<style>"
 "body{margin:0;background:#0e1116;color:#e6edf3;font:14px/1.4 system-ui,sans-serif}"
-"header{padding:10px 16px;background:#161b22;border-bottom:1px solid #30363d;display:flex;gap:12px;align-items:center}"
+"header{padding:10px 16px;background:#161b22;border-bottom:1px solid #30363d;display:flex;gap:12px;align-items:center;flex-wrap:wrap}"
 "h1{font-size:16px;margin:0;font-weight:600} .role{opacity:.7}"
 "nav button{background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:6px 10px;cursor:pointer}"
 "nav button.on{background:#1f6feb;border-color:#1f6feb}"
-"main{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px}"
-"@media(max-width:800px){main{grid-template-columns:1fr}}"
+"main{display:grid;grid-template-columns:1fr;gap:12px;padding:12px}"
 "section{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px}"
+"section.hid{display:none}"
 "textarea,input,select{width:100%;box-sizing:border-box;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:8px}"
 "textarea{min-height:180px;font-family:ui-monospace,monospace}"
 ".drop{border:2px dashed #30363d;border-radius:8px;padding:18px;text-align:center;margin-bottom:8px;color:#8b949e}"
 ".drop.over{border-color:#1f6feb;color:#e6edf3}"
-"button.go{background:#238636;border:0;color:#fff;padding:8px 14px;border-radius:6px;margin-top:8px;cursor:pointer}"
+"button.go{background:#238636;border:0;color:#fff;padding:8px 14px;border-radius:6px;margin-top:8px;cursor:pointer;margin-right:6px}"
 "pre{background:#0d1117;padding:8px;border-radius:6px;max-height:140px;overflow:auto;white-space:pre-wrap}"
-"canvas{width:100%;height:140px;background:#0d1117;border-radius:6px}"
+"canvas{width:100%;height:160px;background:#0d1117;border-radius:6px}"
 "label{display:block;margin:8px 0 4px;color:#8b949e;font-size:12px}"
 ".row{display:flex;gap:8px;flex-wrap:wrap;align-items:end}"
 ".row>div{flex:1;min-width:90px}"
+".dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#484f58;margin-right:6px}"
+".dot.on{background:#3fb950}"
 "</style></head><body>"
-"<header><h1>OIRIA Vulcan</h1><span class=role id=role></span>"
+"<header><span class=dot id=dot></span><h1>OIRIA Vulcan</h1><span class=role id=role></span>"
 "<nav><button class=on id=t1>Script</button><button id=t2>Wave</button><button id=t3>Scope</button></nav>"
 "</header><main>"
 "<section id=p1>"
@@ -66,10 +69,10 @@ static const char INDEX_HTML[] =
 "<button class=go style=background:#1f6feb id=eval>Run without save</button>"
 "<pre id=out></pre>"
 "</section>"
-"<section id=p2>"
-"<p>PWM function generator (S3 has no DAC — add an RC on the pin). Corz shortcuts: s r t w 2k p25 a2 stop</p>"
+"<section id=p2 class=hid>"
+"<p>PWM function generator (S3 has no DAC — RC on the pin). Same <code>siggen_play</code> as the SigGen watch app and <code>sh(\"wave 2k\")</code>.</p>"
 "<div class=row>"
-"<div><label>wave</label><select id=wave><option value=0>sine</option><option value=1>square</option><option value=2>triangle</option><option value=3>saw</option></select></div>"
+"<div><label>wave</label><select id=wave><option value=0>sine</option><option value=1>square</option><option value=2>triangle</option><option value=3>saw</option><option value=4>noise</option></select></div>"
 "<div><label>Hz</label><input id=hz type=number value=1000></div>"
 "<div><label>duty %</label><input id=duty type=number value=50></div>"
 "<div><label>pin</label><input id=pin type=number value=4></div>"
@@ -77,24 +80,72 @@ static const char INDEX_HTML[] =
 "</div>"
 "<button class=go id=play>Start</button>"
 "<button class=go style=background:#da3633 id=stop>Stop</button>"
+"<button class=go style=background:#1f6feb id=owave>Open on watch</button>"
 "<label>corz command</label><input id=corz placeholder='s  or  2k  or  sweep 100 2k 2000'>"
 "<button class=go id=corzgo>Send</button>"
 "<pre id=wstat></pre>"
 "</section>"
-"<section id=p3 style=grid-column:1/-1>"
+"<section id=p3 class=hid>"
+"<p>ADC1 oneshot scope. Same capture as the Scope watch app and <code>sh(\"scope 1\")</code>. Opening this tab starts live plot.</p>"
 "<div class=row>"
 "<div><label>scope pin (ADC1)</label><input id=spin type=number value=1></div>"
 "<div><label>samples</label><input id=sn type=number value=200></div>"
 "</div>"
 "<button class=go id=cap>Capture</button>"
-"<canvas id=cv width=800 height=140></canvas>"
+"<button class=go style=background:#238636 id=slive>Live ON</button>"
+"<button class=go style=background:#1f6feb id=oscope>Open on watch</button>"
+"<canvas id=cv width=800 height=160></canvas>"
 "<pre id=sstat></pre>"
 "</section>"
 "</main>"
 "<script>"
 "const $=s=>document.querySelector(s);"
-"fetch('/status').then(r=>r.json()).then(j=>{$('#role').textContent=j.role+' · '+j.ip;}).catch(()=>{});"
 "const log=(el,t)=>$(el).textContent=t;"
+"const waves=['sine','square','tri','saw','noise'];"
+"let tab=1, live=false, busy=false;"
+"function show(n){"
+" tab=n;"
+" [1,2,3].forEach(i=>{$('#t'+i).classList.toggle('on',i===n); $('#p'+i).classList.toggle('hid',i!==n)});"
+" if(n===3){live=true; $('#slive').textContent='Live ON'; $('#slive').style.background='#238636'; cap()}"
+"}"
+"$('#t1').onclick=()=>show(1);"
+"$('#t2').onclick=()=>show(2);"
+"$('#t3').onclick=()=>show(3);"
+"async function pull(){"
+" try{"
+"  const j=await (await fetch('/status')).json();"
+"  const run=!!j.running;"
+"  $('#dot').classList.toggle('on',run);"
+"  $('#role').textContent=j.role+' · '+j.ip+(j.app?(' · '+j.app):'')+(run?(' · '+waves[j.wave|0]+' '+j.hz+'Hz'):'');"
+"  const ae=document.activeElement && document.activeElement.id;"
+"  if(!['wave','hz','duty','pin','amp'].includes(ae)){"
+"   if(j.wave!=null) $('#wave').value=j.wave;"
+"   if(j.hz) $('#hz').value=j.hz;"
+"   if(j.duty!=null) $('#duty').value=j.duty;"
+"   if(j.gpio) $('#pin').value=j.gpio;"
+"   if(j.amp!=null) $('#amp').value=j.amp;"
+"  }"
+"  if(j.scope_gpio && ae!=='spin') $('#spin').value=j.scope_gpio;"
+"  log('#wstat',(run?'RUN ':'stop ')+waves[j.wave|0]+' '+j.hz+' Hz duty '+j.duty+'% amp '+j.amp+'% GPIO '+j.gpio);"
+" }catch(e){}"
+"}"
+"async function cap(){"
+" if(busy)return; busy=true;"
+" try{"
+"  const r=await fetch('/scope.json?pin='+$('#spin').value+'&n='+$('#sn').value);"
+"  const j=await r.json(); const a=j.mv||[];"
+"  log('#sstat', j.n+' samples  pin '+j.pin+(a.length?('  '+Math.min.apply(null,a)+'..'+Math.max.apply(null,a)+' mV'):''));"
+"  const c=$('#cv'),x=c.getContext('2d'),w=c.width,h=c.height;"
+"  x.fillStyle='#0d1117';x.fillRect(0,0,w,h);"
+"  if(!a.length){busy=false;return}"
+"  let mn=Math.min.apply(null,a),mx=Math.max.apply(null,a); if(mn===mx) mx=mn+1;"
+"  x.strokeStyle='#58a6ff';x.beginPath();"
+"  a.forEach((v,i)=>{const px=i/(a.length-1)*w, py=h-4-(v-mn)/(mx-mn)*(h-8); i?x.lineTo(px,py):x.moveTo(px,py)});"
+"  x.stroke(); x.fillStyle='#8b949e'; x.font='12px sans-serif';"
+"  x.fillText(mx+' mV',6,14); x.fillText(mn+' mV',6,h-6);"
+" }catch(e){log('#sstat','scope fail')}"
+" busy=false;"
+"}"
 "$('#drop').ondragover=e=>{e.preventDefault();e.target.classList.add('over')};"
 "$('#drop').ondragleave=e=>e.target.classList.remove('over');"
 "$('#drop').ondrop=async e=>{e.preventDefault();e.target.classList.remove('over');"
@@ -108,20 +159,25 @@ static const char INDEX_HTML[] =
 " log('#out', await r.text());};"
 "$('#play').onclick=async()=>{"
 " const q=`wave=${$('#wave').value}&hz=${$('#hz').value}&duty=${$('#duty').value}&pin=${$('#pin').value}&amp=${$('#amp').value}`;"
-" const r=await fetch('/wave?'+q,{method:'POST'}); log('#wstat', await r.text());};"
-"$('#stop').onclick=async()=>{log('#wstat', await (await fetch('/wave/stop',{method:'POST'})).text());};"
+" log('#wstat', await (await fetch('/wave?'+q,{method:'POST'})).text()); pull();};"
+"$('#stop').onclick=async()=>{log('#wstat', await (await fetch('/wave/stop',{method:'POST'})).text()); pull();};"
 "$('#corzgo').onclick=async()=>{"
-" const r=await fetch('/cmd',{method:'POST',headers:{'content-type':'text/plain'},body:$('#corz').value});"
-" log('#wstat', await r.text());};"
-"$('#cap').onclick=async()=>{"
-" const r=await fetch('/scope.json?pin='+$('#spin').value+'&n='+$('#sn').value);"
-" const j=await r.json(); log('#sstat', j.n+' samples  pin '+j.pin);"
-" const c=$('#cv'),x=c.getContext('2d'),w=c.width,h=c.height;"
-" x.fillStyle='#0d1117';x.fillRect(0,0,w,h); const a=j.mv||[]; if(!a.length)return;"
-" let mn=Math.min(...a),mx=Math.max(...a); if(mn===mx){mx=mn+1}"
-" x.strokeStyle='#3fb950';x.beginPath();"
-" a.forEach((v,i)=>{const px=i/(a.length-1)*w, py=h- (v-mn)/(mx-mn)*h; i?x.lineTo(px,py):x.moveTo(px,py)});"
-" x.stroke();};"
+" log('#wstat', await (await fetch('/cmd',{method:'POST',headers:{'content-type':'text/plain'},body:$('#corz').value})).text());"
+" pull();};"
+"$('#cap').onclick=()=>cap();"
+"$('#slive').onclick=()=>{"
+" live=!live; $('#slive').textContent=live?'Live ON':'Live OFF';"
+" $('#slive').style.background=live?'#238636':'#1f6feb';"
+" if(live) cap();"
+"};"
+"const openApp=async name=>{"
+" const t=await (await fetch('/app?name='+encodeURIComponent(name),{method:'POST'})).text();"
+" log(tab===2?'#wstat':'#sstat', t);"
+"};"
+"$('#owave').onclick=()=>openApp('SigGenApp');"
+"$('#oscope').onclick=()=>openApp('ScopeApp');"
+"setInterval(()=>{pull(); if(live && tab===3) cap();}, 450);"
+"pull();"
 "</script></body></html>";
 
 static bool wifi_sta_or_ap(void) {
@@ -175,18 +231,66 @@ static esp_err_t h_index(httpd_req_t* req) {
     return httpd_resp_send(req, INDEX_HTML, HTTPD_RESP_USE_STRLEN);
 }
 
+static const char* focused_app_name(void) {
+    auto foc = appManager::instance().get_focused_app();
+    const char* n = (foc && foc->get_app_name()) ? foc->get_app_name() : "";
+    return n;
+}
+
 static esp_err_t h_status(httpd_req_t* req) {
     fill_ip();
-    char buf[192];
+    char buf[320];
     const siggen_cfg_t* c = siggen_play_cfg();
     snprintf(buf, sizeof buf,
-             "{\"role\":\"%s\",\"ip\":\"%s\",\"wave\":%d,\"hz\":%lu,\"gpio\":%d,\"running\":%s}",
+             "{\"role\":\"%s\",\"ip\":\"%s\",\"wave\":%d,\"hz\":%lu,\"gpio\":%d,"
+             "\"duty\":%d,\"amp\":%d,\"running\":%s,\"app\":\"%s\",\"scope_gpio\":%d}",
              boot_role_name(boot_role_resolve()), s_ip,
              c ? (int)c->wave : 0,
              c ? (unsigned long)c->freq_hz : 0,
              siggen_play_gpio(),
-             (c && c->running) ? "true" : "false");
+             c ? (int)c->duty_percent : 0,
+             c ? (int)c->amplitude : 0,
+             (c && c->running) ? "true" : "false",
+             focused_app_name(),
+             siggen_scope_gpio());
     return send_text(req, buf, "application/json");
+}
+
+static void sanitize_app_name(char* name) {
+    for (char* p = name; *p; p++)
+        if (!(isalnum((unsigned char)*p) || *p == '_')) *p = '_';
+}
+
+static esp_err_t h_app(httpd_req_t* req) {
+    char name[40] = {0};
+    char q[96] = {0};
+    httpd_req_get_url_query_str(req, q, sizeof q);
+    httpd_query_key_value(q, "name", name, sizeof name);
+    sanitize_app_name(name);
+    if (!name[0]) return send_text(req, "need name\n", "text/plain");
+    if (!appManager::instance().is_app_registered(name))
+        return send_text(req, "unknown app\n", "text/plain");
+    appManager::instance().close_current_and_open(name);
+    char buf[64];
+    snprintf(buf, sizeof buf, "open %s\n", name);
+    return send_text(req, buf, "text/plain");
+}
+
+static esp_err_t h_apps(httpd_req_t* req) {
+    auto list = appManager::instance().list_registered_apps();
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr_chunk(req, "{\"focused\":\"");
+    httpd_resp_sendstr_chunk(req, focused_app_name());
+    httpd_resp_sendstr_chunk(req, "\",\"apps\":[");
+    for (size_t i = 0; i < list.size(); i++) {
+        char item[192];
+        snprintf(item, sizeof item, "%s{\"name\":\"%s\",\"display\":\"%s\"}",
+                 i ? "," : "", list[i].name.c_str(), list[i].display_name.c_str());
+        httpd_resp_sendstr_chunk(req, item);
+    }
+    httpd_resp_sendstr_chunk(req, "]}");
+    httpd_resp_sendstr_chunk(req, NULL);
+    return ESP_OK;
 }
 
 static int recv_body(httpd_req_t* req, char** out, int max_n) {
@@ -346,7 +450,7 @@ bool rs_vulcan_console_start(void) {
     fill_ip();
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 12;
+    cfg.max_uri_handlers = 16;
     cfg.stack_size = 8192;
     if (httpd_start(&s_httpd, &cfg) != ESP_OK) {
         ESP_LOGE(TAG, "httpd_start failed");
@@ -362,6 +466,8 @@ bool rs_vulcan_console_start(void) {
         { .uri="/cmd",        .method=HTTP_POST, .handler=h_cmd },
         { .uri="/scope.json", .method=HTTP_GET,  .handler=h_scope },
         { .uri="/ls",         .method=HTTP_GET,  .handler=h_ls },
+        { .uri="/apps",       .method=HTTP_GET,  .handler=h_apps },
+        { .uri="/app",        .method=HTTP_POST, .handler=h_app },
     };
     for (size_t i = 0; i < sizeof uris / sizeof uris[0]; i++)
         httpd_register_uri_handler(s_httpd, &uris[i]);
