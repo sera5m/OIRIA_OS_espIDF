@@ -2,22 +2,25 @@
 
 Smartwatch firmware. The language it runs is **Vulcan**.
 
-## Required dependency
+**Build:** this repo **is** the ESP-IDF project. See [BUILD.md](BUILD.md).
 
-Vulcan is baked into the OS (`os_code/core/rs_vm`). The desktop/reference tree is a separate repo so other projects can use the same language without this firmware:
+```bash
+. ~/esp/esp-idf/export.sh
+git clone https://github.com/sera5m/OIRIA_OS_espIDF
+cd OIRIA_OS_espIDF
+idf.py build
+idf.py -p /dev/ttyACM0 flash monitor
+```
+
+Do **not** dump this tree into `tusb_hid/main/`. That old wrapper is gone.
+
+Vulcan on the watch is `os_code/core/rs_vm/` (compiled in). The desktop/reference
+tree is separate and **not** required to flash:
 
 **https://github.com/sera5m/vulcan-lang**
 
 ```bash
-git clone --recurse-submodules https://github.com/sera5m/OIRIA_OS_espIDF
-# or after a plain clone:
-git submodule update --init --recursive
+git submodule update --init --recursive   # optional, fills third_party/vulcan-lang
 ```
 
-If you do not use submodules, clone vulcan-lang next to this tree:
-
-```bash
-git clone https://github.com/sera5m/vulcan-lang third_party/vulcan-lang
-```
-
-See `VULCAN.md`.
+See `VULCAN.md`, `SIGGEN.md`, `BUILD.md`.
