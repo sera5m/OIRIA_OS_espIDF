@@ -5,6 +5,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <cstring>
+#include <cstdlib>
 
 static const char* TAG = "RshellPipe";
 
@@ -15,6 +16,18 @@ bool RshellPipe::add_target(PipeTarget t) {
     if (!t.app && !t.pool) return false;
     targets.push_back(t);
     return true;
+}
+
+bool RshellPipe::take_bytes(const DataItem* item, std::vector<uint8_t>& out) const {
+    if (!item) return false;
+    const uint8_t* src = item->payload;
+    size_t n = item->payload_len;
+    if (!src) n = 0;
+    if (filter_.empty()) {
+        out.assign(src, src + n);
+        return true;
+    }
+    return filter_.apply(src, n, out);
 }
 
 // ---------------------------------------------------------------------------
@@ -46,9 +59,7 @@ uint32_t InterDevicePipe::crc32(const uint8_t* data, size_t len) {
 bool InterDevicePipe::push(DataItem* item) {
     if (!item) return false;
     std::vector<uint8_t> bytes;
-    if (item->payload && item->payload_len) {
-        bytes.assign(item->payload, item->payload + item->payload_len);
-    }
+    if (!take_bytes(item, bytes)) return false;
     batch_.push_back(std::move(bytes));
     if (batch_.size() >= batch_count_) {
         return flush();
@@ -99,6 +110,21 @@ InterProcessPipe::~InterProcessPipe() {
 
 bool InterProcessPipe::push(DataItem* item) {
     if (!item || !queue_) return false;
+    if (!filter_.empty()) {
+        // Queue stores the pointer, so the filtered bytes have to live on the item.
+        // The caller still owns the DataItem. A failed send leaves it already rewritten.
+        std::vector<uint8_t> out;
+        if (!filter_.apply(item->payload, item->payload_len, out)) return false;
+        uint8_t* fresh = nullptr;
+        if (!out.empty()) {
+            fresh = static_cast<uint8_t*>(malloc(out.size()));
+            if (!fresh) return false;
+            memcpy(fresh, out.data(), out.size());
+        }
+        free(item->payload);
+        item->payload = fresh;
+        item->payload_len = out.size();
+    }
     // Non-blocking. Semi-async: producer does not wait for the consumer.
     return xQueueSend(static_cast<QueueHandle_t>(queue_), &item, 0) == pdTRUE;
 }
@@ -118,10 +144,16 @@ bool InterProcessPipe::try_pop(DataItem*& out) {
 // ---------------------------------------------------------------------------
 bool InterBufferPipe::push(DataItem* item) {
     if (!item) return false;
-    // No copy. If a sink is installed it receives the pointer directly.
-    // Transform hook will go here later.
-    if (sink_) {
-        sink_(item);
+    if (filter_.empty()) {
+        if (sink_) sink_(item);
+        return true;
     }
+    std::vector<uint8_t> out;
+    if (!take_bytes(item, out)) return false;
+    // Temporary view. The sink must not free it or keep the pointer.
+    DataItem view = *item;
+    view.payload = out.empty() ? nullptr : out.data();
+    view.payload_len = out.size();
+    if (sink_) sink_(&view);
     return true;
 }

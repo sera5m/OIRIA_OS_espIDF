@@ -40,6 +40,7 @@ idf_component_register(
         "../os_code/applications/toplethosApp/MS_toplethosapp.cpp"
         "../os_code/core/rShell/streams/rshell_pool.cpp"
         "../os_code/core/rShell/streams/rshell_pipe.cpp"
+        "../os_code/core/rShell/streams/rshell_filter.cpp"
         "../os_code/core/rShell/streams/rshell_streamdefs.c"
         "../os_code/core/rShell/streams/rshell_pump.cpp"
         "../os_code/core/com/boot_role.c"

@@ -12,6 +12,7 @@ class DataPool;
 struct DataItem;
 
 #include "rshell_pool.hpp"
+#include "rshell_filter.hpp"
 
 typedef enum Rshell_pipe_flowType {
     null,
@@ -33,24 +34,13 @@ struct PipeTarget {
     static PipeTarget from_pool(DataPool* p) { PipeTarget t{Type::POOL}; t.pool = p; return t; }
 };
 
-// Method: skip the opcode dispatch and call the C++ it would have called.
+// Method: CRUD on the payload. Not an interpreter change.
 //
-// Honest path:  tph source → opcodes → rsvm_step → C++ native
-// Pipe path:    DataItem → the same C++ natives, against a live slot image
-//
-// The functions are the ones already in the interpreter:
-//   fn filter in[payload] out[result]  →  OP_CALL + OP_STORE of the out names
-//   FlowMap { src = dst }              →  OP_FLOW (0x91) / rsvm_flow_apply
-// out[] is slot names, here, or void. It is not a pointer. The pipe target
-// stays in C++ and is filled from the out[] slot after the native returns.
-//
-// The cheat is limited on purpose. Slots (vm->slots) are mutable and that is
-// what a pipe writes: payload in, result out, or one rsvm_flow_apply copy.
-// The code array is only written at compile time (the JMP skip patch). There
-// is no opcode for rewriting a running function. A pipe must not invent
-// bytecode. It calls a function or a FlowMap route that is already loaded
-// in the terminal's resident environment, and it does not rsvm_eval per item
-// (that wipes the machine).
+// Toplethos has named `fn in[] out[]` and FlowMap slot copies. It has no
+// lambda, so a pipe does not call one. Every subtype holds a PipeFilter
+// (rshell_filter.hpp). The filter is a list of Create / Read / Update /
+// Delete run on a working copy of the bytes. Empty filter means the bytes
+// pass through unchanged. The subclass still decides the transport.
 //
 // Base pipe. Subtypes decide how data actually moves.
 class RshellPipe {
@@ -73,12 +63,22 @@ public:
 
     bool add_target(PipeTarget t);
 
+    // Shared by every subtype. Empty until someone adds CRUD steps.
+    PipeFilter& filter() { return filter_; }
+    const PipeFilter& filter() const { return filter_; }
+
     // Push one item. Subtypes implement the actual transfer.
     // Returns false if the item was dropped or the pipe is full.
     virtual bool push(DataItem* item) = 0;
 
     // Optional flush (used by batched subtypes).
     virtual bool flush() { return true; }
+
+protected:
+    PipeFilter filter_;
+
+    // Filter into `out`. Empty filter copies the payload. False if a CRUD step fails.
+    bool take_bytes(const DataItem* item, std::vector<uint8_t>& out) const;
 };
 
 // Inter-device: batched (1-255) with CRC verification on flush.
@@ -124,7 +124,8 @@ private:
     size_t depth_ = 16;
 };
 
-// Inter-buffer: pure pointer passing. Transform hook left for later.
+// Inter-buffer: pointer pass-through. A filter, if set, is applied to a
+// temporary view for the sink. The view is only valid during push().
 class InterBufferPipe : public RshellPipe {
 public:
     Kind kind() const override { return Kind::InterBuffer; }
