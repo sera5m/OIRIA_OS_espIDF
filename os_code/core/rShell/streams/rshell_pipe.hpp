@@ -34,14 +34,12 @@ struct PipeTarget {
     static PipeTarget from_pool(DataPool* p) { PipeTarget t{Type::POOL}; t.pool = p; return t; }
 };
 
-// Method: parameterized transforms on the payload. Not an interpreter change.
+// Method: CRUD edits on the payload, plus find / swap / replace / remove.
+// That set is closed. No math language and no Toplethos call in the pipe.
+// Unit conversion happens at exfil, where the type is already known.
 //
-// Toplethos has named `fn in[] out[]` and FlowMap slot copies. It has no
-// lambda, so a pipe does not call one. Every subtype holds a PipeFilter
-// (rshell_filter.hpp). CRUD (create / read / update / delete) is only the
-// positional part. Find, swap, replace, and remove take patterns, spans,
-// and a count, and alter the working copy. Empty filter means the bytes
-// pass through unchanged. The subclass still decides the transport.
+// Every subtype holds a PipeFilter (rshell_filter.hpp). Empty filter means
+// the bytes pass through unchanged. The subclass still decides the transport.
 //
 // Base pipe. Subtypes decide how data actually moves.
 class RshellPipe {

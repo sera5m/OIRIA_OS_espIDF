@@ -4,25 +4,28 @@
 #include <cstddef>
 #include <vector>
 
-// Pipe filter. Not a Toplethos lambda and not a FlowMap.
+// Pipe filter. Closed set. Do not add a math language, a unit conversion,
+// or a Toplethos call here. Typed conversion (Fahrenheit to Celsius, and
+// the rest of exfil) belongs outside the pipe, at the boundary that
+// already knows the type.
 //
-// The interpreter can call a named fn, or copy one slot onto another.
-// It cannot build a transform at runtime. A pipe filter is the other
-// path: an ordered list of parameterized transforms on a working copy
-// of the payload. The original bytes stay put until the pipe takes
-// the result. What changes is chosen by the arguments, not by a predicate.
+// The interpreter is not involved. A filter is an ordered list of
+// parameterized edits on a working copy of the payload. The original
+// bytes stay put until the pipe takes the result. What changes is chosen
+// by the arguments, not by a predicate.
 //
-// CRUD is the positional subset:
+// Positional:
 //   Create(at, bytes)   insert (at == length appends)
 //   Read(at, n)         working buffer becomes that slice
 //   Update(at, bytes)   overwrite, extending if the write runs past the end
 //   Delete(at, n)       erase that span
 //
-// The rest alter by content. count 0 means "every match". nth is 0-based.
-//   Find(pattern, nth)              buffer becomes that match, and nothing else
-//   Swap(at_a, at_b, n)             exchange two equal spans; overlap fails
-//   Replace(old, neu, count)        non-overlapping, left to right
-//   Remove(pattern, count)          drop those spans. A one-byte pattern is "this kind of byte"
+// Same family, selected by pattern instead of by offset alone.
+// count 0 means every match. nth is 0-based.
+//   Find(pattern, nth)         buffer becomes that match, and nothing else
+//   Swap(at_a, at_b, n)        exchange two equal spans; overlap fails
+//   Replace(old, neu, count)   non-overlapping, left to right
+//   Remove(pattern, count)     drop those spans. One byte selects that byte.
 //
 // A bad offset, an overlap, or a match that is not there fails the whole
 // apply. `out` is left empty on failure.
