@@ -34,12 +34,13 @@ struct PipeTarget {
     static PipeTarget from_pool(DataPool* p) { PipeTarget t{Type::POOL}; t.pool = p; return t; }
 };
 
-// Method: CRUD on the payload. Not an interpreter change.
+// Method: parameterized transforms on the payload. Not an interpreter change.
 //
 // Toplethos has named `fn in[] out[]` and FlowMap slot copies. It has no
 // lambda, so a pipe does not call one. Every subtype holds a PipeFilter
-// (rshell_filter.hpp). The filter is a list of Create / Read / Update /
-// Delete run on a working copy of the bytes. Empty filter means the bytes
+// (rshell_filter.hpp). CRUD (create / read / update / delete) is only the
+// positional part. Find, swap, replace, and remove take patterns, spans,
+// and a count, and alter the working copy. Empty filter means the bytes
 // pass through unchanged. The subclass still decides the transport.
 //
 // Base pipe. Subtypes decide how data actually moves.
@@ -63,7 +64,7 @@ public:
 
     bool add_target(PipeTarget t);
 
-    // Shared by every subtype. Empty until someone adds CRUD steps.
+    // Shared by every subtype. Empty until someone adds transform steps.
     PipeFilter& filter() { return filter_; }
     const PipeFilter& filter() const { return filter_; }
 

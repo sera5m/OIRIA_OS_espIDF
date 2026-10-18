@@ -8,23 +8,34 @@
 //
 // The interpreter can call a named fn, or copy one slot onto another.
 // It cannot build a transform at runtime. A pipe filter is the other
-// path: a short list of CRUD ops run in order on a working copy of the
-// payload. The original bytes are left alone until the pipe decides
-// what to do with the result.
+// path: an ordered list of parameterized transforms on a working copy
+// of the payload. The original bytes stay put until the pipe takes
+// the result. What changes is chosen by the arguments, not by a predicate.
 //
-//   Create(at, bytes)  insert bytes at `at` (at == length appends)
-//   Read(at, n)        the working buffer becomes that slice
-//   Update(at, bytes)  overwrite, extending the buffer if the write runs past the end
-//   Delete(at, n)      erase the span
+// CRUD is the positional subset:
+//   Create(at, bytes)   insert (at == length appends)
+//   Read(at, n)         working buffer becomes that slice
+//   Update(at, bytes)   overwrite, extending if the write runs past the end
+//   Delete(at, n)       erase that span
 //
-// An offset past the end, or a span that does not fit, fails the whole
+// The rest alter by content. count 0 means "every match". nth is 0-based.
+//   Find(pattern, nth)              buffer becomes that match, and nothing else
+//   Swap(at_a, at_b, n)             exchange two equal spans; overlap fails
+//   Replace(old, neu, count)        non-overlapping, left to right
+//   Remove(pattern, count)          drop those spans. A one-byte pattern is "this kind of byte"
+//
+// A bad offset, an overlap, or a match that is not there fails the whole
 // apply. `out` is left empty on failure.
 
-enum class CrudOp : uint8_t {
+enum class XformOp : uint8_t {
     Create = 1,
     Read,
     Update,
-    Delete
+    Delete,
+    Find,
+    Swap,
+    Replace,
+    Remove
 };
 
 class PipeFilter {
@@ -37,16 +48,28 @@ public:
     void update(size_t at, const uint8_t* bytes, size_t n);
     void erase(size_t at, size_t n);
 
+    void find(const uint8_t* pattern, size_t n, size_t nth = 0);
+    void swap_span(size_t at_a, size_t at_b, size_t n);
+    void replace(const uint8_t* old_b, size_t old_n,
+                 const uint8_t* new_b, size_t new_n,
+                 size_t count = 0);
+    void remove(const uint8_t* pattern, size_t n, size_t count = 0);
+
     bool apply(const uint8_t* in, size_t in_len, std::vector<uint8_t>& out) const;
 
 private:
     struct Step {
-        CrudOp op;
+        XformOp op;
         size_t at;
         size_t n;
         size_t mat;
+        size_t at2;
+        size_t n2;
+        size_t count;
     };
 
     std::vector<Step> steps_;
     std::vector<uint8_t> material_;
+
+    size_t push_mat(const uint8_t* bytes, size_t n);
 };
