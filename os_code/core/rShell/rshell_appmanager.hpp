@@ -23,7 +23,7 @@ struct RegisteredAppInfo {
 
 struct InputEvent;
 
-// AppManager: lifecycle, registry, pipes, and optional Vulcan / serial teletype.
+// AppManager: lifecycle, registry, pipes, and optional Toplethos / serial teletype.
 class appManager {
 public:
     static appManager& instance();
@@ -65,16 +65,16 @@ public:
     std::vector<RegisteredAppInfo> list_registered_apps() const;
 
     // -------------------------------------------------------------------------
-    // Vulcan secondary mode (C++ apps stay firmware; .vul is the shell layer)
+    // Toplethos secondary mode (C++ apps stay firmware; .vul is the shell layer)
     // -------------------------------------------------------------------------
     // Run a .vul / .bvul from SD or absolute path via RS-VM (0 = OK).
-    int run_vulcan_script(const char* path);
+    int run_toplethos_script(const char* path);
 
     // Push bytecode/source over collaborative UART (RSDOM_TYPE_VM / VM_SRC).
-    int send_vulcan_uart(uint8_t type, const uint8_t* payload, uint16_t len);
+    int send_toplethos_uart(uint8_t type, const uint8_t* payload, uint16_t len);
 
     // True if secondary scripting path is enabled (role / env).
-    bool vulcan_mode_enabled() const;
+    bool toplethos_mode_enabled() const;
 
     // -------------------------------------------------------------------------
     // Serial-monitor teletype — single .vul/.cvul pipe (one buffer only)

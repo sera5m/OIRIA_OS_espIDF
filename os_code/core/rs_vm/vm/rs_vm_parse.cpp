@@ -470,7 +470,7 @@ static void primary(P* p) {
             }
             return;
         }
-        // Classic: foo(args)  OR  Vulcan: foo in[args] out[dests|here|void]
+        // Classic: foo(args)  OR  Toplethos: foo in[args] out[dests|here|void]
         if (match(p, "in")) {
             int fid = rsvm_func_by_name(p->vm, id);
             if (fid < 0) { fail(p, "unknown function"); return; }

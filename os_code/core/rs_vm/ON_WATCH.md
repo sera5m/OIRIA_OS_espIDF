@@ -1,4 +1,4 @@
-# Vulcan on the watch (what actually runs)
+# Toplethos on the watch (what actually runs)
 
 There is **no JIT** on the ESP32-S3.
 
@@ -17,8 +17,8 @@ Comments that say “JIT-style” mean: emit `.bvul` then interpret that image. 
 ## Firmware wiring
 
 - Sources listed in root `CMakeLists.txt`
-- `RSVM_IN_FIRMWARE=1` so `appManager::run_vulcan_script` / `feed_serial_source` call `rsvm_eval`
-- UI runner: `os_code/applications/vulcanApp` (menu: “Vulcan VM”)
+- `RSVM_IN_FIRMWARE=1` so `appManager::run_toplethos_script` / `feed_serial_source` call `rsvm_eval`
+- UI runner: `os_code/applications/toplethosApp` (menu: “Toplethos VM”)
 - Host GPIO/print: `vm/rs_vm_host_esp.cpp` (`rsvm_install_esp_host`)
 - Include roots: `os_code/core/rs_vm` and `os_code/core/rs_vm/vm` (modules use `vm_modules/...`)
 
@@ -26,7 +26,7 @@ Comments that say “JIT-style” mean: emit `.bvul` then interpret that image. 
 
 See `RS_VM_NOTES.md`. Short version used by the on-watch sample:
 
-```vulcan
+```toplethos
 set_step_depth 50000;
 fn greet in[] out[] {
   print("hi");

@@ -53,10 +53,10 @@ class Companion:
         return self._run(job)
     def _run(self, job: Job) -> str:
         if job.kind == "eval":
-            from vulcan_run import run_source
+            from toplethos_run import run_source
             return run_source(job.body)
         if job.kind == "dsp":
-            from vulcan_run import lut_sin_deg, lut_cos_deg, lut_sin_amp
+            from toplethos_run import lut_sin_deg, lut_cos_deg, lut_sin_amp
             parts = job.body.split()
             if not parts:
                 return "0"

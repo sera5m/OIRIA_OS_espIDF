@@ -1,4 +1,4 @@
-// basic vulcan sample for desktop rsvm_test
+// basic toplethos sample for desktop rsvm_test
 i32 x = 3;
 i32 y;
 x * 2 + 1 = y;

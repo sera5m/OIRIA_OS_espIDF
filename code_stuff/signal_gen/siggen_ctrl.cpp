@@ -34,7 +34,7 @@ esp_err_t siggen_configure(const siggen_cfg_t* cfg) {
             e = siggen_i2s_pdm_init(&g_st);
             break;
         case SIGGEN_OUT_GPIO:
-            // Digital path: Vulcan host pin_mode + gpio_wr / RMT later
+            // Digital path: Toplethos host pin_mode + gpio_wr / RMT later
             g_st.inited = true;
             ESP_LOGI(TAG, "GPIO backend — drive via host gpio_wr / RMT");
             break;

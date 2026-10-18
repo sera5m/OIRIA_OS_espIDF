@@ -1,8 +1,8 @@
 The GTK IDE is **not** part of this firmware repo.
 
-https://github.com/sera5m/vulcan-ide
+https://github.com/sera5m/toplethos-ide
 
-This OS depends on Vulcan BASE only:
-https://github.com/sera5m/vulcan-lang
+This OS depends on Toplethos BASE only:
+https://github.com/sera5m/toplethos-lang
 
-`desktop/vulcan_ide/` if present is a leftover overlay. Do not treat it as canonical.
+`desktop/toplethos_ide/` if present is a leftover overlay. Do not treat it as canonical.

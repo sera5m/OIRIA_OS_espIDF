@@ -69,7 +69,7 @@ static void wrap_trig(char* s) {
     *w=0; strncpy(s,tmp,4095); s[4095]=0;
 }
 
-int rsvm_latex_to_vulcan(const char* latex, char* out, size_t cap) {
+int rsvm_latex_to_toplethos(const char* latex, char* out, size_t cap) {
     if (!latex || !out || cap < 16) return -1;
     char buf[4096]; strncpy(buf, latex, sizeof(buf)-1); buf[sizeof(buf)-1]=0;
     replace_all(buf,sizeof buf,"$$"," "); replace_all(buf,sizeof buf,"$"," ");

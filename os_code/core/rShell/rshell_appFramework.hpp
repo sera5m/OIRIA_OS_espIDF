@@ -48,8 +48,8 @@ enum class AppCapability : uint32_t {
     ST_RING_CAPABLE     = 1 << 13,
     ST_PF_CAPABLE       = 1 << 14,
     ST_PREF_RT_IPC      = 1 << 15,
-    VULCAN_HOST = 1 << 16,   // app may host / bridge RS-VM
-    VULCAN_CLIENT = 1 << 17 // app may connect to RS-VM host
+    TOPLETHOS_HOST = 1 << 16,   // app may host / bridge RS-VM
+    TOPLETHOS_CLIENT = 1 << 17 // app may connect to RS-VM host
 };
 
 

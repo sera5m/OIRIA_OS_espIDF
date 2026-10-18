@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Desktop Vulcan runner (Wayland host). Same LUT wrap as firmware opcodes.
+"""Desktop Toplethos runner (Wayland host). Same LUT wrap as firmware opcodes.
 
 i32 angles are degrees. uint32 wrap: turns = deg * (2^32/360).
 """
@@ -155,7 +155,7 @@ def run_source(src):
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
-        sys.stderr.write('usage: vulcan_run.py file.vul\n'); return 2
+        sys.stderr.write('usage: toplethos_run.py file.vul\n'); return 2
     sys.stdout.write(run_source(open(argv[0], encoding='utf-8').read())); return 0
 
 if __name__ == '__main__':

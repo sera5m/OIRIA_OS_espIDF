@@ -1,5 +1,5 @@
-/* Vulcan web console: drop .vul, corz-style wave, Bojan-style scope. */
-#include "rs_vulcan_httpd.h"
+/* Toplethos web console: drop .vul, corz-style wave, Bojan-style scope. */
+#include "rs_toplethos_httpd.h"
 #include "rs_autoconnect.hpp"
 #include "boot_role.hpp"
 #include "code_stuff/signal_gen/siggen_play.h"
@@ -32,7 +32,7 @@ extern int rs_coll_eval_src(const char* src, size_t len);
 
 static const char INDEX_HTML[] =
 "<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-"<title>OIRIA Vulcan</title>"
+"<title>OIRIA Toplethos</title>"
 "<style>"
 "body{margin:0;background:#0e1116;color:#e6edf3;font:14px/1.4 system-ui,sans-serif}"
 "header{padding:10px 16px;background:#161b22;border-bottom:1px solid #30363d;display:flex;gap:12px;align-items:center;flex-wrap:wrap}"
@@ -55,7 +55,7 @@ static const char INDEX_HTML[] =
 ".dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#484f58;margin-right:6px}"
 ".dot.on{background:#3fb950}"
 "</style></head><body>"
-"<header><span class=dot id=dot></span><h1>OIRIA Vulcan</h1><span class=role id=role></span>"
+"<header><span class=dot id=dot></span><h1>OIRIA Toplethos</h1><span class=role id=role></span>"
 "<nav><button class=on id=t1>Script</button><button id=t2>Wave</button><button id=t3>Scope</button></nav>"
 "</header><main>"
 "<section id=p1>"
@@ -184,7 +184,7 @@ static bool wifi_sta_or_ap(void) {
     /* Try known APs first. */
     if (rs_ac_boot_try(8000)) return true;
 
-    ESP_LOGW(TAG, "STA failed — starting AP OIRIA-vulcan");
+    ESP_LOGW(TAG, "STA failed — starting AP OIRIA-toplethos");
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         nvs_flash_erase();
@@ -196,8 +196,8 @@ static bool wifi_sta_or_ap(void) {
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     if (esp_wifi_init(&cfg) != ESP_OK) return false;
     wifi_config_t ap = {0};
-    memcpy(ap.ap.ssid, "OIRIA-vulcan", 12);
-    memcpy(ap.ap.password, "vulcanvulcan", 12);
+    memcpy(ap.ap.ssid, "OIRIA-toplethos", 12);
+    memcpy(ap.ap.password, "toplethostoplethos", 12);
     ap.ap.ssid_len = 12;
     ap.ap.channel = 6;
     ap.ap.max_connection = 4;
@@ -205,7 +205,7 @@ static bool wifi_sta_or_ap(void) {
     esp_wifi_set_mode(WIFI_MODE_AP);
     esp_wifi_set_config(WIFI_IF_AP, &ap);
     esp_wifi_start();
-    ESP_LOGI(TAG, "AP ssid=OIRIA-vulcan pass=vulcanvulcan");
+    ESP_LOGI(TAG, "AP ssid=OIRIA-toplethos pass=toplethostoplethos");
     return true;
 }
 
@@ -441,7 +441,7 @@ static esp_err_t h_ls(httpd_req_t* req) {
     return send_text(req, buf, "text/plain");
 }
 
-bool rs_vulcan_console_start(void) {
+bool rs_toplethos_console_start(void) {
     if (s_httpd) return true;
     if (!wifi_sta_or_ap()) {
         ESP_LOGE(TAG, "wifi failed");
@@ -476,15 +476,15 @@ bool rs_vulcan_console_start(void) {
     return true;
 }
 
-bool rs_vulcan_console_up(void) { return s_up; }
+bool rs_toplethos_console_up(void) { return s_up; }
 
 static void boot_task(void*) {
     vTaskDelay(pdMS_TO_TICKS(2500));
-    rs_vulcan_console_start();
+    rs_toplethos_console_start();
     vTaskDelete(NULL);
 }
 
-void rs_vulcan_console_boot(void) {
+void rs_toplethos_console_boot(void) {
     static bool once;
     if (once) return;
     once = true;

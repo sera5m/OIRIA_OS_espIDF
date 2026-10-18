@@ -1,6 +1,6 @@
 # Vm_accel — compile-target trapdoor cores
 
-Per-target acceleration for Vulcan. Firmware CMake does **not** list this
+Per-target acceleration for Toplethos. Firmware CMake does **not** list this
 folder unless you opt a watch source in. Desktop builds include it.
 
 | Target | Macro | Trapdoor / accel |

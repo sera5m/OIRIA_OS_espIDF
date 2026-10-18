@@ -5,7 +5,7 @@ fn main in[] out[] {
   dom_enable();
   dom_clear(0);
   dom_win(0, 0, 0, 240, 280);
-  dom_text(0, "hello from vulcan");
+  dom_text(0, "hello from toplethos");
   dom_flush();
   return;
 }

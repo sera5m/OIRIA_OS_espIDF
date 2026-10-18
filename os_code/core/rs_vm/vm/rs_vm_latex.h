@@ -3,7 +3,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-int rsvm_latex_to_vulcan(const char* latex, char* out, size_t cap);
+int rsvm_latex_to_toplethos(const char* latex, char* out, size_t cap);
 #ifdef __cplusplus
 }
 #endif

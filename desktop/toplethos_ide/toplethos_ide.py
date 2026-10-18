@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vulcan IDE — Wayland editor, file tree, PC/watch target, PC tyrant I/O.
+"""Toplethos IDE — Wayland editor, file tree, PC/watch target, PC tyrant I/O.
 
 USB-C console (idf.py monitor style), usually /dev/ttyACM0 @ 115200.
 
@@ -47,14 +47,14 @@ except Exception:
     serial = None
     list_ports = None
 
-APP_ID = "dev.oiria.VulcanIde"
+APP_ID = "dev.oiria.ToplethosIde"
 HERE = Path(__file__).resolve().parent
 EXAMPLES = HERE / "examples"
 VUL_EXTS = {".vul", ".bvul"}
 DEFAULT_SRC = """set_step_depth 20000;
 
 fn main in[] out[] {
-  print("hello from vulcan-ide");
+  print("hello from toplethos-ide");
   i32 n = 3;
   do n[n] {
     print(n);
@@ -146,7 +146,7 @@ class SerialLink:
                 GLib.idle_add(self.on_rx, text)
 
 
-class VulcanIde(Gtk.Application):
+class ToplethosIde(Gtk.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_OPEN)
         self.win = None
@@ -170,7 +170,7 @@ class VulcanIde(Gtk.Application):
         if self.win:
             self.win.present()
             return
-        self.win = Gtk.ApplicationWindow(application=self, title="Vulcan IDE")
+        self.win = Gtk.ApplicationWindow(application=self, title="Toplethos IDE")
         self.win.set_default_size(1100, 760)
         self.win.set_child(self._build())
         self.tyrant_box.set_sensitive(False)
@@ -478,12 +478,12 @@ class VulcanIde(Gtk.Application):
         self._run_local(src)
 
     def _run_local(self, src):
-        runner = shutil.which("rsvm") or shutil.which("vulcan")
+        runner = shutil.which("rsvm") or shutil.which("toplethos")
         if not runner:
-            self._append_log("[pc] no local rsvm/vulcan on PATH. Use Watch or Tyrant.\n")
+            self._append_log("[pc] no local rsvm/toplethos on PATH. Use Watch or Tyrant.\n")
             self.status.set_text("no local rsvm — use Watch / Tyrant")
             return
-        tmp = Path("/tmp/vulcan_ide_run.vul")
+        tmp = Path("/tmp/toplethos_ide_run.vul")
         tmp.write_text(src, encoding="utf-8")
         self._append_log("[pc] %s %s\n" % (runner, tmp))
         def work():
@@ -506,7 +506,7 @@ class VulcanIde(Gtk.Application):
             self._append_log("[watch] %s\n" % e)
             self.status.set_text(str(e))
             return
-        self.status.set_text("sent to watch — wait VULCAN OK / ERR")
+        self.status.set_text("sent to watch — wait TOPLETHOS OK / ERR")
         self._append_log("[watch] framed upload\n")
 
     def _ty_send(self, line):
@@ -575,7 +575,7 @@ class VulcanIde(Gtk.Application):
         text = Path(path).read_text(encoding="utf-8", errors="replace")
         self._set_text(text)
         self.path = path
-        self.win.set_title("Vulcan IDE — " + Path(path).name)
+        self.win.set_title("Toplethos IDE — " + Path(path).name)
         self._touch_status()
 
     def _on_save(self, *_):
@@ -596,7 +596,7 @@ class VulcanIde(Gtk.Application):
         Path(path).write_text(self._get_text(), encoding="utf-8")
         self.path = path
         self.workdir = Path(path).parent
-        self.win.set_title("Vulcan IDE — " + Path(path).name)
+        self.win.set_title("Toplethos IDE — " + Path(path).name)
         self._refresh_files()
 
     def _on_new(self, *_):
@@ -613,7 +613,7 @@ class VulcanIde(Gtk.Application):
 
 
 def main():
-    app = VulcanIde()
+    app = ToplethosIde()
     return app.run(sys.argv[:])
 
 

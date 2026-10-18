@@ -1,5 +1,5 @@
 #pragma once
-/* Compile targets for Vulcan accel / trapdoor. */
+/* Compile targets for Toplethos accel / trapdoor. */
 
 #if defined(RSVM_IN_FIRMWARE) || defined(ESP_PLATFORM)
 #  ifndef RSVM_TARGET_WATCH

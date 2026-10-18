@@ -1,5 +1,5 @@
 #pragma once
-// High-level controller — call from apps, menu, or Vulcan OP_NATIVE wrappers
+// High-level controller — call from apps, menu, or Toplethos OP_NATIVE wrappers
 #include "siggen_types.h"
 #include "esp_err.h"
 
@@ -17,7 +17,7 @@ esp_err_t siggen_set_freq(uint32_t freq_hz);
 esp_err_t siggen_set_wave(siggen_wave_t wave);
 esp_err_t siggen_set_duty(uint8_t duty_percent);
 
-// Snapshot for UI / Vulcan env
+// Snapshot for UI / Toplethos env
 const siggen_cfg_t* siggen_cfg_snapshot(void);
 
 #ifdef __cplusplus

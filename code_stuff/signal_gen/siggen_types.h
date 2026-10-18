@@ -5,9 +5,9 @@
 // ESP32-S3 has NO classic DAC. Output paths:
 //   SIGGEN_OUT_LEDC   — hardware PWM (square; duty-modulated ≈ arbitrary + LPF)
 //   SIGGEN_OUT_I2S_PDM— I2S PDM (1-bit density; RC LPF → analog-ish)
-//   SIGGEN_OUT_GPIO   — bit-bang / RMT digital patterns via Vulcan GPIO host
+//   SIGGEN_OUT_GPIO   — bit-bang / RMT digital patterns via Toplethos GPIO host
 //
-// Vulcan can drive this through OP_NATIVE / pin_mode / gpio_wr or a thin
+// Toplethos can drive this through OP_NATIVE / pin_mode / gpio_wr or a thin
 // native table ("siggen_start", "siggen_stop", …) registered on the host.
 // =============================================================================
 

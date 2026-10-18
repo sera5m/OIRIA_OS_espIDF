@@ -1,6 +1,6 @@
-# Watch native + collective Vulcan terminal
+# Watch native + collective Toplethos terminal
 
-Vulcan is the bash analogue. The second chip **listens** on UART1.
+Toplethos is the bash analogue. The second chip **listens** on UART1.
 
 ## Roles (`boot_role`)
 

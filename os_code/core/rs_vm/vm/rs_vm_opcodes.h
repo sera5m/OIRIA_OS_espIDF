@@ -1,5 +1,5 @@
 #pragma once
-// rs_vm_opcodes – Vulcan light bytecode (v2.1) + LUT trig
+// rs_vm_opcodes – Toplethos light bytecode (v2.1) + LUT trig
 #include <stdint.h>
 #ifdef __cplusplus
 extern "C" {

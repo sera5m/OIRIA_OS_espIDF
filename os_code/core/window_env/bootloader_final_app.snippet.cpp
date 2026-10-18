@@ -30,7 +30,7 @@ extern void register_watch();
 extern void register_menu();
 extern void register_fileviewer();
 extern void register_pong();
-extern void register_vulcan();
+extern void register_toplethos();
 extern void register_siggen();
 extern void register_scope();
 extern void register_snake();
@@ -123,7 +123,7 @@ static void bootloader_final_app() {
     register_menu();
     register_fileviewer();
     register_pong();
-    register_vulcan();
+    register_toplethos();
     register_siggen();
     register_scope();
     register_snake();

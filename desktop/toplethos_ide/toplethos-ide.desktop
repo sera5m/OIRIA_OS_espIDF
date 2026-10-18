@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Toplethos IDE
+Comment=Edit Toplethos and send it to the OIRIA watch over USB-C serial
+Exec=python3 __DIR__/toplethos_ide.py %f
+Terminal=false
+Type=Application
+Categories=Development;IDE;
+MimeType=text/x-toplethos;
+StartupNotify=true
+Keywords=toplethos;esp32;oiria;

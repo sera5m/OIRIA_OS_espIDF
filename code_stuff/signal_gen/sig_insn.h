@@ -1,6 +1,6 @@
 #pragma once
 // =============================================================================
-// sig_insn — fire-and-forget signal instruction set (C/C++ + Vulcan-friendly)
+// sig_insn — fire-and-forget signal instruction set (C/C++ + Toplethos-friendly)
 // =============================================================================
 // Build a small program of packed ops, call sig_insn_fire(), walk away.
 // Runner task evaluates formulas, watches peak/trough, drives GPIO / PDM /
@@ -9,7 +9,7 @@
 // Direct C++:
 //   SigProgram p; p.sine(1000,80).out_pdm(17).on_peak_gpio(2,1).on_trough_gpio(2,0).fire();
 //
-// Vulcan / OP_NATIVE later maps names → same ops (push program blob + fire).
+// Toplethos / OP_NATIVE later maps names → same ops (push program blob + fire).
 // =============================================================================
 
 #include <stdint.h>

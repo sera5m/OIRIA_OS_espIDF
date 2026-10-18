@@ -4,11 +4,11 @@
 
 **Fire-and-forget** programs: slap formulas together, stack triggers (peak/trough/IO),
 route samples out GPIO / LEDC / PDM / **protocol_spi** / **protocol_i2c**. Works from
-plain C, C++ fluent API, or Vulcan `native("wave", …)`.
+plain C, C++ fluent API, or Toplethos `native("wave", …)`.
 
 Refs: [BojanJurca Esp32_oscilloscope](https://github.com/BojanJurca/Esp32_oscilloscope)
 (web scope), [corz.org ESP32 signal generator](https://corz.org/ESP32/square-sine-triangle-wave-signal-generator/)
-(web + serial one-letter commands — ported as Vulcan, PWM-only on S3).
+(web + serial one-letter commands — ported as Toplethos, PWM-only on S3).
 
 ## ESP32-S3 outputs
 
@@ -20,7 +20,7 @@ Refs: [BojanJurca Esp32_oscilloscope](https://github.com/BojanJurca/Esp32_oscill
 | **protocol_spi** | Nested sample stream to external DAC / bus |
 | **protocol_i2c** | Nested sample → reg write on codec/DAC |
 
-## Vulcan / web (this is the user-facing path)
+## Toplethos / web (this is the user-facing path)
 
 See repo-root `SIGGEN.md`.
 
@@ -31,7 +31,7 @@ native("sweep", f0, f1, ms)
 native("adc", pin)
 ```
 
-Web console (STA or AP `OIRIA-vulcan`): drop `.vul`, Corz `s/r/t/2k/p25/stop`, scope canvas.
+Web console (STA or AP `OIRIA-toplethos`): drop `.vul`, Corz `s/r/t/2k/p25/stop`, scope canvas.
 
 `siggen_play.*` is the singleton used by both HTTP and `OP_NATIVE`. Same binary on
 head (tyrant/solo) and secondary (puppet). Tyrant also UART-forwards `wave` to the puppet.
@@ -57,7 +57,7 @@ precomputed_math/
   fast_inv_trig_i16.h     inv sqrt / atan2 / phase_inc
 
 signal_gen/
-  siggen_play.*           Vulcan + HTTP front (PWM DDS + ADC capture)
+  siggen_play.*           Toplethos + HTTP front (PWM DDS + ADC capture)
   sig_insn.h / .cpp       ISA, builder, runner task
   sig_protocol.h / .cpp   SPI + I2C sample sinks
   siggen_wavetable.*      buffer fillers

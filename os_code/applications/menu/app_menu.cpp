@@ -58,7 +58,7 @@ void app_launcher_menu::build_static_menus()
 
     utils_menu = {
         {"Calculator", "CalcApp",      false},
-        {"Vulcan VM",  "VulcanApp",    false},
+        {"Toplethos VM",  "ToplethosApp",    false},
         {"SigGen",     "SigGenApp",    false},
         {"Scope",      "ScopeApp",     false},
         {"Stopwatch",  "StopwatchApp", false},

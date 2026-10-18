@@ -5,7 +5,7 @@ cd("/sdcard/apps");
 print(pwd());
 print(ls("."));
 print(env("ROLE"));
-mw_text(0, "hello from vulcan");
+mw_text(0, "hello from toplethos");
 open_app("Pong");
 uart_send(0x11, "print(1);");
 pool("scores", 0, "");

@@ -1,11 +1,11 @@
-// VulcanApp – RS-VM on-watch test console (aligned with real MWenv / AppBase APIs)
-#include "MS_vulcanapp.hpp"
+// ToplethosApp – RS-VM on-watch test console (aligned with real MWenv / AppBase APIs)
+#include "MS_toplethosapp.hpp"
 
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
 
-static const char* TAG = "VulcanApp";
+static const char* TAG = "ToplethosApp";
 
 static const char* kEmbeddedSample =
     "set_step_depth 50000;\n"
@@ -38,27 +38,27 @@ static const char* kEmbeddedSample =
 // Host UI sink — prints go into the app log buffer
 // ---------------------------------------------------------------------------
 static void ui_print_i32(int32_t v, void* user) {
-    auto* app = static_cast<VulcanApp*>(user);
+    auto* app = static_cast<ToplethosApp*>(user);
     if (!app) return;
     char tmp[24];
     int n = snprintf(tmp, sizeof tmp, "%ld\n", (long)v);
     app->append_log(tmp, n);
 }
 static void ui_print_str(const char* s, uint8_t len, void* user) {
-    auto* app = static_cast<VulcanApp*>(user);
+    auto* app = static_cast<ToplethosApp*>(user);
     if (!app || !s) return;
     app->append_log(s, (int)len);
     app->append_char('\n');
 }
 static void ui_print_char(char c, void* user) {
-    auto* app = static_cast<VulcanApp*>(user);
+    auto* app = static_cast<ToplethosApp*>(user);
     if (app) app->append_char(c);
 }
 static void ui_delay_ms(uint32_t ms, void*) {
     vTaskDelay(pdMS_TO_TICKS(ms ? ms : 1));
 }
 
-void rsvm_install_esp_host_ui(rsvm_t* vm, VulcanApp* app) {
+void rsvm_install_esp_host_ui(rsvm_t* vm, ToplethosApp* app) {
     if (!vm) return;
     rsvm_host_t h{};
     h.print_i32  = ui_print_i32;
@@ -72,12 +72,12 @@ void rsvm_install_esp_host_ui(rsvm_t* vm, VulcanApp* app) {
 // ---------------------------------------------------------------------------
 // App lifecycle
 // ---------------------------------------------------------------------------
-VulcanApp::VulcanApp(const ApplicationConfig& cfg) : AppBase(cfg) {
+ToplethosApp::ToplethosApp(const ApplicationConfig& cfg) : AppBase(cfg) {
     appTickRateHZ = 10;
 }
 
-void VulcanApp::on_start() {
-    ESP_LOGI(TAG, "Vulcan starting");
+void ToplethosApp::on_start() {
+    ESP_LOGI(TAG, "Toplethos starting");
     clear_log();
     ran_once = false;
     vm_ready = false;
@@ -101,10 +101,10 @@ void VulcanApp::on_start() {
             .backgroundType = BgFillType::Solid,
             .UpdateRate = 0.5f
         },
-        "Vulcan VM"
+        "Toplethos VM"
     );
     // name for title bar
-    strncpy(win->Initialcfg.name, "Vulcan", sizeof win->Initialcfg.name - 1);
+    strncpy(win->Initialcfg.name, "Toplethos", sizeof win->Initialcfg.name - 1);
 
     WindowManager::getInstance().registerWindow(win);
     bind_main_window(win);
@@ -113,8 +113,8 @@ void VulcanApp::on_start() {
     redraw_text();
 }
 
-void VulcanApp::on_stop() {
-    ESP_LOGI(TAG, "Vulcan stop");
+void ToplethosApp::on_stop() {
+    ESP_LOGI(TAG, "Toplethos stop");
     if (win) {
         WindowManager::getInstance().unregisterWindow(win);
         win.reset();
@@ -122,10 +122,10 @@ void VulcanApp::on_stop() {
     vm_ready = false;
 }
 
-void VulcanApp::on_pause()  { /* keep log */ }
-void VulcanApp::on_resume() { redraw_text(); }
+void ToplethosApp::on_pause()  { /* keep log */ }
+void ToplethosApp::on_resume() { redraw_text(); }
 
-void VulcanApp::tick_app(uint32_t) {
+void ToplethosApp::tick_app(uint32_t) {
     // one-shot auto-run after first frames
     if (!ran_once && win) {
         ran_once = true;
@@ -133,7 +133,7 @@ void VulcanApp::tick_app(uint32_t) {
     }
 }
 
-void VulcanApp::on_draw() {
+void ToplethosApp::on_draw() {
     redraw_text();
     if (win) win->dirty = true;
 }
@@ -141,13 +141,13 @@ void VulcanApp::on_draw() {
 // ---------------------------------------------------------------------------
 // Log buffer
 // ---------------------------------------------------------------------------
-void VulcanApp::clear_log() {
+void ToplethosApp::clear_log() {
     log_len = 0;
     log_buf[0] = 0;
     scroll = 0;
 }
 
-void VulcanApp::append_log(const char* s, int len) {
+void ToplethosApp::append_log(const char* s, int len) {
     if (!s || len <= 0) return;
     if (log_len + len >= LOG_CAP) {
         // drop from front
@@ -162,16 +162,16 @@ void VulcanApp::append_log(const char* s, int len) {
     log_buf[log_len] = 0;
 }
 
-void VulcanApp::append_char(char c) {
+void ToplethosApp::append_char(char c) {
     append_log(&c, 1);
 }
 
 // ---------------------------------------------------------------------------
 // Run sample
 // ---------------------------------------------------------------------------
-void VulcanApp::run_embedded_sample() {
+void ToplethosApp::run_embedded_sample() {
     clear_log();
-    append_log("--- vulcan run ---\n", 18);
+    append_log("--- toplethos run ---\n", 18);
 
     rsvm_init(&vm);
     rsvm_install_esp_host_ui(&vm, this);
@@ -194,7 +194,7 @@ void VulcanApp::run_embedded_sample() {
     redraw_text();
 }
 
-void VulcanApp::redraw_text() {
+void ToplethosApp::redraw_text() {
     if (!win) return;
 
     // Build a single string for SetText (MWenv owns layout/draw)
@@ -207,7 +207,7 @@ void VulcanApp::redraw_text() {
         o += n;
     };
 
-    put("Vulcan VM\n");
+    put("Toplethos VM\n");
     put(status_line);
     put("\n----\n");
 
@@ -233,7 +233,7 @@ void VulcanApp::redraw_text() {
 // ---------------------------------------------------------------------------
 // Input — KEY_ENTER re-run, KEY_BACK close
 // ---------------------------------------------------------------------------
-void VulcanApp::receive_event_input(const void* event) {
+void ToplethosApp::receive_event_input(const void* event) {
     if (!event) return;
     const InputEvent* ev = static_cast<const InputEvent*>(event);
     if (ev->action != KeyAction::Tap) return;
@@ -253,17 +253,17 @@ void VulcanApp::receive_event_input(const void* event) {
 // ---------------------------------------------------------------------------
 // Registration (same pattern as PongApp)
 // ---------------------------------------------------------------------------
-void register_vulcan() {
+void register_toplethos() {
     AppManifest m;
-    m.name = "VulcanApp";
-    m.display_name = "Vulcan";
-    m.description = "RS-VM / Vulcan script console";
+    m.name = "ToplethosApp";
+    m.display_name = "Toplethos";
+    m.description = "RS-VM / Toplethos script console";
     m.capabilities = static_cast<uint32_t>(AppCapability::NEEDS_WINDOW);
     m.stack_size_bytes = 16384;
     m.priority = 5;
     m.tick_rate_hz = 10;
     m.create = [](const ApplicationConfig& cfg) {
-        return std::make_shared<VulcanApp>(cfg);
+        return std::make_shared<ToplethosApp>(cfg);
     };
     appManager::instance().register_app(m);
 }

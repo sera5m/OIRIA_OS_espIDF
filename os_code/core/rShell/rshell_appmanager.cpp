@@ -422,26 +422,26 @@ void appManager::force_check_pools() {
 
 
 // =============================================================================
-// Vulcan secondary mode + serial teletype (fused from patches)
+// Toplethos secondary mode + serial teletype (fused from patches)
 // Enable full RS-VM path by defining RSVM_IN_FIRMWARE in the component build.
 // =============================================================================
 
 #ifndef RSVM_IN_FIRMWARE
 // Stubs so the tree links before rs_vm is wired into CMake.
 
-int appManager::run_vulcan_script(const char* path) {
+int appManager::run_toplethos_script(const char* path) {
     if (!path || !path[0]) return -1;
-    ESP_LOGW(TAG, "run_vulcan_script(%s): RS-VM not in build (define RSVM_IN_FIRMWARE)", path);
+    ESP_LOGW(TAG, "run_toplethos_script(%s): RS-VM not in build (define RSVM_IN_FIRMWARE)", path);
     return -1;
 }
 
-int appManager::send_vulcan_uart(uint8_t type, const uint8_t* payload, uint16_t len) {
+int appManager::send_toplethos_uart(uint8_t type, const uint8_t* payload, uint16_t len) {
     (void)type; (void)payload; (void)len;
-    ESP_LOGW(TAG, "send_vulcan_uart: RS-VM/UART DOM not in build");
+    ESP_LOGW(TAG, "send_toplethos_uart: RS-VM/UART DOM not in build");
     return -1;
 }
 
-bool appManager::vulcan_mode_enabled() const {
+bool appManager::toplethos_mode_enabled() const {
     return false;
 }
 
@@ -453,7 +453,7 @@ bool appManager::vulcan_mode_enabled() const {
 
 extern "C" void rsvm_install_esp_host(rsvm_t* vm);
 
-int appManager::run_vulcan_script(const char* path) {
+int appManager::run_toplethos_script(const char* path) {
     if (!path || !path[0]) return -1;
     rsvm_t vm;
     rsvm_init(&vm);
@@ -461,23 +461,23 @@ int appManager::run_vulcan_script(const char* path) {
     rsvm_parse_err_t err{};
     rsvm_status_t st = rsvm_eval_file(&vm, path, &err);
     if (st != RSVM_OK) {
-        ESP_LOGE(TAG, "vulcan %s: %s L%d", path, err.message, err.line);
+        ESP_LOGE(TAG, "toplethos %s: %s L%d", path, err.message, err.line);
         return (int)st;
     }
     return 0;
 }
 
-int appManager::send_vulcan_uart(uint8_t type, const uint8_t* payload, uint16_t len) {
+int appManager::send_toplethos_uart(uint8_t type, const uint8_t* payload, uint16_t len) {
     return (int)rs_dom_link_send(type, payload, len);
 }
 
-bool appManager::vulcan_mode_enabled() const {
+bool appManager::toplethos_mode_enabled() const {
     return true;
 }
 
 #endif  // RSVM_IN_FIRMWARE
 
-// ----- Serial terminal (always present; uses run_vulcan_script / feed) -----
+// ----- Serial terminal (always present; uses run_toplethos_script / feed) -----
 
 void appManager::start_serial_terminal() {
     if (terminal_task_) return;
@@ -534,7 +534,7 @@ int appManager::feed_serial_source(const char* src, size_t len) {
     rsvm_status_t st = rsvm_eval(&vm, copy, &err);
     free(copy);
     if (st != RSVM_OK) {
-        ESP_LOGE(TAG, "serial vulcan err L%d: %s", err.line, err.message);
+        ESP_LOGE(TAG, "serial toplethos err L%d: %s", err.line, err.message);
         rc = (int)st;
     } else {
         rc = 0;

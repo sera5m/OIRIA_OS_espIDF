@@ -8,7 +8,7 @@
     register_menu(); \
     register_fileviewer(); \
     register_pong(); \
-    register_vulcan(); \
+    register_toplethos(); \
     register_siggen(); \
     register_scope(); \
     register_snake(); \

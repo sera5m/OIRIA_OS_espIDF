@@ -1,17 +1,17 @@
-# Vulcan as the system shell (bash analogue)
+# Toplethos as the system shell (bash analogue)
 
 ## Intent
 
 Firmware **C++ apps stay baked in** (Pong, Snake, File Viewer, …).  
-Vulcan (`.vul` / `.bvul`) is the **scripting / orchestration layer** — like bash on Linux:
+Toplethos (`.vul` / `.bvul`) is the **scripting / orchestration layer** — like bash on Linux:
 
 | Linux | OIRIA |
 |-------|--------|
-| bash | Vulcan RS-VM |
+| bash | Toplethos RS-VM |
 | ELF binaries | C++ `AppBase` apps in firmware |
 | `systemctl` / open app | `open_app("Name")` → `appManager::close_current_and_open` |
 | `ls` / `cd` / files | SD + DataPool via host |
-| pipes | rShell pipes (future: Vulcan bridge) |
+| pipes | rShell pipes (future: Toplethos bridge) |
 | ssh remote | UART `RSDOM_TYPE_VM*` packets |
 
 ## What was fused
@@ -47,18 +47,18 @@ Desktop stubs live in `rs_vm_desktop_test.cpp` for bring-up.
 
 Patches (do not replace AppBase lifecycle):
 
-- `appmanager_vulcan_mode.patch.hpp.txt`
-- `appmanager_vulcan_mode.patch.cpp.txt`
+- `appmanager_toplethos_mode.patch.hpp.txt`
+- `appmanager_toplethos_mode.patch.cpp.txt`
 
 Adds optional:
 
 ```cpp
-appManager::run_vulcan_script(path);
-appManager::send_vulcan_uart(type, payload, len);
-appManager::vulcan_mode_enabled();
+appManager::run_toplethos_script(path);
+appManager::send_toplethos_uart(type, payload, len);
+appManager::toplethos_mode_enabled();
 ```
 
-C++ apps remain the primary runtime. Vulcan is invoked **as needed** (menu, UART, automation).
+C++ apps remain the primary runtime. Toplethos is invoked **as needed** (menu, UART, automation).
 
 ### UART
 
@@ -66,7 +66,7 @@ C++ apps remain the primary runtime. Vulcan is invoked **as needed** (menu, UART
 
 ## Example
 
-```vulcan
+```toplethos
 print(sh("help"));
 print(pwd());
 print(ls("/sdcard"));

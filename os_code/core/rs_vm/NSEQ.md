@@ -1,13 +1,13 @@
 # native_seq — trapdoored on-device array action
 
 `native("wave", …)` is one interpreter op **plus** a string lookup, **plus**
-(on tyrant) a sprintf of Vulcan source sent over UART. A burst of twelve
+(on tyrant) a sprintf of Toplethos source sent over UART. A burst of twelve
 calls is twelve translates.
 
 `native_seq` packs those calls into an array of interned nids and walks it
 in **C**, like `do n[N]` uses `OP_TRAP_LOOP`.
 
-```vulcan
+```toplethos
 print(native_seq(
   native("wave", 1, 1000, 50, 4, 80),
   native("delay", 200),
@@ -23,7 +23,7 @@ interpreter). Runtime values go in a packed `i32` array, stride 7:
 [nid, nargs, a0, a1, a2, a3, a4] × N
 ```
 
-```vulcan
+```toplethos
 i32 burst[14];
 burst[0] = 1;  burst[1] = 5; burst[2] = 1; burst[3] = 1000;
 burst[4] = 50; burst[5] = 4; burst[6] = 80;

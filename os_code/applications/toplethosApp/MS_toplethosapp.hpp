@@ -1,10 +1,10 @@
 #pragma once
 
 // =============================================================================
-// VulcanApp – minimal RS-VM runner for the watch (ESP32-S3 / AppBase)
+// ToplethosApp – minimal RS-VM runner for the watch (ESP32-S3 / AppBase)
 // =============================================================================
 // Shows VM print output via Window::SetText. ENTER re-runs sample; BACK exits.
-// Call register_vulcan() from boot / menu init (same as register_pong).
+// Call register_toplethos() from boot / menu init (same as register_pong).
 // =============================================================================
 
 #include <stdint.h>
@@ -23,9 +23,9 @@
 #include "os_code/core/rs_vm/vm/rs_vm.hpp"
 #include "os_code/core/rs_vm/vm/rs_vm_parse.hpp"
 
-class VulcanApp : public AppBase {
+class ToplethosApp : public AppBase {
 public:
-    explicit VulcanApp(const ApplicationConfig& cfg);
+    explicit ToplethosApp(const ApplicationConfig& cfg);
 
     void tick_app(uint32_t delta_ms) override;
     void receive_event_input(const void* event) override;
@@ -59,7 +59,7 @@ private:
     void redraw_text();
 };
 
-void register_vulcan();
+void register_toplethos();
 
 extern "C" void rsvm_install_esp_host(rsvm_t* vm);
-void rsvm_install_esp_host_ui(rsvm_t* vm, VulcanApp* app);
+void rsvm_install_esp_host_ui(rsvm_t* vm, ToplethosApp* app);

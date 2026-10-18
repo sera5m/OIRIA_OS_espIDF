@@ -4,8 +4,8 @@ Git is now a full ESP-IDF **project**. Clone it and build from the repo root.
 Do **not** copy this tree into `examples/.../tusb_hid/main/` — that was the old
 hierarchy and it is what you just lost.
 
-Vulcan on device is already in `os_code/core/rs_vm/`. You do **not** need
-`vulcan-lang` for firmware.
+Toplethos on device is already in `os_code/core/rs_vm/`. You do **not** need
+`toplethos-lang` for firmware.
 
 ## 0. Chip
 
@@ -60,23 +60,23 @@ sudo usermod -aG uucp "$USER"
 ## 3. What should come up
 
 - Watch face / menu on the LCD
-- Utilities → **Vulcan VM**, **SigGen**, **Scope**
-- Wi‑Fi STA from `os_code/core/com/autoconnect.conf`, else AP `OIRIA-vulcan` / `vulcanvulcan`
+- Utilities → **Toplethos VM**, **SigGen**, **Scope**
+- Wi‑Fi STA from `os_code/core/com/autoconnect.conf`, else AP `OIRIA-toplethos` / `toplethostoplethos`
 - Browser: `http://<watch-ip>/`  (Script / Wave / Scope)
 
-## 4. Desktop Vulcan (optional, PC only)
+## 4. Desktop Toplethos (optional, PC only)
 
 Not used by `idf.py`. Only if you want to run `.vul` on the laptop:
 
 ```bash
 sudo pacman -S --needed python-gobject gtk4 python-matplotlib
-git clone https://github.com/sera5m/vulcan-lang
-git clone https://github.com/sera5m/vulcan-ide
-cd vulcan-ide
-PYTHONPATH=../vulcan-lang:. python3 vulcan_ide.py
+git clone https://github.com/sera5m/toplethos-lang
+git clone https://github.com/sera5m/toplethos-ide
+cd toplethos-ide
+PYTHONPATH=../toplethos-lang:. python3 toplethos_ide.py
 ```
 
-Or just: `python3 vulcan-lang/vulcan_run.py vulcan-lang/examples/sin_demo.vul`
+Or just: `python3 toplethos-lang/toplethos_run.py toplethos-lang/examples/sin_demo.vul`
 
 ## Layout (so you don’t nest it again)
 

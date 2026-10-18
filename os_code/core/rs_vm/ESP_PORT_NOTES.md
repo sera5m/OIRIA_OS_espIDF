@@ -20,9 +20,9 @@ os_code/core/rs_vm/
 App (console test):
 
 ```
-os_code/applications/vulcan/
-  MS_vulcanapp.hpp
-  MS_vulcanapp.cpp
+os_code/applications/toplethos/
+  MS_toplethosapp.hpp
+  MS_toplethosapp.cpp
 ```
 
 (or drop the two files next to other MS_* apps and fix includes)
@@ -40,7 +40,7 @@ os_code/applications/vulcan/
 "os_code/core/rs_vm/vm_modules/vm_mdl_flowmap/vm_mdl_flowmap.cpp"
 
 # test app
-"os_code/applications/vulcan/MS_vulcanapp.cpp"
+"os_code/applications/toplethos/MS_toplethosapp.cpp"
 ```
 
 Include dirs: add `os_code/core/rs_vm/vm` and `os_code/core/rs_vm` (for `vm_modules/...`).
@@ -50,10 +50,10 @@ Include dirs: add `os_code/core/rs_vm/vm` and `os_code/core/rs_vm` (for `vm_modu
 In `app_menu` utilities (or misc):
 
 ```cpp
-{"Vulcan", "VulcanApp", false},
+{"Toplethos", "ToplethosApp", false},
 ```
 
-`MS_vulcanapp.cpp` registers `VulcanApp` via the same `AppRegistration` pattern as Pong.
+`MS_toplethosapp.cpp` registers `ToplethosApp` via the same `AppRegistration` pattern as Pong.
 
 ## Host
 
@@ -66,29 +66,29 @@ In `app_menu` utilities (or misc):
 
 - VM structs are large (code 4K, heap 2K, str pool 1K). Prefer **static** or PSRAM
   allocation if the app task stack is tight.
-- Suggest task stack ≥ 12–16 KB for VulcanApp (parse + run + UI).
+- Suggest task stack ≥ 12–16 KB for ToplethosApp (parse + run + UI).
 - `RSVM_MAX_STEPS` default 200k; embedded sample uses `set_step_depth 50000`.
 
 ## Optional next steps
 
-1. Load `.vul` / `.bvul` from microSD (`/sdcard/apps/vulcan/`).
+1. Load `.vul` / `.bvul` from microSD (`/sdcard/apps/toplethos/`).
 2. Wire `RSDOM_TYPE_VM` UART path for puppet/tyrant collaborative run.
 3. Drop `debugger/` stats to UART on STEP_LIMIT.
 4. Replace Window `draw_text` API names if your MWenv differs (stubs in app).
 
 ## Window API assumptions
 
-`VulcanApp` calls:
+`ToplethosApp` calls:
 
 - `WindowManager::instance().create_window(title, x, y, w, h)`
 - `win->set_bg`, `win->clear`, `win->draw_text(x, y, str, color)`
 - `appManager::instance().close_current_and_open("app_launcher_menu")`
 
-If your tree uses different names, adjust only `MS_vulcanapp.cpp`.
+If your tree uses different names, adjust only `MS_toplethosapp.cpp`.
 
 ## Shell / MWenv / appManager fusion
 
-See `VULCAN_SHELL.md`. C++ apps stay firmware; Vulcan is bash-like:
+See `TOPLETHOS_SHELL.md`. C++ apps stay firmware; Toplethos is bash-like:
 
 ```
 sh / ls / cd / pwd / exec / open_app / env / pool / mw_text / uart_send
@@ -96,4 +96,4 @@ sh / ls / cd / pwd / exec / open_app / env / pool / mw_text / uart_send
 
 Host bridges: SD, DataPool, Window::SetText, appManager::close_current_and_open, rsdom UART.
 
-Secondary mode patches: `artifacts/appmanager_vulcan_mode.patch.*.txt`
+Secondary mode patches: `artifacts/appmanager_toplethos_mode.patch.*.txt`
