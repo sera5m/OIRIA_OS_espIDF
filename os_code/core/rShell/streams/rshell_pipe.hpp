@@ -33,6 +33,14 @@ struct PipeTarget {
     static PipeTarget from_pool(DataPool* p) { PipeTarget t{Type::POOL}; t.pool = p; return t; }
 };
 
+// Method: fractional backend use.
+// A pipe and a tph function are the same shape: inputs, one backend call, outputs.
+// The pipe does not own a VM and does not rsvm_eval a script per DataItem.
+// The OS terminal holds the one resident tph environment. push() borrows a fraction
+// of it: write the payload into that function's input slots, enter the already-loaded
+// host method, and write the output slots into the target. The interpreter returns
+// when the C++ method returns. tph only names the call. C++ moves the bytes.
+//
 // Base pipe. Subtypes decide how data actually moves.
 class RshellPipe {
 public:
