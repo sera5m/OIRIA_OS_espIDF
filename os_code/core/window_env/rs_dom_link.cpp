@@ -15,6 +15,7 @@
 #include "os_code/core/rs_vm/vm/rs_vm.hpp"
 #include "os_code/core/rs_vm/vm/rs_vm_parse.hpp"
 #include "os_code/core/rs_vm/vm/rs_vm_nseq.h"
+#include "os_code/core/rShell/streams/rshell_pump.hpp"
 
 static const char* TAG = "rs_dom_link";
 
@@ -234,6 +235,14 @@ extern "C" void rs_dom_link_start_rx(void) {
 extern "C" void rs_dom_link_start_listen(void) {
     rs_dom_link_start_tx();
     rs_dom_link_start_rx();
+    /* Dual-ESP path. mode stays null so the pump does not fan local items here. */
+    static InterDevicePipe collective(8);
+    if (collective.id.empty()) {
+        collective.id = "collective-uart";
+        collective.mode = null;
+        DataStreamerPump::register_pipe(&collective);
+        ESP_LOGI(TAG, "collective UART pipe registered (batch %u)", collective.batch_count());
+    }
     /* Wi-Fi console: drop .vul / wave / scope. Head and puppet both serve. */
     rs_vulcan_console_boot();
 }

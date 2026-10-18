@@ -80,7 +80,8 @@ public:
 
 private:
     uint8_t batch_count_ = 1;
-    std::vector<DataItem*> batch_;
+    // Owned copies. The pump frees the original DataItem after push returns.
+    std::vector<std::vector<uint8_t>> batch_;
     uint32_t last_crc_ = 0;
 
     static uint32_t crc32(const uint8_t* data, size_t len);

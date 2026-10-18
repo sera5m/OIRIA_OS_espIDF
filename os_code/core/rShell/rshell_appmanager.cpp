@@ -7,6 +7,7 @@
 #include "os_code/core/notification_sys/rs_notif_dispatcher.h"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "os_code/middle_layer/input/hid_t.h"
+#include "os_code/core/rShell/streams/rshell_pump.hpp"
 //#include "os_code/middle_layer/input/input_handler.hpp" 
 #include "os_code/middle_layer/input/hid_t.h"
 
@@ -317,23 +318,55 @@ bool appManager::establish_inlet(std::shared_ptr<AppBase> app, DataPool* pool, R
 // Pipe Management
 // =======================================================
 
-bool appManager::create_pipe(std::shared_ptr<AppBase> source,
-    const std::vector<PipeTarget>& targets,
-    Rshell_pipe_flowType flow) {
+static bool emplace_pipe(std::vector<std::unique_ptr<RshellPipe>>& pipes,
+                         std::shared_ptr<AppBase> source,
+                         const std::vector<PipeTarget>& targets,
+                         Rshell_pipe_flowType flow,
+                         RshellPipe::Kind kind) {
     if (!source || targets.empty()) return false;
 
-    auto pipe = std::make_unique<RshellPipe>();
+    std::unique_ptr<RshellPipe> pipe;
+    switch (kind) {
+    case RshellPipe::Kind::InterBuffer:
+        pipe = std::make_unique<InterBufferPipe>();
+        break;
+    case RshellPipe::Kind::InterDevice:
+        pipe = std::make_unique<InterDevicePipe>(8);
+        break;
+    case RshellPipe::Kind::InterProcess:
+    default:
+        pipe = std::make_unique<InterProcessPipe>();
+        break;
+    }
+
     pipe->source_app = source.get();
     pipe->mode = flow;
-    pipe->id = "pipe_" + std::to_string(active_pipes.size());
-
+    pipe->id = "pipe_" + std::to_string(pipes.size());
     for (const auto& t : targets) {
         pipe->add_target(t);
     }
 
-    active_pipes.push_back(std::move(pipe));
-    ESP_LOGI(TAG, "Pipe created from %s to %zu targets", source->get_app_name(), targets.size());
+    DataStreamerPump::register_pipe(pipe.get());
+    ESP_LOGI(TAG, "Pipe %s kind=%d from %s to %zu targets",
+             pipe->id.c_str(), (int)kind, source->get_app_name(), targets.size());
+    pipes.push_back(std::move(pipe));
     return true;
+}
+
+static RshellPipe::Kind kind_for_targets(const std::vector<PipeTarget>& targets,
+                                         bool force_ring) {
+    if (force_ring) return RshellPipe::Kind::InterBuffer;
+    for (const auto& t : targets) {
+        if (t.type == PipeTarget::Type::POOL) return RshellPipe::Kind::InterBuffer;
+    }
+    return RshellPipe::Kind::InterProcess;
+}
+
+bool appManager::create_pipe(std::shared_ptr<AppBase> source,
+    const std::vector<PipeTarget>& targets,
+    Rshell_pipe_flowType flow) {
+    return emplace_pipe(active_pipes, source, targets, flow,
+                        kind_for_targets(targets, false));
 }
 
 bool appManager::pipe_to_apps(std::shared_ptr<AppBase> from,
@@ -373,9 +406,8 @@ bool appManager::connect_pipe(std::shared_ptr<AppBase> source,
                               bool use_psram_ring) {
     std::vector<PipeTarget> targets;
     if (target) targets.push_back(PipeTarget::from_app(target.get()));
-    // Use direct (1:1) or fan (1:N) - ring is a pool property, not pipe mode
-    Rshell_pipe_flowType flow = use_psram_ring ? direct : direct;
-    return create_pipe(source, targets, flow);
+    return emplace_pipe(active_pipes, source, targets, direct,
+                        kind_for_targets(targets, use_psram_ring));
 }
 
 void appManager::force_check_pools() {

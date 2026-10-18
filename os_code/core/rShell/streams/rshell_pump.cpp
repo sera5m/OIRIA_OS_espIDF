@@ -70,12 +70,12 @@ static void pump_task(void* param) {
                 }
             }
 
-            // PIPE FAN-OUT
+            // Local pipes keep the old fan-out.
+            // InterDevice stays off this loop; callers push() it explicitly.
             for (auto* pipe : DataStreamerPump::active_pipes) {
                 if (!pipe) continue;
-
-                bool should_route = (pipe->mode == direct || pipe->mode == fan || pipe->mode == clone);
-                if (!should_route) continue;
+                if (!(pipe->mode == direct || pipe->mode == fan || pipe->mode == clone)) continue;
+                if (pipe->kind() == RshellPipe::Kind::InterDevice) continue;
 
                 for (const auto& t : pipe->targets) {
                     if (t.type == PipeTarget::Type::APP && t.app) {
@@ -86,6 +86,9 @@ static void pump_task(void* param) {
                             t.pool->push_ring(item->payload, item->payload_len);
                         }
                     }
+                }
+                if (pipe->kind() == RshellPipe::Kind::InterBuffer) {
+                    pipe->push(item);
                 }
             }
 

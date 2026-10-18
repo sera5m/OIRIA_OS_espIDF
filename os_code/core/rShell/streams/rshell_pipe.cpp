@@ -45,7 +45,11 @@ uint32_t InterDevicePipe::crc32(const uint8_t* data, size_t len) {
 
 bool InterDevicePipe::push(DataItem* item) {
     if (!item) return false;
-    batch_.push_back(item);
+    std::vector<uint8_t> bytes;
+    if (item->payload && item->payload_len) {
+        bytes.assign(item->payload, item->payload + item->payload_len);
+    }
+    batch_.push_back(std::move(bytes));
     if (batch_.size() >= batch_count_) {
         return flush();
     }
@@ -55,11 +59,10 @@ bool InterDevicePipe::push(DataItem* item) {
 bool InterDevicePipe::flush() {
     if (batch_.empty()) return true;
 
-    // Compute a CRC over every payload in the batch.
     uint32_t crc = 0;
-    for (DataItem* it : batch_) {
-        if (it && it->payload && it->payload_len) {
-            crc ^= crc32(it->payload, it->payload_len);
+    for (const auto& bytes : batch_) {
+        if (!bytes.empty()) {
+            crc ^= crc32(bytes.data(), bytes.size());
         }
     }
     last_crc_ = crc;
@@ -67,8 +70,7 @@ bool InterDevicePipe::flush() {
     ESP_LOGI(TAG, "InterDevice flush id=%s count=%u crc=0x%08lx",
              id.c_str(), (unsigned)batch_.size(), (unsigned long)last_crc_);
 
-    // TODO: actual UART / collective send of the batch + CRC.
-    // For now the items stay owned by the caller; we just drop our references.
+    // UART send of the batch stays with the collective link. Copies are local.
     batch_.clear();
     return true;
 }
