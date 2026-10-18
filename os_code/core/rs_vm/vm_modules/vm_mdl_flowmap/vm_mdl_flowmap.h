@@ -2,6 +2,8 @@
 // =============================================================================
 // vm_mdl_flowmap – FlowMap Route { x = y; … } data-routing DSL
 // At compile time routes are stored; at runtime OP_FLOW can apply them.
+// A pipe filter that only renames a slot uses rsvm_flow_apply. A filter that
+// changes bytes is a tph `fn … in[] out[]`, not this module.
 // =============================================================================
 #include "os_code/core/rs_vm/vm/rs_vm.hpp"
 

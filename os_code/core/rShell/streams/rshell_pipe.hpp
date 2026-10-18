@@ -33,13 +33,24 @@ struct PipeTarget {
     static PipeTarget from_pool(DataPool* p) { PipeTarget t{Type::POOL}; t.pool = p; return t; }
 };
 
-// Method: fractional backend use.
-// A pipe and a tph function are the same shape: inputs, one backend call, outputs.
-// The pipe does not own a VM and does not rsvm_eval a script per DataItem.
-// The OS terminal holds the one resident tph environment. push() borrows a fraction
-// of it: write the payload into that function's input slots, enter the already-loaded
-// host method, and write the output slots into the target. The interpreter returns
-// when the C++ method returns. tph only names the call. C++ moves the bytes.
+// Method: a pipe filter is an already-loaded tph function, not a new opcode.
+//
+// The interpreter already has the transform shape (rs_vm_parse.cpp):
+//   fn filter in[payload] out[result] { ... }
+//   filter in[payload] out[result];
+// That call compiles to OP_CALL, then OP_STORE of each out[] name. out[here]
+// leaves the value on the stack. out[void] discards it. out[] takes slot
+// names only — not a C++ pointer — so the pipe target stays on this side.
+//
+// FlowMap { src = dst } / OP_FLOW (0x91) / rsvm_flow_apply is the other half:
+// a dataflow route that copies one named slot onto another. Use that when the
+// filter is only a rename of where the value sits. Use the function body when
+// the bytes must change.
+//
+// Fractional backend use: the pipe does not own a VM and does not rsvm_eval
+// per DataItem. The terminal's resident environment already holds the function.
+// push() writes the payload into the in[] slots, enters that call, and copies
+// the out[] slots to the pipe target. tph names the call. C++ moves the bytes.
 //
 // Base pipe. Subtypes decide how data actually moves.
 class RshellPipe {
