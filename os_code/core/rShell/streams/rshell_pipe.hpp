@@ -33,24 +33,24 @@ struct PipeTarget {
     static PipeTarget from_pool(DataPool* p) { PipeTarget t{Type::POOL}; t.pool = p; return t; }
 };
 
-// Method: a pipe filter is an already-loaded tph function, not a new opcode.
+// Method: skip the opcode dispatch and call the C++ it would have called.
 //
-// The interpreter already has the transform shape (rs_vm_parse.cpp):
-//   fn filter in[payload] out[result] { ... }
-//   filter in[payload] out[result];
-// That call compiles to OP_CALL, then OP_STORE of each out[] name. out[here]
-// leaves the value on the stack. out[void] discards it. out[] takes slot
-// names only — not a C++ pointer — so the pipe target stays on this side.
+// Honest path:  tph source → opcodes → rsvm_step → C++ native
+// Pipe path:    DataItem → the same C++ natives, against a live slot image
 //
-// FlowMap { src = dst } / OP_FLOW (0x91) / rsvm_flow_apply is the other half:
-// a dataflow route that copies one named slot onto another. Use that when the
-// filter is only a rename of where the value sits. Use the function body when
-// the bytes must change.
+// The functions are the ones already in the interpreter:
+//   fn filter in[payload] out[result]  →  OP_CALL + OP_STORE of the out names
+//   FlowMap { src = dst }              →  OP_FLOW (0x91) / rsvm_flow_apply
+// out[] is slot names, here, or void. It is not a pointer. The pipe target
+// stays in C++ and is filled from the out[] slot after the native returns.
 //
-// Fractional backend use: the pipe does not own a VM and does not rsvm_eval
-// per DataItem. The terminal's resident environment already holds the function.
-// push() writes the payload into the in[] slots, enters that call, and copies
-// the out[] slots to the pipe target. tph names the call. C++ moves the bytes.
+// The cheat is limited on purpose. Slots (vm->slots) are mutable and that is
+// what a pipe writes: payload in, result out, or one rsvm_flow_apply copy.
+// The code array is only written at compile time (the JMP skip patch). There
+// is no opcode for rewriting a running function. A pipe must not invent
+// bytecode. It calls a function or a FlowMap route that is already loaded
+// in the terminal's resident environment, and it does not rsvm_eval per item
+// (that wipes the machine).
 //
 // Base pipe. Subtypes decide how data actually moves.
 class RshellPipe {
