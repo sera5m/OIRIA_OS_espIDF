@@ -1517,20 +1517,26 @@ static void statement(P* p) {
             pre_props |= bit;
             if (bit == RSVM_PROP_AUTOUNROLL) {
                 pre_unroll = 8;
-                if (match(p, "(")) {
+                skip_ws(p);
+                if (peek(p) == '(' || peek(p) == '[') {
+                    char open = getc_(p);
                     int32_t n = 0;
                     if (!parse_int(p, &n) || n < 0) { fail(p, "autounroll n"); return; }
                     pre_unroll = (int)n;
-                    expect(p, ")");
+                    expect(p, open == '(' ? ")" : "]");
                 }
             }
-            if (bit == RSVM_PROP_THREADED && match(p, "(")) {
-                int32_t n = 1;
-                if (!parse_int(p, &n) || n < 1) { fail(p, "parallel n"); return; }
-                expect(p, ")");
-                p->vm->thread_desired = (uint8_t)(n > 255 ? 255 : n);
-                if (p->vm->thread_cap && p->vm->thread_desired > p->vm->thread_cap)
-                    p->vm->thread_desired = p->vm->thread_cap;
+            if (bit == RSVM_PROP_THREADED) {
+                skip_ws(p);
+                if (peek(p) == '(' || peek(p) == '[') {
+                    char open = getc_(p);
+                    int32_t n = 1;
+                    if (!parse_int(p, &n) || n < 1) { fail(p, "parallel n"); return; }
+                    expect(p, open == '(' ? ")" : "]");
+                    p->vm->thread_desired = (uint8_t)(n > 255 ? 255 : n);
+                    if (p->vm->thread_cap && p->vm->thread_desired > p->vm->thread_cap)
+                        p->vm->thread_desired = p->vm->thread_cap;
+                }
             }
             skip_ws(p);
         }
@@ -1699,10 +1705,7 @@ static void statement(P* p) {
         expr(p);
         skip_ws(p);
         if (match(p, "=")) {
-            if (!parse_ident(p,id,sizeof id)) { fail(p,"dest"); return; }
-            expect(p,";");
-            uint8_t s = slot_of(p,id,true);
-            emit_u8(p,RSVM_OP_STORE); emit_u8(p,s);
+            fail(p, "assignment is name = expr");
             return;
         }
         // bare expression statement (e.g. foo();) – discard result
