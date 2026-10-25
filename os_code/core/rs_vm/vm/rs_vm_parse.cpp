@@ -210,6 +210,20 @@ static int try_nseq_step(P* p, rsvm_nstep_t* st) {
     return 0;
 }
 
+
+static bool match_atom(P* p) {
+    /* 1.0 names, plus the older u* aliases. The watch stores every one in the same cell. */
+    return match(p, "i4") || match(p, "i8") || match(p, "i16") || match(p, "i32") || match(p, "i64")
+        || match(p, "ui4") || match(p, "ui8") || match(p, "ui16") || match(p, "ui32") || match(p, "ui64")
+        || match(p, "u8") || match(p, "u16") || match(p, "u32") || match(p, "u64")
+        || match(p, "size")
+        || match(p, "f8e4m3") || match(p, "f8e5m2") || match(p, "f16") || match(p, "f32") || match(p, "f64")
+        || match(p, "bf16")
+        || match(p, "uf8e4m3") || match(p, "uf8e5m2") || match(p, "uf16") || match(p, "uf32") || match(p, "uf64")
+        || match(p, "t1") || match(p, "t8") || match(p, "t16") || match(p, "t32") || match(p, "t64")
+        || match(p, "bool") || match(p, "char") || match(p, "string") || match(p, "fnid") || match(p, "ptr");
+}
+
 static void expr(P* p);
 static void statement(P* p);
 static void parse_block(P* p);
@@ -470,7 +484,19 @@ static void primary(P* p) {
             }
             return;
         }
-        // Classic: foo(args)  OR  Toplethos: foo in[args] out[dests|here|void]
+        if ((strcmp(id, "sin") == 0 || strcmp(id, "cos") == 0 ||
+             strcmp(id, "tan") == 0 || strcmp(id, "sin_amp") == 0) && match(p, "in")) {
+            expect(p, "[");
+            expr(p);
+            if (strcmp(id, "sin_amp") == 0) { expect(p, ","); expr(p); }
+            expect(p, "]");
+            if (strcmp(id, "sin") == 0) emit_u8(p, RSVM_OP_SIN);
+            else if (strcmp(id, "cos") == 0) emit_u8(p, RSVM_OP_COS);
+            else if (strcmp(id, "tan") == 0) emit_u8(p, RSVM_OP_TAN);
+            else emit_u8(p, RSVM_OP_SIN_AMP);
+            return;
+        }
+        // foo in[args]. out[names] stores. A 1.0 result type leaves the value.
         if (match(p, "in")) {
             int fid = rsvm_func_by_name(p->vm, id);
             if (fid < 0) { fail(p, "unknown function"); return; }
@@ -511,13 +537,11 @@ static void primary(P* p) {
                     }
                 }
                 expect(p, "]");
-            } else {
-                // no out[] — only legal if function declares no outs
-                if (n_out > 0) {
-                    // soft warning into parse error message style — fail for now as requested
-                    fail(p, "function has outputs; add out[params] or out[void]");
-                    return;
-                }
+            } else if (n_out > 0 && (f->reserved & 1)) {
+                here_mode = 1;
+            } else if (n_out > 0) {
+                fail(p, "function has outputs; add out[params] or out[void]");
+                return;
             }
             emit_u8(p, RSVM_OP_CALL); emit_u8(p, (uint8_t)fid);
             if (here_mode == 2) {
@@ -651,8 +675,42 @@ static void bor_expr(P* p) {
         } else break;
     }
 }
-static void expr(P* p) {
+static void land_expr(P* p) {
     bor_expr(p);
+    for (;;) {
+        skip_ws(p);
+        if (peek(p) == '&' && p->s[p->pos + 1] == '&') {
+            getc_(p); getc_(p);
+            emit_u8(p, RSVM_OP_DUP);
+            emit_u8(p, RSVM_OP_JZ);
+            uint16_t at = p->vm->code_len; emit_i16(p, 0);
+            emit_u8(p, RSVM_OP_POP);
+            bor_expr(p);
+            int16_t rel = (int16_t)(p->vm->code_len - (at + 2));
+            p->vm->code[at] = (uint8_t)(rel & 0xFF);
+            p->vm->code[at + 1] = (uint8_t)((rel >> 8) & 0xFF);
+        } else break;
+    }
+}
+static void lor_expr(P* p) {
+    land_expr(p);
+    for (;;) {
+        skip_ws(p);
+        if (peek(p) == '|' && p->s[p->pos + 1] == '|') {
+            getc_(p); getc_(p);
+            emit_u8(p, RSVM_OP_DUP);
+            emit_u8(p, RSVM_OP_JNZ);
+            uint16_t at = p->vm->code_len; emit_i16(p, 0);
+            emit_u8(p, RSVM_OP_POP);
+            land_expr(p);
+            int16_t rel = (int16_t)(p->vm->code_len - (at + 2));
+            p->vm->code[at] = (uint8_t)(rel & 0xFF);
+            p->vm->code[at + 1] = (uint8_t)((rel >> 8) & 0xFF);
+        } else break;
+    }
+}
+static void expr(P* p) {
+    lor_expr(p);
 }
 static void parse_block(P* p) {
     expect(p, "{");
@@ -733,6 +791,16 @@ static void statement(P* p) {
     }
 
     if (match(p, "halt")) { expect(p, ";"); emit_u8(p, RSVM_OP_HALT); return; }
+    if (match(p, "rng")) { fail(p, "rng is not on the watch"); return; }
+    if (match(p, "match")) { fail(p, "match is not on the watch"); return; }
+    if (match(p, "flow")) { fail(p, "flow is not on the watch. FlowMap remains."); return; }
+    if (match(p, "namespace")) {
+        char ns[RSVM_NAME_LEN];
+        if (!parse_ident(p, ns, sizeof ns)) { fail(p, "namespace name"); return; }
+        (void)ns;
+        parse_block(p);
+        return;
+    }
 
     // set_output_bytecode "path.bvul";  or set_output_bytecode; → <main>.bvul
     if (match(p, "set_output_bytecode")) {
@@ -1252,7 +1320,7 @@ static void statement(P* p) {
         skip_ws(p); if (peek(p)==';') getc_(p);
         return;
     }
-    if (match(p, "struct")) {
+    if (match(p, "struct") || match(p, "object")) {
         char sn[RSVM_NAME_LEN];
         if (!parse_ident(p,sn,sizeof sn)) { fail(p,"struct name"); return; }
         if (p->vm->struct_count >= RSVM_MAX_STRUCTS) { fail(p,"too many structs"); return; }
@@ -1285,13 +1353,14 @@ static void statement(P* p) {
             getc_(p);
             char pn[RSVM_NAME_LEN];
             if (!parse_ident(p, pn, sizeof pn)) { fail(p, "struct @prop"); return; }
-            if (strcmp(pn, "extends") == 0) {
-                expect(p, "(");
+            if (strcmp(pn, "extends") == 0 || strcmp(pn, "childof") == 0) {
+                char open = (pn[0] == 'c') ? '[' : '(';
+                expect(p, open == '[' ? "[" : "(");
                 char bn[RSVM_NAME_LEN];
-                if (!parse_ident(p, bn, sizeof bn)) { fail(p, "base in @extends"); return; }
-                expect(p, ")");
+                if (!parse_ident(p, bn, sizeof bn)) { fail(p, "base"); return; }
+                expect(p, open == '[' ? "]" : ")");
                 int bid = rsvm_struct_by_name(p->vm, bn);
-                if (bid < 0) { fail(p, "unknown base struct"); return; }
+                if (bid < 0) { fail(p, "unknown base"); return; }
                 st->base_id = (uint8_t)bid;
             }
             skip_ws(p);
@@ -1472,7 +1541,7 @@ static void statement(P* p) {
         skip_ws(p);
         if (peek(p)!=']') {
             for (;;) {
-                match(p,"i32"); match(p,"i16"); match(p,"i8"); match(p,"bool"); match(p,"ptr");
+                match_atom(p);
                 char an[RSVM_NAME_LEN];
                 if (!parse_ident(p,an,sizeof an)) { fail(p,"arg name"); return; }
                 f->arg_slots[n_in] = slot_of(p,an,true);
@@ -1489,7 +1558,18 @@ static void statement(P* p) {
         skip_ws(p);
         if (peek(p)!=']') {
             for (;;) {
-                match(p,"i32"); match(p,"i16"); match(p,"i8"); match(p,"bool"); match(p,"ptr");
+                int tsave = p->pos, tl = p->line, tc = p->col;
+                bool typed = match_atom(p);
+                skip_ws(p);
+                if (typed && (peek(p) == ']' || peek(p) == ',')) {
+                    /* out[i32] is a 1.0 result. reserved bit 0: leave it on the stack. */
+                    f->reserved = (uint8_t)(f->reserved | 1);
+                    n_out++;
+                    if (peek(p) == ',') { getc_(p); continue; }
+                    break;
+                }
+                if (typed) { /* out[i32 name] is the older named output. */ }
+                else { p->pos = tsave; p->line = tl; p->col = tc; }
                 char on[RSVM_NAME_LEN];
                 if (!parse_ident(p,on,sizeof on)) { fail(p,"out name"); return; }
                 f->out_slots[n_out] = slot_of(p,on,true);
@@ -1512,6 +1592,9 @@ static void statement(P* p) {
             getc_(p);
             char pn[RSVM_NAME_LEN];
             if (!parse_ident(p, pn, sizeof pn)) { fail(p, "property name after @"); return; }
+            if (strcmp(pn, "gpuparallel") == 0 || strcmp(pn, "npuparallel") == 0) {
+                fail(p, "not on the watch"); return;
+            }
             uint16_t bit = rsvm_prop_from_name(pn);
             if (bit == RSVM_PROP_NONE) { fail(p, "unknown function property"); return; }
             pre_props |= bit;
@@ -1569,6 +1652,9 @@ static void statement(P* p) {
             getc_(p);
             char pn[RSVM_NAME_LEN];
             if (!parse_ident(p, pn, sizeof pn)) { fail(p, "property name after @"); return; }
+            if (strcmp(pn, "gpuparallel") == 0 || strcmp(pn, "npuparallel") == 0) {
+                fail(p, "not on the watch"); return;
+            }
             uint16_t bit = rsvm_prop_from_name(pn);
             if (bit == RSVM_PROP_NONE) { fail(p, "unknown function property"); return; }
             f->props |= bit;
@@ -1587,10 +1673,7 @@ static void statement(P* p) {
         char tname[RSVM_NAME_LEN];
         int save=p->pos, sl=p->line, sc=p->col;
         bool is_type=false;
-        if (match(p,"i32")||match(p,"i16")||match(p,"i8")||match(p,"bool")||match(p,"ptr")||match(p,"string")
-                ||match(p,"ui8")||match(p,"ui16")||match(p,"ui32")||match(p,"ui64")
-                ||match(p,"u8")||match(p,"u16")||match(p,"u32")||match(p,"u64")
-                ||match(p,"f16")||match(p,"f32")||match(p,"uf16")||match(p,"uf32"))
+        if (match_atom(p))
             is_type=true;
         else if (parse_ident(p,tname,sizeof tname)) {
             if (rsvm_struct_by_name(p->vm,tname)>=0) is_type=true;
@@ -1649,6 +1732,10 @@ static void statement(P* p) {
         char id[RSVM_NAME_LEN];
         if (parse_ident(p,id,sizeof id)) {
             skip_ws(p);
+            if (peek(p) == '^' && p->s[p->pos + 1] == '=') {
+                fail(p, "^= is not on the watch");
+                return;
+            }
             if (peek(p)=='[') {
                 getc_(p);
                 uint8_t s = slot_of(p, id, true);

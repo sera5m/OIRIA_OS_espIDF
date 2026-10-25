@@ -52,3 +52,24 @@ Call style is `name in[...] out[...]` (`out[here]` leaves a value on the stack).
 - Loading `.vul` from SD
 - ikitaku
 - gcc AOT
+
+
+## Language 1.0 on the watch
+
+The device is not the desktop. It runs the forms below. Anything else fails at parse time instead of guessing.
+
+| 1.0 form | on the watch |
+|---|---|
+| `fn add in[i32 a] out[i32] { return a + 1; }` | Yes. `out[i32]` is a result left on the stack. `add in[1]` uses it. |
+| `out[name]` | The older named output. Still works. |
+| `sin in[90]` and `sin(90)` | Both. `cos`, `tan`, and `sin_amp` too. |
+| `&&` `||` | Yes. The right side does not run when the left decides it. |
+| `object` | The same layout as `struct`. `@childof[Base]` is the parent. |
+| `namespace Name { ... }` | The brace is parsed. Names are not prefixed. |
+| `i32` `ui32` `f32` `bf16` `t8` and the other atoms | They parse. Every one is the same cell. There is no `bf16` unit and no ternary unit. |
+| `u8` `u16` `u32` `u64` `uf16` | Older names. Still accepted. 1.0 spells these `ui8` and `uf32`. |
+| `@parallel[n]` | CPU threads only, and the watch cap is 1. |
+| `@gpuparallel` `@npuparallel` | Parse error: `not on the watch`. |
+| `rng` `match` `flow` `^=` | Parse error. `FlowMap` is still the watch form. |
+
+`print(...)`, `native(...)`, and `sh(...)` stay parenthesized. Those are host calls, not 1.0 functions.
