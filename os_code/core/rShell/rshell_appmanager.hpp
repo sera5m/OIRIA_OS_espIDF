@@ -44,6 +44,7 @@ public:
 
     // Focus / input
     void set_focused_app(std::shared_ptr<AppBase> app);
+    void unfocus();   // explicit clear of focus + window highlight
     std::shared_ptr<AppBase> get_focused_app() const;
     void route_input_to_focused(const InputEvent& ev);
 
