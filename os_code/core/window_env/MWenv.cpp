@@ -1,4 +1,5 @@
 #include "MWenv.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
 
 #include <math.h>
 #include <string.h>
@@ -1591,6 +1592,9 @@ void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWin
 
     last_update_ms = now_ms;
 
+    // Sample before drawing. end_focus_frame acks this value, not a later bump.
+    const uint32_t focus_epoch = appManager::instance().begin_focus_frame();
+
     bool did_any_drawing = false;
 
     // === CRITICAL: Skip repositioning if we are in fullscreen mode ===
@@ -1664,6 +1668,7 @@ void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWin
     }
 
     tb_dirty = false;   // reset toolbar dirty flag
+    appManager::instance().end_focus_frame(focus_epoch);
 }
 
 

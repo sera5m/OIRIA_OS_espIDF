@@ -1,5 +1,5 @@
 #include "os_code/core/rShell/rshell_appFramework.hpp"
-#include "os_code/core/rShell/rshell_appFramework.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
 #include "esp_task_wdt.h"
 #include "esp_log.h"
 #include "hardware/drivers/psram_std/psram_std.hpp"
@@ -151,10 +151,12 @@ void AppBase::force_check_pool(DataPool* pool) {
 
 
 void AppBase::bind_main_window(std::shared_ptr<Window> win) {
-    window_ = win;
-    if (win) {
-        ESP_LOGD(TAG, "Window bound to app %s", get_app_name());
-    }
+    window_ = std::move(win);
+    if (!window_) return;
+    ESP_LOGD(TAG, "Window bound to app %s", get_app_name());
+    // If focus was published before this window existed, apply highlight + raise
+    // through the single writer. No-op when this app is not the focused one.
+    appManager::instance().on_main_window_bound(this);
 }
 
 bool AppBase::has_capability(AppCapability cap) const {

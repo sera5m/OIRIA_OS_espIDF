@@ -363,6 +363,10 @@ extern toolbarconfig g_defaultToolbarConfig;
 // WindowManager (singleton)
 // ---------------------------------------------------------------------------
 
+// Owns the window list, z-order, and the frame (UpdateAll).
+// Does not own focus. appManager is the only writer of window_highlighted
+// and of the focus raise. UpdateAll samples the focus epoch before drawing
+// and acks that sample after, so a mid-frame focus waits for the next frame.
 class WindowManager {
 public:
     static WindowManager& getInstance() {

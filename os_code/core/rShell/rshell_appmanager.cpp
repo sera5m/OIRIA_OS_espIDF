@@ -106,20 +106,20 @@ bool appManager::is_app_registered(const std::string& name) const {
 // Open / Launch
 // =======================================================
 
-std::shared_ptr<AppBase> appManager::open_app(const std::string& name) {
+OpenAppResult appManager::open_app(const std::string& name) {
     ESP_LOGI(TAG, "Opening app: %s", name.c_str());
 
     // If already running, focus it
     if (auto existing = get_app(name)) {
         set_focused_app(existing);
-        return existing;
+        return {AppOpStatus::Ok, existing};
     }
 
     // Find manifest
     auto it = app_manifests.find(name);
     if (it == app_manifests.end()) {
         ESP_LOGE(TAG, "App not registered: %s", name.c_str());
-        return nullptr;
+        return {AppOpStatus::NotFound, nullptr};
     }
 
     const AppManifest& manifest = it->second;
@@ -136,7 +136,7 @@ std::shared_ptr<AppBase> appManager::open_app(const std::string& name) {
     auto app = manifest.create(cfg);
     if (!app) {
         ESP_LOGE(TAG, "Failed to create app: %s", name.c_str());
-        return nullptr;
+        return {AppOpStatus::CreateFailed, nullptr};
     }
 
     // Initialize and start
@@ -149,7 +149,7 @@ std::shared_ptr<AppBase> appManager::open_app(const std::string& name) {
     set_focused_app(app);
 
     ESP_LOGI(TAG, "App launched: %s", name.c_str());
-    return app;
+    return {AppOpStatus::Ok, app};
 }
 
 // =======================================================
@@ -172,19 +172,16 @@ void appManager::cleanup_old_app(std::shared_ptr<AppBase> old_app) {
         }
     }
 
-    // If this was the focused app, clear highlight and focus
+    // Only the focus writers touch the highlight. unfocus no-ops if this isn't it.
     if (focused_app == old_app) {
-        if (auto win = old_app->get_main_window()) {
-            win->window_highlighted = false;
-            win->dirty = true;
-        }
-        focused_app.reset();
+        unfocus();
     }
 
     ESP_LOGI(TAG, "Cleaned up old app: %s", old_app->get_app_name());
 }
 
 void appManager::DestroyAllApps() {
+    unfocus();
     for (auto& app : apps) {
         if (app) app->force_close();
     }
@@ -235,7 +232,12 @@ void appManager::draw_all() {
 // =======================================================
 
 void appManager::set_focused_app(std::shared_ptr<AppBase> app) {
-    // Unhighlight previous focused window (only on actual change)
+    // Null is unfocus. One clear path, one epoch bump.
+    if (!app) {
+        unfocus();
+        return;
+    }
+
     if (focused_app && focused_app != app) {
         if (auto prev_win = focused_app->get_main_window()) {
             prev_win->window_highlighted = false;
@@ -245,19 +247,20 @@ void appManager::set_focused_app(std::shared_ptr<AppBase> app) {
     }
 
     focused_app = app;
+    ESP_LOGD(TAG, "Focused app: %s", app->get_app_name());
 
-    if (app) {
-        ESP_LOGD(TAG, "Focused app: %s", app->get_app_name());
-        if (auto win = app->get_main_window()) {
-            win->window_highlighted = true;
-            win->dirty = true;
-            // Raise to top of z-order: highest practical Layer (drawn last)
-            win->set_layer(255);
-            // Force re-sort so the new layer takes effect immediately
-            ref_wm.SortWindowsByLayer();
-            ESP_LOGD(TAG, "Highlighted + raised window for focused app: %s", app->get_app_name());
-        }
+    // Window may not be bound yet. Focus is still recorded; bind_main_window
+    // calls on_main_window_bound, which re-enters here once the window exists.
+    if (auto win = app->get_main_window()) {
+        win->window_highlighted = true;
+        win->dirty = true;
+        win->set_layer(255);
+        ref_wm.SortWindowsByLayer();
+        ESP_LOGD(TAG, "Highlighted + raised window for focused app: %s", app->get_app_name());
+    } else {
+        ESP_LOGD(TAG, "Focused %s with no window yet", app->get_app_name());
     }
+    bump_focus_epoch();
 }
 
 void appManager::unfocus() {
@@ -268,7 +271,67 @@ void appManager::unfocus() {
         ESP_LOGD(TAG, "Unhighlighted window on unfocus: %s", focused_app->get_app_name());
     }
     focused_app.reset();
+    bump_focus_epoch();
     ESP_LOGD(TAG, "Focus cleared");
+}
+
+void appManager::bump_focus_epoch() {
+    focus_epoch_.fetch_add(1, std::memory_order_release);
+}
+
+AppOpStatus appManager::focus_app(const std::string& name, bool settle) {
+    auto app = get_app(name);
+    if (!app) return AppOpStatus::NotFound;
+    set_focused_app(app);
+    // High-level path only. The primitive does not wait: UpdateAll runs on
+    // another task, and waiting inside it would deadlock.
+    if (settle && !wait_focus_settled(80)) {
+        ESP_LOGW(TAG, "focus_app(%s): compositor did not ack in 80ms", name.c_str());
+    }
+    return AppOpStatus::Ok;
+}
+
+void appManager::on_main_window_bound(AppBase* app) {
+    if (!app || !focused_app || focused_app.get() != app) return;
+    set_focused_app(focused_app);
+}
+
+uint32_t appManager::begin_focus_frame() {
+    // Sample before any draw. A focus publish that lands mid-frame is not
+    // acked until a later frame that started after the bump.
+    const uint32_t sampled = focus_epoch_.load(std::memory_order_acquire);
+    TaskHandle_t expected = nullptr;
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    compositor_task_.compare_exchange_strong(
+        expected, self, std::memory_order_release, std::memory_order_relaxed);
+    compositor_depth_.fetch_add(1, std::memory_order_release);
+    return sampled;
+}
+
+void appManager::end_focus_frame(uint32_t sampled_epoch) {
+    composited_epoch_.store(sampled_epoch, std::memory_order_release);
+    const uint32_t prev = compositor_depth_.fetch_sub(1, std::memory_order_release);
+    if (prev == 1) {
+        compositor_task_.store(nullptr, std::memory_order_release);
+    }
+}
+
+bool appManager::wait_focus_settled(uint32_t timeout_ms) {
+    // Fail only when THIS task is inside UpdateAll. Another task drawing
+    // is the case we are waiting for, not a deadlock.
+    const TaskHandle_t owner = compositor_task_.load(std::memory_order_acquire);
+    if (owner != nullptr && owner == xTaskGetCurrentTaskHandle()) {
+        return false;
+    }
+    const uint32_t want = focus_epoch_.load(std::memory_order_acquire);
+    const TickType_t start = xTaskGetTickCount();
+    const TickType_t budget = pdMS_TO_TICKS(timeout_ms == 0 ? 1 : timeout_ms);
+    for (;;) {
+        const uint32_t seen = composited_epoch_.load(std::memory_order_acquire);
+        if (static_cast<int32_t>(seen - want) >= 0) return true;
+        if ((xTaskGetTickCount() - start) >= budget) return false;
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
 }
 
 std::shared_ptr<AppBase> appManager::get_focused_app() const {
@@ -290,7 +353,7 @@ void appManager::close_current_and_open(std::string name) {
             kill_app(current_name);
         } else {
             auto doomed = focused_app;
-            focused_app.reset();
+            unfocus();
             if (doomed) {
                 doomed->force_close();
                 cleanup_old_app(doomed);
@@ -332,18 +395,19 @@ std::vector<RegisteredAppInfo> appManager::list_registered_apps() const {
 // =======================================================
 
 std::shared_ptr<DataPool> appManager::establish_pool(size_t bytes, e_type_storage stype) {
+    // One failure mode (alloc). Nullptr is the status.
     return DataPool::create_shared(bytes, stype, "appmanager");
 }
 
-bool appManager::establish_outlet(std::shared_ptr<AppBase> app, size_t bytes, e_type_storage stype) {
-    if (!app) return false;
+AppOpStatus appManager::establish_outlet(std::shared_ptr<AppBase> app, size_t bytes, e_type_storage stype) {
+    if (!app) return AppOpStatus::InvalidArg;
     auto pool = app->establish_pool(bytes, stype);
-    return pool != nullptr;
+    return pool ? AppOpStatus::Ok : AppOpStatus::CreateFailed;
 }
 
-bool appManager::establish_inlet(std::shared_ptr<AppBase> app, DataPool* pool, Rshell_pipe_flowType flow) {
-    if (!app || !pool) return false;
-    return app->on_inlet_established(pool, flow);
+AppOpStatus appManager::establish_inlet(std::shared_ptr<AppBase> app, DataPool* pool, Rshell_pipe_flowType flow) {
+    if (!app || !pool) return AppOpStatus::InvalidArg;
+    return app->on_inlet_established(pool, flow) ? AppOpStatus::Ok : AppOpStatus::CreateFailed;
 }
 
 
@@ -396,14 +460,16 @@ static RshellPipe::Kind kind_for_targets(const std::vector<PipeTarget>& targets,
     return RshellPipe::Kind::InterProcess;
 }
 
-bool appManager::create_pipe(std::shared_ptr<AppBase> source,
+AppOpStatus appManager::create_pipe(std::shared_ptr<AppBase> source,
     const std::vector<PipeTarget>& targets,
     Rshell_pipe_flowType flow) {
-    return emplace_pipe(active_pipes, source, targets, flow,
-                        kind_for_targets(targets, false));
+    if (!source || targets.empty()) return AppOpStatus::InvalidArg;
+    const bool ok = emplace_pipe(active_pipes, source, targets, flow,
+                                 kind_for_targets(targets, false));
+    return ok ? AppOpStatus::Ok : AppOpStatus::InvalidArg;
 }
 
-bool appManager::pipe_to_apps(std::shared_ptr<AppBase> from,
+AppOpStatus appManager::pipe_to_apps(std::shared_ptr<AppBase> from,
                               const std::vector<std::shared_ptr<AppBase>>& to_apps,
                               Rshell_pipe_flowType flow) {
     std::vector<PipeTarget> targets;
@@ -413,7 +479,7 @@ bool appManager::pipe_to_apps(std::shared_ptr<AppBase> from,
     return create_pipe(from, targets, flow);
 }
 
-bool appManager::pipe_to_pools(std::shared_ptr<AppBase> from,
+AppOpStatus appManager::pipe_to_pools(std::shared_ptr<AppBase> from,
                                const std::vector<DataPool*>& to_pools,
                                Rshell_pipe_flowType flow) {
     std::vector<PipeTarget> targets;
@@ -423,25 +489,29 @@ bool appManager::pipe_to_pools(std::shared_ptr<AppBase> from,
     return create_pipe(from, targets, flow);
 }
 
-bool appManager::pipe_to_targets(std::shared_ptr<AppBase> from,
+AppOpStatus appManager::pipe_to_targets(std::shared_ptr<AppBase> from,
                                  const std::vector<PipeTarget>& targets,
                                  Rshell_pipe_flowType flow) {
     return create_pipe(from, targets, flow);
 }
 
-bool appManager::pipe_apps(std::shared_ptr<AppBase> from, std::shared_ptr<AppBase> to, Rshell_pipe_flowType flow) {
+AppOpStatus appManager::pipe_apps(std::shared_ptr<AppBase> from, std::shared_ptr<AppBase> to, Rshell_pipe_flowType flow) {
     std::vector<PipeTarget> targets;
     if (to) targets.push_back(PipeTarget::from_app(to.get()));
     return create_pipe(from, targets, flow);
 }
 
-bool appManager::connect_pipe(std::shared_ptr<AppBase> source,
+AppOpStatus appManager::connect_pipe(std::shared_ptr<AppBase> source,
                               std::shared_ptr<AppBase> target,
                               bool use_psram_ring) {
+    // direct + optional forced ring. create_pipe never forces the ring
+    // and uses the caller's flow, so this does not go through it.
+    if (!source || !target) return AppOpStatus::InvalidArg;
     std::vector<PipeTarget> targets;
-    if (target) targets.push_back(PipeTarget::from_app(target.get()));
-    return emplace_pipe(active_pipes, source, targets, direct,
-                        kind_for_targets(targets, use_psram_ring));
+    targets.push_back(PipeTarget::from_app(target.get()));
+    const bool ok = emplace_pipe(active_pipes, source, targets, direct,
+                                 kind_for_targets(targets, use_psram_ring));
+    return ok ? AppOpStatus::Ok : AppOpStatus::InvalidArg;
 }
 
 void appManager::force_check_pools() {
