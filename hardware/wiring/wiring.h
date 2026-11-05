@@ -108,6 +108,9 @@ void StartSPI() {
 //hardware testing subsection
 
 
+// American CRT mono RCA (crt_rm). D0/D1 are the jack. WR and D2-D7 stay open.
+// GPIO 3, 26, 27, 28, 38, 39, 40, 41, 47. Do not reuse while crt_rm is inited.
+
 //x axis,sel
 #define ENCODER0_CLK_PIN GPIO_NUM_42
 #define ENCODER0_DT_PIN  GPIO_NUM_14

@@ -8,26 +8,31 @@
 #include "hardware/drivers/lcd/fonts/font_basic_types.h"
 #include "hardware/drivers/abstraction_layers/al_scr.h"
 #include "hardware/drivers/lcd/st7789v2/lcDriver.h"
+#include "hardware/drivers/lcd/crt_rca_mono/crt_rm.h"
 
-// Forward declarations for external display (stubs for now)
-// Implement these later if you add an external display
-static void external_display_framebuffer(bool a, bool b)
-{
-    (void)a; (void)b;
-    // TODO: implement external display
-}
-
-static void external_refresh_screen(void)
-{
-    // TODO: implement external display refresh
-}
-/* Active driver pointer */
 static const ScreenDriver *active_driver = NULL;
+
+static void crt_display_framebuffer(bool a, bool b)
+{
+    (void)a;
+    (void)b;
+    crt_rm_present();
+}
+
+static void crt_refresh_screen(void)
+{
+    crt_rm_present();
+}
 
 /* Driver instances */
 const ScreenDriver onboard_screen_driver = {
     .display_framebuffer = lcd_fb_display_framebuffer,
-    .refresh_screen      = lcd_refresh_screen   // ← NOT lcd_refreshScreen
+    .refresh_screen      = lcd_refresh_screen
+};
+
+const ScreenDriver external_screen_driver = {
+    .display_framebuffer = crt_display_framebuffer,
+    .refresh_screen      = crt_refresh_screen
 };
 
 

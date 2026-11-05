@@ -13,6 +13,7 @@ idf_component_register(
         "../hardware/drivers/abstraction_layers/al_scr.c"
         "../hardware/drivers/lcd/st7789v2/lcDriver.c"
         "../hardware/drivers/lcd/st7789v2/lcdriverAddon.cpp"
+        "../hardware/drivers/lcd/crt_rca_mono/crt_rm.c"
         "../hardware/drivers/lcd/fonts/font_avr_classics.c"
         "../hardware/drivers/encoders/ky040_driver.cpp"
         "../hardware/drivers/generic/button_driver.cpp"
@@ -116,6 +117,7 @@ idf_component_register(
         esp_driver_i2c
         esp_http_client
         esp_adc
+        esp_lcd
     REQUIRES
         ulp
         esp_driver_pcnt
