@@ -44,12 +44,15 @@
 
 #define LED_PIN GPIO_NUM_48
 //i2c pins
-//hardware known connected: max30012 hr sensor, mpu6050 gyro, 
+//hardware known connected: MAX30102 HR/SpO2, BMA400 accelerometer (0x14/0x15)
 //ic2 is on 8 and 9 but defined elsewhere
 //if i read the data right these are also acessable by the ulp co-proscessor
 // I2C config — choose free GPIOs that don't conflict with your SPI/encoders/LCD
 //#define I2C_PORT        I2C_NUM_1     // or I2C_NUM_1 if port 0 is used elsewhere
 #define I2C_FREQ_HZ 100000       // 
+
+// BMA400 INT1 pin for shake-to-wake. Set to the real GPIO when board wiring is known.
+// #define BMA400_INT1_PIN GPIO_NUM_XX
 
 //other pins
 //#define IRQ 16 //notify from input devices
@@ -133,6 +136,7 @@ void StartSPI() {
 //some warnings:
 
 //usb hardware occupies gipo 19 and 20
+
 
 
 
