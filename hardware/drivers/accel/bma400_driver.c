@@ -1,5 +1,6 @@
 #include "bma400_driver.h"
 #include "esp_log.h"
+#include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -46,6 +47,13 @@ static int16_t sign_extend_12(uint16_t raw)
     raw &= 0x0FFF;
     if (raw & 0x0800) raw |= 0xF000;
     return (int16_t)raw;
+}
+
+// Threshold LSB for wake interrupt: 2^(2+acc_range)/256 g
+static float wkup_lsb_g(uint8_t range)
+{
+    // range 0 → 0.015625 g, range 1 → 0.03125 g, etc.
+    return (float)(1 << (2 + range)) / 256.0f;
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +187,79 @@ esp_err_t bma400_configure(bma400_dev_t *dev, uint8_t range, uint8_t odr)
     return ESP_OK;
 }
 
+esp_err_t bma400_configure_shake_wake(bma400_dev_t *dev, float threshold_g)
+{
+    if (!dev || !dev->i2c_dev) return ESP_ERR_INVALID_STATE;
+    if (threshold_g <= 0.0f) threshold_g = 1.8f;
+
+    // Force ±2 g so the 1.8 g threshold is meaningful and within range
+    dev->range = BMA400_RANGE_2G;
+    dev->scale = scale_for_range(BMA400_RANGE_2G);
+
+    // Must be in a mode where we can write config; sleep is fine for most regs,
+    // but wake-up interrupt is evaluated in low-power. Configure first, then enter LP.
+    uint8_t thres = (uint8_t)(threshold_g / wkup_lsb_g(BMA400_RANGE_2G) + 0.5f);
+    if (thres == 0) thres = 1;
+    if (thres > 255) thres = 255;
+
+    ESP_LOGI(TAG, "shake-wake threshold %.2f g → %u LSB (2g range)", threshold_g, thres);
+
+    // WKUP_INT_CONFIG0:
+    //  bits 7:5 = enable Z/Y/X
+    //  bits 4:2 = num_of_samples (2 → ~80 ms at 25 Hz low-power)
+    //  bits 1:0 = wkup_refu = 0b10 (every-time update → relative, ignores gravity)
+    uint8_t cfg0 = (1 << 7) | (1 << 6) | (1 << 5) | (2 << 2) | 0x02;
+    esp_err_t err = wr_reg(dev, BMA400_REG_WKUP_CONFIG0, cfg0);
+    if (err != ESP_OK) return err;
+
+    err = wr_reg(dev, BMA400_REG_WKUP_CONFIG1, thres);
+    if (err != ESP_OK) return err;
+
+    // Map wake-up interrupt to INT1
+    err = wr_reg(dev, BMA400_REG_INT1_MAP, BMA400_INT1_MAP_WKUP);
+    if (err != ESP_OK) return err;
+
+    // INT12_IO_CTRL: push-pull, active-high (bit 1 = 1 → INT1 active high)
+    // bit1 = int1_lvl (1 = active high), bit0 = int1_od (0 = push-pull)
+    err = wr_reg(dev, BMA400_REG_INT12_IO_CTRL, 0x02);
+    if (err != ESP_OK) return err;
+
+    // Enter low-power so the wake-up engine runs
+    err = bma400_set_mode(dev, BMA400_STATE_LOW_POWER);
+    if (err != ESP_OK) return err;
+
+    ESP_LOGI(TAG, "shake-wake armed (INT1 active-high, LP mode)");
+    return ESP_OK;
+}
+
+esp_err_t bma400_arm_cpu_wakeup(bma400_dev_t *dev)
+{
+    if (!dev) return ESP_ERR_INVALID_ARG;
+    if (dev->int1_pin == GPIO_NUM_NC) {
+        ESP_LOGE(TAG, "INT1 pin not set — cannot arm CPU wake");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    gpio_config_t io = {
+        .pin_bit_mask = (1ULL << dev->int1_pin),
+        .mode         = GPIO_MODE_INPUT,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,   // idle low
+        .intr_type    = GPIO_INTR_HIGH_LEVEL,
+    };
+    esp_err_t err = gpio_config(&io);
+    if (err != ESP_OK) return err;
+
+    err = gpio_wakeup_enable(dev->int1_pin, GPIO_INTR_HIGH_LEVEL);
+    if (err != ESP_OK) return err;
+
+    err = esp_sleep_enable_gpio_wakeup();
+    if (err != ESP_OK) return err;
+
+    ESP_LOGI(TAG, "ESP32 light-sleep armed on GPIO %d (BMA400 INT1)", dev->int1_pin);
+    return ESP_OK;
+}
+
 esp_err_t bma400_read_raw(bma400_dev_t *dev, bma400_raw_t *out)
 {
     if (!dev || !out || !dev->i2c_dev) return ESP_ERR_INVALID_ARG;
@@ -219,6 +300,12 @@ esp_err_t bma400_read_temperature(bma400_dev_t *dev, float *temp_c)
     // Datasheet: temp (°C) = raw * 0.5 + 23  (approx; centered around 23 °C)
     *temp_c = ((int8_t)raw) * 0.5f + 23.0f;
     return ESP_OK;
+}
+
+esp_err_t bma400_read_int_status(bma400_dev_t *dev, uint8_t *status)
+{
+    if (!dev || !status || !dev->i2c_dev) return ESP_ERR_INVALID_ARG;
+    return rd_reg(dev, BMA400_REG_INT_STAT0, status);
 }
 
 const char *bma400_state_str(bma400_state_t s)

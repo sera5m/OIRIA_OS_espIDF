@@ -21,9 +21,20 @@
 #define BMA400_REG_STATUS           0x03
 #define BMA400_REG_ACC_X_LSB        0x04
 #define BMA400_REG_TEMP             0x11
+#define BMA400_REG_INT_STAT0        0x0E
 #define BMA400_REG_ACC_CONFIG0      0x19
 #define BMA400_REG_ACC_CONFIG1      0x1A
 #define BMA400_REG_ACC_CONFIG2      0x1B
+#define BMA400_REG_INT_CONFIG0      0x1F
+#define BMA400_REG_INT_CONFIG1      0x20
+#define BMA400_REG_INT1_MAP         0x21
+#define BMA400_REG_INT2_MAP         0x22
+#define BMA400_REG_INT12_IO_CTRL    0x24
+#define BMA400_REG_WKUP_CONFIG0     0x2F
+#define BMA400_REG_WKUP_CONFIG1     0x30
+#define BMA400_REG_WKUP_CONFIG2     0x31  // ref X
+#define BMA400_REG_WKUP_CONFIG3     0x32  // ref Y
+#define BMA400_REG_WKUP_CONFIG4     0x33  // ref Z
 #define BMA400_REG_CMD              0x7E
 
 // Power modes (ACC_CONFIG0 bits 1:0)
@@ -48,6 +59,14 @@
 
 // Soft reset command
 #define BMA400_CMD_SOFT_RESET       0xB6
+
+// Wake-up interrupt bits
+#define BMA400_INT1_MAP_WKUP        (1 << 0)
+#define BMA400_INT_STAT0_WKUP       (1 << 0)
+
+// Default shake threshold: ±1.8 g
+// At ±2 g range, datasheet: LSB = 2^(2+0)/256 = 15.625 mg → 1.8 / 0.015625 ≈ 115
+#define BMA400_SHAKE_THRESHOLD_1_8G 115
 
 // Driver state machine
 typedef enum {
@@ -85,6 +104,7 @@ struct bma400_dev_t {
 
     // Optional callbacks
     esp_err_t (*on_data_ready)(bma400_dev_t *dev);
+    esp_err_t (*on_shake_wake)(bma400_dev_t *dev);  // called from ISR context if set
 };
 
 // --- API ---
@@ -111,6 +131,28 @@ esp_err_t bma400_set_mode(bma400_dev_t *dev, bma400_state_t target);
 esp_err_t bma400_configure(bma400_dev_t *dev, uint8_t range, uint8_t odr);
 
 /**
+ * Configure the wake-up interrupt for shake detection at ±threshold_g
+ * (default 1.8 g) and map it to INT1. Puts the sensor into low-power mode.
+ * Relative (every-time) reference so gravity is ignored; any axis exceeding
+ * the threshold for a few samples asserts INT1.
+ *
+ * After this, call bma400_arm_cpu_wakeup() to let the ESP32 light-sleep
+ * on that pin.
+ */
+esp_err_t bma400_configure_shake_wake(bma400_dev_t *dev, float threshold_g);
+
+/**
+ * Arm the ESP32 to wake from light sleep on the BMA400 INT1 pin
+ * (active-high by default after configure_shake_wake).
+ * Requires int1_pin to be a real GPIO.
+ *
+ * NOTE: There is currently no rshell on_wakeup(reason) hook in fboot/sss.
+ * After esp_light_sleep_start() returns, the caller must inspect the wake
+ * cause (esp_sleep_get_wakeup_cause()) and decide what to do.
+ */
+esp_err_t bma400_arm_cpu_wakeup(bma400_dev_t *dev);
+
+/**
  * Read raw 12-bit two's-complement samples (only valid in low-power or normal).
  */
 esp_err_t bma400_read_raw(bma400_dev_t *dev, bma400_raw_t *out);
@@ -129,6 +171,11 @@ esp_err_t bma400_soft_reset(bma400_dev_t *dev);
  * Read chip temperature (approx °C).
  */
 esp_err_t bma400_read_temperature(bma400_dev_t *dev, float *temp_c);
+
+/**
+ * Read INT_STAT0 and clear by reading (BMA400 clears on read for most sources).
+ */
+esp_err_t bma400_read_int_status(bma400_dev_t *dev, uint8_t *status);
 
 const char *bma400_state_str(bma400_state_t s);
 
