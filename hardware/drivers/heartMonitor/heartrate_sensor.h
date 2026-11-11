@@ -57,6 +57,24 @@ typedef struct {
     uint8_t bpm;
     uint8_t spo2;
     bool    beat;                 // true if a peak was seen this update
+
+    // Maxim PBA (peripheral beat amplitude) state. Streaming, one sample
+    // at a time. The "window" is the 32-tap FIR delay line plus the DC
+    // estimator; there is no separate analysis buffer for BPM.
+    struct {
+        int16_t ac_cur;
+        int16_t ac_prev;
+        int16_t ac_min;
+        int16_t ac_max;
+        int16_t ac_max_hold;
+        int16_t ac_min_hold;
+        int16_t pos_edge;
+        int16_t neg_edge;
+        int32_t dc_reg;
+        int16_t fir[32];
+        uint8_t fir_off;
+        int64_t last_beat_us;
+    } pba;
 } max30102_dev_t;
 
 esp_err_t max30102_init(max30102_dev_t *dev,

@@ -1,6 +1,7 @@
 #include "max30102_sensor.h"
 #include "hr_metrics.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -138,47 +139,69 @@ static esp_err_t drain_fifo(max30102_dev_t *dev)
     return ESP_OK;
 }
 
-// Peak interval on IR. DC is the window mean; a peak is a local max
-// at least 1/64 of the mean above its neighbors.
-static void compute_bpm(max30102_dev_t *dev)
+// Maxim PBA (peripheral beat amplitude), adapted from the SparkFun
+// heartRate.cpp port of Maxim's algorithm.
+// Copyright (C) 2016 Maxim Integrated Products, Inc.
+// Permission granted to use, copy, modify; see SparkFun MAX3010x library.
+// Not for medical diagnosis.
+
+static const int16_t k_fir[12] = {
+    172, 321, 579, 927, 1360, 1858, 2390, 2916, 3391, 3768, 4012, 4096
+};
+
+static int16_t pba_dc(int32_t *reg, uint32_t x)
 {
-    dev->beat = false;
-    if (dev->win_n < dev->sample_hz) return;   // need ~1 s
-
-    uint64_t sum = 0;
-    for (uint16_t i = 0; i < dev->win_n; i++) sum += dev->ir[i];
-    uint32_t dc = (uint32_t)(sum / dev->win_n);
-    if (dc < 1000) return;                     // no finger
-
-    uint32_t thresh = dc / 64;
-    if (thresh < 20) thresh = 20;
-
-    int peaks[16];
-    int np = 0;
-    int min_gap = dev->sample_hz * 60 / 200;   // 200 bpm max
-    if (min_gap < 4) min_gap = 4;
-
-    for (uint16_t i = 2; i + 2 < dev->win_n && np < 16; i++) {
-        uint32_t v = dev->ir[i];
-        if (v + thresh < dc) continue;
-        if (v <= dev->ir[i - 1] || v < dev->ir[i + 1]) continue;
-        if (v <= dev->ir[i - 2] || v < dev->ir[i + 2]) continue;
-        if (np > 0 && (int)i - peaks[np - 1] < min_gap) continue;
-        peaks[np++] = (int)i;
-    }
-    if (np < 2) return;
-
-    int span = peaks[np - 1] - peaks[0];
-    int intervals = np - 1;
-    if (span <= 0) return;
-    int bpm = (int)((int64_t)intervals * dev->sample_hz * 60 / span);
-    if (bpm < 30 || bpm > 200) return;
-
-    dev->bpm = (uint8_t)bpm;
-    dev->beat = true;
+    *reg += ((((int32_t)x << 15) - *reg) >> 4);
+    return (int16_t)(*reg >> 15);
 }
 
-// Ratio-of-ratios. Rough; good enough to see a trend, not a medical value.
+static int16_t pba_fir(max30102_dev_t *dev, int16_t din)
+{
+    uint8_t off = dev->pba.fir_off;
+    dev->pba.fir[off] = din;
+    int32_t z = (int32_t)k_fir[11] * dev->pba.fir[(off - 11) & 31];
+    for (int i = 0; i < 11; i++) {
+        int16_t a = dev->pba.fir[(off - i) & 31];
+        int16_t b = dev->pba.fir[(off - 22 + i) & 31];
+        z += (int32_t)k_fir[i] * (a + b);
+    }
+    dev->pba.fir_off = (off + 1) & 31;
+    return (int16_t)(z >> 15);
+}
+
+// One IR sample in. Returns true on a detected beat.
+static bool pba_sample(max30102_dev_t *dev, uint32_t sample)
+{
+    dev->pba.ac_prev = dev->pba.ac_cur;
+    int16_t dc = pba_dc(&dev->pba.dc_reg, sample);
+    dev->pba.ac_cur = pba_fir(dev, (int16_t)((int32_t)sample - dc));
+
+    bool beat = false;
+    int16_t prev = dev->pba.ac_prev;
+    int16_t cur  = dev->pba.ac_cur;
+
+    if (prev < 0 && cur >= 0) {
+        dev->pba.ac_max_hold = dev->pba.ac_max;
+        dev->pba.ac_min_hold = dev->pba.ac_min;
+        dev->pba.pos_edge = 1;
+        dev->pba.neg_edge = 0;
+        dev->pba.ac_max = 0;
+        int amp = (int)dev->pba.ac_max_hold - (int)dev->pba.ac_min_hold;
+        if (amp > 20 && amp < 1000) beat = true;
+    }
+    if (prev > 0 && cur <= 0) {
+        dev->pba.pos_edge = 0;
+        dev->pba.neg_edge = 1;
+        dev->pba.ac_min = 0;
+    }
+    if (dev->pba.pos_edge && cur > prev) dev->pba.ac_max = cur;
+    if (dev->pba.neg_edge && cur < prev) dev->pba.ac_min = cur;
+    return beat;
+}
+
+// Ratio-of-ratios over the current window, then Maxim's published quadratic
+// (algorithm.cpp comment): SpO2 = -45.060 R^2 + 30.354 R + 94.845.
+// Still an estimate; calibration depends on the optical stack.
 static void compute_spo2(max30102_dev_t *dev)
 {
     if (dev->state != MAX30102_STATE_SPO2 || dev->win_n < 32) return;
@@ -190,25 +213,24 @@ static void compute_spo2(max30102_dev_t *dev)
     }
     irdc /= dev->win_n;
     reddc /= dev->win_n;
-    if (irdc < 1000 || reddc < 1000) return;
+    if (irdc < 5000 || reddc < 5000) return;
 
     uint32_t irac = 0, redac = 0;
     for (uint16_t i = 0; i < dev->win_n; i++) {
         int32_t d = (int32_t)dev->ir[i] - (int32_t)irdc;
         if (d < 0) d = -d;
-        if ((uint32_t)d > irac) irac = (uint32_t)d;
+        if ((uint32_t)d > irac) irac = d;
         d = (int32_t)dev->red[i] - (int32_t)reddc;
         if (d < 0) d = -d;
-        if ((uint32_t)d > redac) redac = (uint32_t)d;
+        if ((uint32_t)d > redac) redac = d;
     }
-    if (irac == 0) return;
+    if (irac == 0 || redac == 0) return;
 
-    // R = (red_ac/red_dc) / (ir_ac/ir_dc). Linear map, clamped.
     float R = ((float)redac / (float)reddc) / ((float)irac / (float)irdc);
-    int spo2 = (int)(110.0f - 25.0f * R);
-    if (spo2 < 70) spo2 = 70;
-    if (spo2 > 100) spo2 = 100;
-    dev->spo2 = (uint8_t)spo2;
+    float spo2 = (-45.060f * R + 30.354f) * R + 94.845f;
+    if (spo2 < 70.0f) spo2 = 70.0f;
+    if (spo2 > 100.0f) spo2 = 100.0f;
+    dev->spo2 = (uint8_t)(spo2 + 0.5f);
 }
 
 esp_err_t max30102_update(max30102_dev_t *dev)
@@ -219,13 +241,32 @@ esp_err_t max30102_update(max30102_dev_t *dev)
     esp_err_t err = drain_fifo(dev);
     if (err != ESP_OK) return err;
 
-    uint8_t prev = dev->bpm;
-    compute_bpm(dev);
-    compute_spo2(dev);
+    // Run PBA on samples that arrived since the last update.
+    // We only have the window, so walk the newest stretch.
+    static uint16_t s_seen;
+    uint16_t start = (dev->win_n > 8) ? (uint16_t)(dev->win_n - 8) : 0;
+    if (dev->win_n < s_seen) s_seen = 0;
+    if (start < s_seen) start = s_seen;
 
-    // Hand the short-period result to the logger. A change is what RLE keeps.
-    if (dev->bpm && dev->bpm != prev) {
-        hr_metrics_push(dev->bpm, dev->spo2);
+    bool beat = false;
+    for (uint16_t i = start; i < dev->win_n; i++) {
+        if (pba_sample(dev, dev->ir[i])) beat = true;
+    }
+    s_seen = dev->win_n;
+
+    if (beat) {
+        int64_t now = esp_timer_get_time();
+        if (dev->pba.last_beat_us) {
+            int64_t dt = now - dev->pba.last_beat_us;
+            if (dt > 300000 && dt < 2000000) {          // 30..200 bpm
+                int bpm = (int)(60000000LL / dt);
+                dev->bpm = (uint8_t)bpm;
+                dev->beat = true;
+                compute_spo2(dev);
+                hr_metrics_push(dev->bpm, dev->spo2);
+            }
+        }
+        dev->pba.last_beat_us = now;
     }
     return ESP_OK;
 }
