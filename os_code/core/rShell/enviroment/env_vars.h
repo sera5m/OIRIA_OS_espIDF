@@ -129,6 +129,9 @@ typedef struct {
     uint32_t flashSizeKb;
     uint32_t freeSpaceKb;
 
+    // Bytes reserved for the heart-rate NVS log. Power of two, max 1024.
+    uint16_t hrStorageBytes;
+
     uint8_t batteryPercent;
     bool charging;
     float inputVoltage;

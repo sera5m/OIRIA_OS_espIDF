@@ -175,7 +175,11 @@ static void os_conf_apply_key(const char* key, const char* val) {
     if (!key || !val) return;
 
     // --- window / EnvConfig ---
-    if (!strcmp(key, "fpsTarget")) {
+        if (!strcmp(key, "hrStorageBytes")) {
+        int v = atoi(val);
+        if (v >= 64 && v <= 1024) v_env.hrStorageBytes = (uint16_t)v;
+    } else if (!strcmp(key, "fpsTarget")) {
+
         int v = atoi(val);
         if (v > 0 && v <= 240) v_env.fpsTarget = (uint16_t)v;
     } else if (!strcmp(key, "framethrottle_target")) {

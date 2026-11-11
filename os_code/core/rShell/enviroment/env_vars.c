@@ -44,6 +44,7 @@ EnvConfig v_env = {
     .extStorageSizeKb = 0,
     .flashSizeKb = 0,
     .freeSpaceKb = 0,
+    .hrStorageBytes = 1024,
 
     .batteryPercent = 100,
     .charging = false,

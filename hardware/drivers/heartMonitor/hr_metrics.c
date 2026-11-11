@@ -1,4 +1,5 @@
 #include "hr_metrics.h"
+#include "os_code/core/rShell/enviroment/env_vars.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_log.h"
@@ -29,7 +30,20 @@ static uint8_t  s_red_spo2[MINS_PER_BLOCK];
 static uint8_t  s_mins;                 // 0..5
 
 static uint8_t  s_blob[HR_METRICS_NVS_SIZE];
+static uint16_t s_cap;                  // active size from v_env.hrStorageBytes
 static uint16_t s_used;                 // bytes occupied after the 4-byte header
+static uint16_t s_full_mark;
+
+static uint16_t cap_from_env(void)
+{
+    uint16_t n = v_env.hrStorageBytes;
+    if (n < 64) n = 64;
+    if (n > HR_METRICS_NVS_SIZE) n = HR_METRICS_NVS_SIZE;
+    // Force power of two.
+    uint16_t p2 = 64;
+    while ((p2 << 1) && (p2 << 1) <= n) p2 <<= 1;
+    return p2;
+}
 static bool     s_sd_ok;
 static bool     s_inited;
 
@@ -47,7 +61,7 @@ static void blob_load(void)
     size_t len = sizeof(s_blob);
     if (nvs_get_blob(h, NVS_KEY, s_blob, &len) == ESP_OK && len >= 4) {
         s_used = (uint16_t)(s_blob[0] | (s_blob[1] << 8));
-        if (s_used > HR_METRICS_NVS_SIZE - 4) s_used = 0;
+        if (s_used > s_cap - 4) s_used = 0;
     }
     nvs_close(h);
 }
@@ -58,7 +72,7 @@ static void blob_store(void)
     s_blob[1] = (uint8_t)(s_used >> 8);
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
-    nvs_set_blob(h, NVS_KEY, s_blob, sizeof(s_blob));
+    nvs_set_blob(h, NVS_KEY, s_blob, s_cap);
     nvs_commit(h);
     nvs_close(h);
 }
@@ -122,7 +136,7 @@ static void commit_block(void)
     }
 
     uint16_t need = 6 + n_runs * 2;
-    if ((uint32_t)s_used + need > HR_METRICS_NVS_SIZE - 4) {
+    if ((uint32_t)s_used + need > s_cap - 4) {
         ESP_LOGW(TAG, "blob full, dropping block");
         return;
     }
@@ -147,7 +161,7 @@ static void commit_block(void)
 
 static void try_flush_sd(void)
 {
-    if (s_used < HR_METRICS_FULL_MARK) return;
+    if (s_used < s_full_mark) return;
 
     FILE *f = fopen(SD_PATH, "ab");
     if (!f) {
@@ -176,12 +190,14 @@ static void try_flush_sd(void)
 
 esp_err_t hr_metrics_init(void)
 {
+    s_cap = cap_from_env();
+    s_full_mark = (uint16_t)((s_cap * 80) / 100);
     blob_load();
     s_raw_n = 0;
     s_mins = 0;
     s_inited = true;
     s_sd_ok = false;
-    ESP_LOGI(TAG, "hr metrics ready, nvs used=%u", s_used);
+    ESP_LOGI(TAG, "hr metrics ready, cap=%u used=%u", s_cap, s_used);
     return ESP_OK;
 }
 
