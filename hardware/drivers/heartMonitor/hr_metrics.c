@@ -63,7 +63,10 @@ static void blob_store(void)
     nvs_close(h);
 }
 
-// Reduce up to 128 samples to 8 bucket averages.
+// Reduce up to 128 samples to 8.
+// Each bucket keeps the sample furthest from the previous kept value,
+// so a spike survives into the RLE instead of being averaged away.
+// A flat minute still collapses to one run later.
 static void reduce_minute(uint8_t out_bpm[RED_N], uint8_t *out_spo2)
 {
     uint8_t n = s_raw_n;
@@ -74,20 +77,23 @@ static void reduce_minute(uint8_t out_bpm[RED_N], uint8_t *out_spo2)
     }
     uint32_t spo2_sum = 0;
     uint8_t  spo2_n = 0;
+    uint8_t prev = s_raw_bpm[0];
     for (int b = 0; b < RED_N; b++) {
-        uint32_t sum = 0;
-        uint8_t  cnt = 0;
-        // Split the collected samples evenly across 8 buckets.
         uint16_t a = (uint16_t)b * n / RED_N;
         uint16_t z = (uint16_t)(b + 1) * n / RED_N;
         if (z <= a) z = a + 1;
         if (z > n) z = n;
+
+        uint8_t pick = s_raw_bpm[a];
+        int best = 0;
         for (uint16_t i = a; i < z; i++) {
-            sum += s_raw_bpm[i];
-            cnt++;
+            int d = (int)s_raw_bpm[i] - (int)prev;
+            if (d < 0) d = -d;
+            if (d >= best) { best = d; pick = s_raw_bpm[i]; }
             if (s_raw_spo2[i]) { spo2_sum += s_raw_spo2[i]; spo2_n++; }
         }
-        out_bpm[b] = cnt ? (uint8_t)(sum / cnt) : 0;
+        out_bpm[b] = pick;
+        prev = pick;
     }
     *out_spo2 = spo2_n ? (uint8_t)(spo2_sum / spo2_n) : 0;
 }

@@ -1,5 +1,7 @@
-#ifndef MAX30102_SENSOR_H
-#define MAX30102_SENSOR_H
+#pragma once
+// MAX30102 driver. Replaces the old stub.
+// FIFO → short IR window → peak-interval BPM. SpO2 is a rough ratio-of-ratios.
+// Does not log; call hr_metrics_push() with the results if you want history.
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -7,71 +9,69 @@
 #include "driver/i2c_master.h"
 #include "driver/gpio.h"
 
-#define MAX30102_I2C_ADDR 0x57
+#define MAX30102_I2C_ADDR   0x57
+#define MAX30102_PART_ID    0x15
 
-// Registers
-#define REG_INTR_STATUS_1 0x00
-#define REG_INTR_ENABLE_1 0x02
-#define REG_FIFO_WR_PTR   0x04
-#define REG_FIFO_RD_PTR   0x06
-#define REG_FIFO_DATA     0x07
-#define REG_MODE_CONFIG   0x09
-#define REG_SPO2_CONFIG   0x0A
-#define REG_LED1_PA       0x0C // Red LED
-#define REG_LED2_PA       0x0D // IR LED
-#define REG_TEMP_INTEGER  0x1F
-#define REG_TEMP_FRACTION 0x20
-#define REG_TEMP_CONFIG   0x21
+// Registers (datasheet)
+#define MAX30102_REG_INT_STATUS1  0x00
+#define MAX30102_REG_INT_ENABLE1  0x02
+#define MAX30102_REG_FIFO_WR      0x04
+#define MAX30102_REG_OVF_CTR      0x05
+#define MAX30102_REG_FIFO_RD      0x06
+#define MAX30102_REG_FIFO_DATA    0x07
+#define MAX30102_REG_FIFO_CONFIG  0x08
+#define MAX30102_REG_MODE_CONFIG  0x09
+#define MAX30102_REG_SPO2_CONFIG  0x0A
+#define MAX30102_REG_LED1_PA      0x0C
+#define MAX30102_REG_LED2_PA      0x0D
+#define MAX30102_REG_TEMP_INT     0x1F
+#define MAX30102_REG_TEMP_FRAC    0x20
+#define MAX30102_REG_TEMP_CONFIG  0x21
+#define MAX30102_REG_REV_ID       0xFE
+#define MAX30102_REG_PART_ID      0xFF
 
-// --- 1. Memory Structures ---
+#define MAX30102_MODE_HR          0x02
+#define MAX30102_MODE_SPO2        0x03
 
-// Stores samples every 2.5s for 1 minute (24 entries)
+// Short analysis window: 4 s at 50 Hz effective (sample-avg 2 @ 100 Hz).
+#define MAX30102_WIN              200
+
+typedef enum {
+    MAX30102_STATE_UNINIT = 0,
+    MAX30102_STATE_SLEEP,
+    MAX30102_STATE_HR,
+    MAX30102_STATE_SPO2,
+} max30102_state_t;
+
 typedef struct {
-    uint8_t seconds_offset; // Time within the 60s frame (0, 2, 5, ...)
-    uint8_t heart_rate;     // Calculated BPM
-} min_hr_sample_t;
+    i2c_master_dev_handle_t i2c;
+    gpio_num_t int_pin;           // GPIO_NUM_NC if unused
+    max30102_state_t state;
+    uint8_t sample_hz;            // effective rate after averaging
 
-typedef struct {
-    min_hr_sample_t samples[24];
-    uint8_t sample_count;
-} minute_history_t;
+    // IR/RED window for the current short period.
+    uint32_t ir[MAX30102_WIN];
+    uint32_t red[MAX30102_WIN];
+    uint16_t win_n;
 
-// Dynamic ring buffer storing raw IR/RED samples over 5 seconds (5s @ 50Hz = 250 samples)
-typedef struct {
-    uint32_t ir_buf[250];
-    uint32_t red_buf[250];
-    size_t head;
-    size_t count;
-} live_fifo_ringbuf_t;
+    uint8_t bpm;
+    uint8_t spo2;
+    bool    beat;                 // true if a peak was seen this update
+} max30102_dev_t;
 
-// --- 2. Modular OS Generic Peripheral Interface ---
+esp_err_t max30102_init(max30102_dev_t *dev,
+                        i2c_master_bus_handle_t bus,
+                        gpio_num_t int_pin);
 
-typedef struct max30102_dev_t max30102_dev_t;
+esp_err_t max30102_set_mode(max30102_dev_t *dev, max30102_state_t mode);
+esp_err_t max30102_shutdown(max30102_dev_t *dev);
 
-struct max30102_dev_t {
-    i2c_master_dev_handle_t i2c_dev;
-    gpio_num_t int_pin;
-    
-    // Live telemetry states
-    live_fifo_ringbuf_t ringbuf;
-    minute_history_t min_history;
-    uint8_t current_estimated_hr;
-    uint8_t current_spo2;
-    
-    // Virtual Interface function pointers
-    esp_err_t (*check_peripheral_data)(max30102_dev_t *dev);
-    esp_err_t (*send_ping)(max30102_dev_t *dev);
-};
+// Drain FIFO into the window and recompute bpm/spo2.
+// Pushes a sample to hr_metrics when a new bpm is produced.
+esp_err_t max30102_update(max30102_dev_t *dev);
 
-// --- 3. Required API Functions ---
+esp_err_t max30102_read_temperature(max30102_dev_t *dev, float *temp_c);
 
-esp_err_t max30102_init(max30102_dev_t *dev, i2c_master_bus_handle_t bus_handle, gpio_num_t int_pin);
-esp_err_t max30102_read_hr_spo2(max30102_dev_t *dev, uint8_t *hr, uint8_t *spo2);
-esp_err_t max30102_read_temperature(max30102_dev_t *dev, float *temperature);
-esp_err_t max30102_read_raw_ir(max30102_dev_t *dev, uint32_t *raw_ir);
-esp_err_t max30102_fire_led_pulse(max30102_dev_t *dev, uint8_t red_amplitude, uint8_t ir_amplitude);
+const char *max30102_state_str(max30102_state_t s);
 
-// Sleep & Power optimization
-esp_err_t max30102_configure_light_sleep_collection(max30102_dev_t *dev);
-
-#endif // MAX30102_SENSOR_H
+#endif

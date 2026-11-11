@@ -1,7 +1,9 @@
 #pragma once
 // Passive heart-rate metrics.
 // Short samples accumulate for one minute (up to 128).
-// Each minute is reduced 128 → 8 (bucket averages).
+// Each minute is reduced 128 → 8, keeping the sample in each
+// bucket furthest from the previous value so a spike survives.
+// RLE then collapses flat stretches and leaves jumps as their own runs.
 // Every 5 minutes the 40 values are run-length encoded into a 1 KB NVS blob.
 // At 80% full the blob is appended to the microSD and cleared.
 
