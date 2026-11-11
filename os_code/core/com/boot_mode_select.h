@@ -1,8 +1,7 @@
 #pragma once
-// Early boot: wake-reason check + hold-menu mode select (BIOS-like).
-// Only the GPIO is touched unless the menu button is held.
-// If held, a minimal LCD + encoder path runs and the chosen role is written
-// to NVS so boot_role_resolve() picks it up. Timeout → standard (SOLO).
+// Early boot: wake-reason check + hold-menu mode select (BIOS-like) + serial rescue.
+// Only the GPIO is touched unless the menu button is held or a serial command arrives.
+// Chosen role is written to NVS so boot_role_resolve() picks it up.
 
 #include "os_code/core/com/boot_role.hpp"
 #include "esp_err.h"
@@ -29,19 +28,22 @@ typedef struct {
 } wake_check_t;
 
 // Call as early as possible, before boot_role_resolve().
-// Reads sleep cause + ULP shared state. Does not start the full OS.
 wake_check_t boot_check_why_awake(void);
+wake_check_t boot_get_last_wake(void);
 
 // Poll the menu button (ENCODER0_SW / "sel") for ~200 ms.
-// Returns true if held. Only GPIO is used.
 bool boot_menu_button_held(void);
 
-// If menu was held, run the minimal mode-select UI and write the chosen
-// role to NVS. Returns the role that should be used this boot.
-// If menu was not held, returns BOOT_ROLE_SOLO and does nothing else.
-// Special actions (shutdown / flash) are handled inside and do not return
-// in the normal sense, or return SOLO after requesting the action.
+// If menu was held, run the minimal mode-select UI (LCD + encoder) and
+// accept the same /bootseq commands over the console UART.
+// If menu was not held, still listens briefly for a serial rescue command.
+// Returns the role that should be used this boot (SOLO if nothing chosen).
 boot_role_t boot_mode_select_if_held(void);
+
+// Process one line of the early serial protocol (no leading whitespace).
+// Returns true if the command requested an immediate role change / exit.
+// Same text can later be fed to rshell.
+bool boot_serial_handle_line(const char *line, boot_role_t *out_role);
 
 #ifdef __cplusplus
 }

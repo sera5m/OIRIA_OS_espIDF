@@ -11,10 +11,18 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "driver/uart.h"
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 
 static const char *TAG = "boot_mode";
+
+static wake_check_t s_last_wake = {0};
+
+wake_check_t boot_get_last_wake(void) {
+    return s_last_wake;
+}
 
 // Menu button = encoder0 switch ("sel"). Active low assumed.
 #ifndef MENU_BOOT_PIN
@@ -23,6 +31,7 @@ static const char *TAG = "boot_mode";
 
 #define MODE_SELECT_TIMEOUT_S 60
 #define HOLD_CONFIRM_MS       200
+#define SERIAL_RESCUE_MS      3000   // listen this long even if button not held
 
 // ---------------------------------------------------------------------------
 // Wake reason
@@ -65,6 +74,7 @@ wake_check_t boot_check_why_awake(void)
         }
     }
 
+    s_last_wake = w;
     if (w.reasons) {
         ESP_LOGI(TAG, "awake reasons=0x%lx force=%d ulp_raw=0x%02x",
                  (unsigned long)w.reasons, w.force_wake, w.ulp_raw);
@@ -130,43 +140,192 @@ static const struct {
       "turn this device off",
       BOOT_ROLE_SOLO },
     { "firmware flash",
-      "wait for a computer or another unit to flash firmware over the connector/USB/I2C. Or select OTA in the menu app after a normal boot.",
+      "wait for a computer or another unit to flash firmware over the connector/USB/I2C. Connect USB, or select OTA in the menu app after a normal boot.",
       BOOT_ROLE_SOLO },
 };
 
 // ---------------------------------------------------------------------------
-// Draw
+// Serial rescue (dumb UART console, same text later goes to rshell)
+// ---------------------------------------------------------------------------
+
+static void serial_write(const char *s)
+{
+    uart_write_bytes(UART_NUM_0, s, strlen(s));
+}
+
+static boot_role_t role_from_name(const char *name)
+{
+    if (!name) return BOOT_ROLE_SOLO;
+    if (!strcasecmp(name, "solo") || !strcasecmp(name, "default") || !strcasecmp(name, "normal"))
+        return BOOT_ROLE_SOLO;
+    if (!strcasecmp(name, "tyrant") || !strcasecmp(name, "collaborative") || !strcasecmp(name, "collab"))
+        return BOOT_ROLE_TYRANT;
+    if (!strcasecmp(name, "puppet") || !strcasecmp(name, "helper") || !strcasecmp(name, "assistant"))
+        return BOOT_ROLE_PUPPET;
+    return (boot_role_t)0xFF;
+}
+
+static void commit_role_nvs(boot_role_t role)
+{
+    nvs_handle_t h;
+    if (nvs_open("rshell", NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u8(h, "boot_role", (uint8_t)role);
+    nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "NVS boot_role = %s", boot_role_name(role));
+}
+
+// Returns true if the command wants the early path to exit with *out_role.
+bool boot_serial_handle_line(const char *line, boot_role_t *out_role)
+{
+    if (!line || line[0] != '/') return false;
+
+    // Skip leading '/' and any extra spaces.
+    const char *p = line + 1;
+    while (*p == ' ') p++;
+
+    // Expect "bootseq" as the first token.
+    if (strncasecmp(p, "bootseq", 7) != 0) {
+        serial_write("err: unknown prefix (want /bootseq ...)\r\n");
+        return false;
+    }
+    p += 7;
+    while (*p == ' ') p++;
+
+    if (strncasecmp(p, "help", 4) == 0 || *p == '\0' || *p == '?') {
+        serial_write("early boot commands:\r\n");
+        serial_write("  /bootseq help\r\n");
+        serial_write("  /bootseq status\r\n");
+        serial_write("  /bootseq setconfvar mode <default|collaborative|helper|solo|tyrant|puppet>\r\n");
+        serial_write("  /bootseq getconfvar mode\r\n");
+        serial_write("  /bootseq shutdown\r\n");
+        serial_write("  /bootseq flash\r\n");
+        return false;
+    }
+
+    if (strncasecmp(p, "status", 6) == 0) {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "awake=0x%lx force=%d\r\n",
+                 (unsigned long)s_last_wake.reasons, s_last_wake.force_wake);
+        serial_write(buf);
+        return false;
+    }
+
+    if (strncasecmp(p, "shutdown", 8) == 0) {
+        serial_write("shutting down\r\n");
+        vTaskDelay(pdMS_TO_TICKS(200));
+        esp_deep_sleep_start();
+        return true; // never reaches
+    }
+
+    if (strncasecmp(p, "flash", 5) == 0) {
+        serial_write("firmware flash: connect USB or another unit, then reboot\r\n");
+        commit_role_nvs(BOOT_ROLE_SOLO);
+        if (out_role) *out_role = BOOT_ROLE_SOLO;
+        return true;
+    }
+
+    if (strncasecmp(p, "getconfvar", 10) == 0) {
+        p += 10;
+        while (*p == ' ') p++;
+        if (strncasecmp(p, "mode", 4) == 0) {
+            // Just report what is currently in NVS (or default).
+            nvs_handle_t h;
+            uint8_t v = 0xFF;
+            if (nvs_open("rshell", NVS_READONLY, &h) == ESP_OK) {
+                nvs_get_u8(h, "boot_role", &v);
+                nvs_close(h);
+            }
+            char buf[64];
+            if (v <= BOOT_ROLE_PUPPET)
+                snprintf(buf, sizeof(buf), "mode=%s\r\n", boot_role_name((boot_role_t)v));
+            else
+                snprintf(buf, sizeof(buf), "mode=(unset)\r\n");
+            serial_write(buf);
+        } else {
+            serial_write("err: unknown var\r\n");
+        }
+        return false;
+    }
+
+    if (strncasecmp(p, "setconfvar", 10) == 0) {
+        p += 10;
+        while (*p == ' ') p++;
+        if (strncasecmp(p, "mode", 4) == 0) {
+            p += 4;
+            while (*p == ' ') p++;
+            boot_role_t r = role_from_name(p);
+            if ((uint8_t)r == 0xFF) {
+                serial_write("err: bad mode (default|collaborative|helper)\r\n");
+                return false;
+            }
+            commit_role_nvs(r);
+            char buf[64];
+            snprintf(buf, sizeof(buf), "ok mode=%s\r\n", boot_role_name(r));
+            serial_write(buf);
+            if (out_role) *out_role = r;
+            return true;
+        }
+        serial_write("err: unknown var\r\n");
+        return false;
+    }
+
+    serial_write("err: unknown /bootseq command (try /bootseq help)\r\n");
+    return false;
+}
+
+// Non-blocking line reader. Returns true when a full line is ready in buf.
+static bool serial_read_line(char *buf, size_t cap, int *pos)
+{
+    uint8_t c;
+    int n = uart_read_bytes(UART_NUM_0, &c, 1, 0);
+    if (n <= 0) return false;
+
+    if (c == '\r' || c == '\n') {
+        if (*pos > 0) {
+            buf[*pos] = '\0';
+            *pos = 0;
+            return true;
+        }
+        return false;
+    }
+    if (*pos < (int)cap - 1 && c >= 32 && c < 127) {
+        buf[(*pos)++] = (char)c;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// Draw (local LCD path)
 // ---------------------------------------------------------------------------
 
 static void draw_mode_screen(int sel, int seconds_left)
 {
     fb_clear(0x0000);
 
-    fb_draw_text(0, 4, 4, "MODE SELECT", 0xFFFF, 2,
+    fb_draw_text(0, 4, 2, "MODE SELECT", 0xFFFF, 2,
                  0, true, 0x0000, 240, font_avr_classics);
 
     char buf[64];
-    snprintf(buf, sizeof(buf), "menu held  |  %d s to default", seconds_left);
-    fb_draw_text(0, 4, 28, buf, 0x001F, 1,
+    snprintf(buf, sizeof(buf), "%d s  |  /bootseq on serial", seconds_left);
+    fb_draw_text(0, 4, 22, buf, 0x001F, 1,
                  0, true, 0x0000, 240, font_avr_classics);
 
-    int y = 52;
+    int y = 48;
     for (int i = 0; i < MODE_COUNT; i++) {
-        uint16_t title_col = (i == sel) ? 0xFFFF : 0x7BEF;
-        uint16_t expl_col  = 0x001F;
-
-        char line[48];
-        snprintf(line, sizeof(line), "%s %s", (i == sel) ? ">" : " ", modes[i].title);
-        fb_draw_text(0, 4, y, line, title_col, 2,
+        uint16_t col = (i == sel) ? 0xFFFF : 0x7BEF;
+        char line[40];
+        snprintf(line, sizeof(line), "%s %s", (i == sel) ? "[]" : "  ", modes[i].title);
+        fb_draw_text(0, 4, y, line, col, 2,
                      0, true, 0x0000, 240, font_avr_classics);
-        y += 22;
-
-        fb_draw_text(0, 12, y, modes[i].expl, expl_col, 1,
-                     0, true, 0x0000, 220, font_avr_classics);
-        y += 28;
+        y += 24;
     }
 
-    fb_draw_text(0, 4, 260, "scroll to select  |  click to confirm", 0x7BEF, 1,
+    // Bottom half: description of selected only.
+    fb_draw_text(0, 4, 180, modes[sel].expl, 0x001F, 1,
+                 0, true, 0x0000, 230, font_avr_classics);
+
+    fb_draw_text(0, 4, 260, "scroll | click   or /bootseq", 0x7BEF, 1,
                  0, true, 0x0000, 240, font_avr_classics);
 
     lcd_fb_display_framebuffer(false, false);
@@ -182,19 +341,27 @@ static void on_twist(void *ctx, int delta) {
     s_enc_delta += delta;
 }
 
-static void commit_role_nvs(boot_role_t role)
-{
-    nvs_handle_t h;
-    if (nvs_open("rshell", NVS_READWRITE, &h) != ESP_OK) return;
-    nvs_set_u8(h, "boot_role", (uint8_t)role);
-    nvs_commit(h);
-    nvs_close(h);
-    ESP_LOGI(TAG, "NVS boot_role = %s", boot_role_name(role));
-}
-
 boot_role_t boot_mode_select_if_held(void)
 {
-    if (!boot_menu_button_held()) {
+    bool held = boot_menu_button_held();
+
+    // Always announce the serial rescue channel.
+    serial_write("\r\n[early] /bootseq help   (serial rescue)\r\n");
+
+    if (!held) {
+        // Short listen window so a stuck unit can still be rescued.
+        char line[96];
+        int pos = 0;
+        TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(SERIAL_RESCUE_MS);
+        boot_role_t chosen = BOOT_ROLE_SOLO;
+        while (xTaskGetTickCount() < until) {
+            if (serial_read_line(line, sizeof(line), &pos)) {
+                if (boot_serial_handle_line(line, &chosen)) {
+                    return chosen;
+                }
+            }
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
         return BOOT_ROLE_SOLO;
     }
 
@@ -219,8 +386,12 @@ boot_role_t boot_mode_select_if_held(void)
     int seconds = MODE_SELECT_TIMEOUT_S;
     TickType_t last_sec = xTaskGetTickCount();
     bool saw_release = false;
+    char line[96];
+    int pos = 0;
+    boot_role_t serial_role = BOOT_ROLE_SOLO;
 
     draw_mode_screen(sel, seconds);
+    serial_write("mode select active — /bootseq setconfvar mode <name>\r\n");
 
     while (seconds > 0) {
         if (enc) ky040_poll(enc);
@@ -229,6 +400,12 @@ boot_role_t boot_mode_select_if_held(void)
             sel = (sel + s_enc_delta + MODE_COUNT) % MODE_COUNT;
             s_enc_delta = 0;
             draw_mode_screen(sel, seconds);
+        }
+
+        if (serial_read_line(line, sizeof(line), &pos)) {
+            if (boot_serial_handle_line(line, &serial_role)) {
+                return serial_role;
+            }
         }
 
         int lvl = gpio_get_level(MENU_BOOT_PIN);
@@ -254,6 +431,7 @@ boot_role_t boot_mode_select_if_held(void)
             fb_draw_text(0, 20, 120, "shutting down", 0xFFFF, 2,
                          0, true, 0x0000, 200, font_avr_classics);
             lcd_fb_display_framebuffer(false, false);
+            serial_write("shutting down\r\n");
             vTaskDelay(pdMS_TO_TICKS(800));
             esp_deep_sleep_start();
             break;
@@ -264,6 +442,7 @@ boot_role_t boot_mode_select_if_held(void)
             fb_draw_text(0, 4, 130, "connect USB or another unit", 0x001F, 1,
                          0, true, 0x0000, 230, font_avr_classics);
             lcd_fb_display_framebuffer(false, false);
+            serial_write("firmware flash: connect USB or another unit\r\n");
             commit_role_nvs(BOOT_ROLE_SOLO);
             return BOOT_ROLE_SOLO;
         default:

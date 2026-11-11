@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <algorithm>   // for std::clamp, std::max, std::min
 #include "os_code/core/com/boot_role.hpp"
+#include "os_code/core/com/boot_mode_select.h"
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "os_code/core/rShell/rshell_appmanager.hpp"
@@ -453,6 +454,22 @@ extern TaskHandle_t core2TaskHandle;
 extern "C" void app_main(void) {
     ESP_LOGI(TAG, "===== ESP32-S3 Boot =====");
 
+    // NVS must be up before the early path can write boot_role.
+    esp_err_t nvs_err = nvs_flash_init();
+    if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        nvs_flash_erase();
+        nvs_flash_init();
+    }
+
+    // Always start as master (SOLO). Do not honor NVS / headless yet.
+    // Early path can override via menu or /bootseq before we demote.
+    v_env.headless = false;
+    wake_check_t why = boot_check_why_awake();
+    (void)why;  // later: feed into notification / shared_state
+    boot_role_t early_role = boot_mode_select_if_held();
+    ESP_LOGI(TAG, "early (still master until resolve) → %s", boot_role_name(early_role));
+
+
     // Early PM from compile defaults; os.conf may reconfigure after load.
     esp_pm_config_t pm_config = {
         .max_freq_mhz = v_env.cpuMhzMax,
@@ -599,9 +616,12 @@ static bool ensure_wifi(void) {
 static void bootloader_final_app() {
     vTaskDelay(pdMS_TO_TICKS(50));
 
-    // boot_role_resolve sees NVS written by os_conf_load if conf set bootRole
+    // Role is resolved only after the early rescue window.
+    // Until this line we have been running as master (SOLO).
+    // Now we may demote to PUPPET / switch to TYRANT.
     const boot_role_t role = boot_role_resolve();
     v_env.headless = !boot_has_display(role);
+    ESP_LOGI(TAG, "switching from master to resolved role %s", boot_role_name(role));
 
     ESP_LOGI(TAG, "=== final boot role: %s (headless=%d) ===",
              boot_role_name(role), (int)v_env.headless);
