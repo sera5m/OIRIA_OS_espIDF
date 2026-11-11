@@ -1,23 +1,55 @@
-https://www.reddit.com/r/esp32/comments/1rfi1s5/finally_turned_this_into_a_gamepad/
+OIRIA_OS goals
+Updated 2026-11-11
 
-this person turned it into a gamepad stick twist thingy which was cool, so i liked it and wanna do this
+DONE
+----
+- BMA400 accel driver: modular state machine, probe 0x14/0x15, CHIPID 0x90,
+  ±1.8 g shake-to-wake on INT1, arm ESP32 light-sleep GPIO wake.
+- Wake system: wake_reason_t enum (unknown, buttonpush, sensorping,
+  genericInterrupt, power_restored, timer, alarm, periodic, ulp, force).
+  Bitmask still carries multiples. Priority picker for primary.
+- BMA force-wake tag: bma400_tag_shake_wake() → RTC force_tag
+  (ULP_WAKE_SHAKE | ULP_WAKE_FORCE). ULP consumes it into wake_reason.
+- Early boot: master-first (SOLO until after rescue window), then demote.
+  Menu-held LCD+encoder mode select. Serial /bootseq rescue on UART0.
+  Short listen window even if button not held.
+- SSD1351 SPI driver (double FB, dirty rows, chunked push).
+- Window highlight border gated on window_highlighted; focus raises layer.
+- Vulcan IDE / VM port work already on main (separate from this list).
 
+OPEN — from the working list
+-----------------------------
+- UI less gross: fonts, background patterns, DOM optimization.
+- Reduce energy use.
+- Finish the rubber ducky app.
+- Add 1-Wire.
+- Make the device more of a mini cyberdeck.
+- Clean bad code.
+- Finish heart-rate / SpO2 (MAX30102).
 
+OPEN — older notes that were already in this file
+--------------------------------------------------
+Gamepad / stick
+  https://www.reddit.com/r/esp32/comments/1rfi1s5/finally_turned_this_into_a_gamepad/
+  Turn the encoder/stick into a gamepad-style twist input.
 
+CBOR
+  https://cborbook.com/part_1/practical_introduction_to_cbor.html
+  Replace internal JSON with CBOR. Add storage so we can save CBOR files.
+  (architectureGoal.md already assumes CBOR tags on DataItem; sink not done.)
 
-https://cborbook.com/part_1/practical_introduction_to_cbor.html
-cbor replaces json internally, which is something i was gonna make anyway lolol
-gotta add storage support for this so we can save cbor files 
+Input handling
+  Revise input manager to check sources from a list of connected devices
+  built on HID connect. Constructed as-is, not a slow polled list.
+  Future: combos as a listed array via bitmask so any number of combos works.
 
+Data streamer core
+  Extend streamcompatabilitytable with external plugins and ext symbol
+  linkings. Add an ext table for it.
+  (rshell_streamdefs / pump skeleton exists; routing and CBOR storage sink
+  still incomplete. See os_code/core/architectureGoal.md.)
 
-INPUT HANDLING AND STREAMING CORE
-
-
-revise input manager to check all input sources based on a list of connected devices which are made on hid device connect
-this should be constructed as is, not be some fuckass list that takes a long time to poll
-
-
-//future revision make this a listed array item via bitmasking so we can make any amount of combos
-
-i want to make data streamer core definitions be 
-able to extend streamcompatabilitytable with external pluggins and ext symbol linkings. gotta add ext table for it
+Notes
+-----
+hostusb/todo.txt also has: mass storage (SD over SPI or read USB drives,
+later) and rubber ducky.
