@@ -153,6 +153,13 @@ esp_err_t bma400_configure_shake_wake(bma400_dev_t *dev, float threshold_g);
 esp_err_t bma400_arm_cpu_wakeup(bma400_dev_t *dev);
 
 /**
+ * Tag a BMA400 shake as a force-wake in RTC memory so the ULP alert
+ * path and the early boot check both see it. Safe to call after a
+ * GPIO wake from INT1; does not require the ULP to be running.
+ */
+void bma400_tag_shake_wake(void);
+
+/**
  * Read raw 12-bit two's-complement samples (only valid in low-power or normal).
  */
 esp_err_t bma400_read_raw(bma400_dev_t *dev, bma400_raw_t *out);

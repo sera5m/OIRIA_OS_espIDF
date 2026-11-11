@@ -7,6 +7,7 @@ RTC_DATA_ATTR uint8_t  hour              = 0;
 RTC_DATA_ATTR uint8_t  minute            = 0;
 RTC_DATA_ATTR bool     wake_main_now     = false;
 RTC_DATA_ATTR uint8_t  wake_reason       = 0;
+RTC_DATA_ATTR uint8_t  force_tag         = 0;   // main/BMA sets; ULP consumes
 
 RTC_DATA_ATTR uint16_t timer0_remain_min = 0;
 RTC_DATA_ATTR uint16_t timer1_remain_min = 0;
@@ -92,6 +93,12 @@ void ulp_entry(void)
 
     if (minute % 5 == 0) {
         reason |= ULP_WAKE_PERIODIC;
+    }
+
+    // Consume any force-wake tag the main CPU / BMA path left.
+    if (force_tag) {
+        reason |= force_tag;
+        force_tag = 0;
     }
 
     if (reason != 0) {

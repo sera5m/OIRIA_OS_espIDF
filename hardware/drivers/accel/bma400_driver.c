@@ -260,6 +260,26 @@ esp_err_t bma400_arm_cpu_wakeup(bma400_dev_t *dev)
     return ESP_OK;
 }
 
+
+void bma400_tag_shake_wake(void)
+{
+    // Weak so this still links if the ULP binary is not in the build.
+    extern uint8_t ulp_force_tag    __attribute__((weak));
+    extern uint8_t ulp_wake_reason  __attribute__((weak));
+    extern uint8_t ulp_wake_main_now __attribute__((weak));
+
+    if (&ulp_force_tag) {
+        ulp_force_tag |= (1u << 4);   // ULP_WAKE_SHAKE
+        ulp_force_tag |= (1u << 5);   // ULP_WAKE_FORCE
+    }
+    if (&ulp_wake_reason) {
+        ulp_wake_reason |= (1u << 4) | (1u << 5);
+    }
+    if (&ulp_wake_main_now) {
+        ulp_wake_main_now = 1;
+    }
+}
+
 esp_err_t bma400_read_raw(bma400_dev_t *dev, bma400_raw_t *out)
 {
     if (!dev || !out || !dev->i2c_dev) return ESP_ERR_INVALID_ARG;

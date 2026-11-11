@@ -24,6 +24,37 @@ wake_check_t boot_get_last_wake(void) {
     return s_last_wake;
 }
 
+const char *wake_reason_name(wake_reason_t r)
+{
+    switch (r) {
+        case WAKE_REASON_BUTTON_PUSH:       return "buttonpush";
+        case WAKE_REASON_SENSOR_PING:       return "sensorping";
+        case WAKE_REASON_GENERIC_INTERRUPT: return "genericInterrupt";
+        case WAKE_REASON_POWER_RESTORED:    return "power_restored";
+        case WAKE_REASON_TIMER:             return "timer";
+        case WAKE_REASON_ALARM:             return "alarm";
+        case WAKE_REASON_PERIODIC:          return "periodic";
+        case WAKE_REASON_ULP:               return "ulp";
+        case WAKE_REASON_FORCE:             return "force";
+        default:                            return "unknown";
+    }
+}
+
+// Pick a single primary reason from the bitmask (priority order).
+static wake_reason_t pick_primary(uint32_t bits)
+{
+    if (bits & WAKE_MSG_SHAKE)  return WAKE_REASON_SENSOR_PING;
+    if (bits & WAKE_MSG_BUTTON) return WAKE_REASON_BUTTON_PUSH;
+    if (bits & WAKE_MSG_FORCE)  return WAKE_REASON_FORCE;
+    if (bits & WAKE_MSG_ALARM)  return WAKE_REASON_ALARM;
+    if (bits & WAKE_MSG_TIMER)  return WAKE_REASON_TIMER;
+    if (bits & WAKE_MSG_POWER)  return WAKE_REASON_POWER_RESTORED;
+    if (bits & WAKE_MSG_GPIO)   return WAKE_REASON_GENERIC_INTERRUPT;
+    if (bits & WAKE_MSG_PERIODIC) return WAKE_REASON_PERIODIC;
+    if (bits & WAKE_MSG_ULP)    return WAKE_REASON_ULP;
+    return WAKE_REASON_UNKNOWN;
+}
+
 // Menu button = encoder0 switch ("sel"). Active low assumed.
 #ifndef MENU_BOOT_PIN
 #define MENU_BOOT_PIN ENCODER0_SW_PIN
@@ -46,8 +77,14 @@ wake_check_t boot_check_why_awake(void)
         case ESP_SLEEP_WAKEUP_GPIO:
         case ESP_SLEEP_WAKEUP_EXT0:
         case ESP_SLEEP_WAKEUP_EXT1:
-            w.reasons |= WAKE_MSG_GPIO;
+            w.reasons |= WAKE_MSG_GPIO | WAKE_MSG_FORCE;
             w.force_wake = true;
+            // Menu button vs sensor: if the menu pin is low, call it a button.
+            if (gpio_get_level(MENU_BOOT_PIN) == 0) {
+                w.reasons |= WAKE_MSG_BUTTON;
+            } else {
+                w.reasons |= WAKE_MSG_SHAKE;   // BMA INT1 or other sensor
+            }
             break;
         case ESP_SLEEP_WAKEUP_TIMER:
             w.reasons |= WAKE_MSG_TIMER;
@@ -63,6 +100,13 @@ wake_check_t boot_check_why_awake(void)
     // ULP shared state (optional; symbols may be absent if ULP not linked yet).
     extern uint8_t ulp_wake_main_now __attribute__((weak));
     extern uint8_t ulp_wake_reason   __attribute__((weak));
+    extern uint8_t ulp_force_tag     __attribute__((weak));
+    if (&ulp_force_tag && ulp_force_tag) {
+        if (ulp_force_tag & 0x10) w.reasons |= WAKE_MSG_SHAKE;
+        if (ulp_force_tag & 0x20) w.reasons |= WAKE_MSG_FORCE;
+        w.force_wake = true;
+    }
+
     if (&ulp_wake_main_now && ulp_wake_main_now) {
         w.reasons |= WAKE_MSG_ULP;
         w.force_wake = true;
@@ -71,12 +115,16 @@ wake_check_t boot_check_why_awake(void)
             if (ulp_wake_reason & 0x02) w.reasons |= WAKE_MSG_ALARM;
             if (ulp_wake_reason & 0x04) w.reasons |= WAKE_MSG_TIMER;
             if (ulp_wake_reason & 0x01) w.reasons |= WAKE_MSG_PERIODIC;
+            if (ulp_wake_reason & 0x10) w.reasons |= WAKE_MSG_SHAKE;
+            if (ulp_wake_reason & 0x20) w.reasons |= WAKE_MSG_FORCE;
         }
     }
 
+    w.primary = pick_primary(w.reasons);
     s_last_wake = w;
     if (w.reasons) {
-        ESP_LOGI(TAG, "awake reasons=0x%lx force=%d ulp_raw=0x%02x",
+        ESP_LOGI(TAG, "awake primary=%s reasons=0x%lx force=%d ulp_raw=0x%02x",
+                 wake_reason_name(w.primary),
                  (unsigned long)w.reasons, w.force_wake, w.ulp_raw);
     } else {
         ESP_LOGI(TAG, "cold boot / no wake reason");

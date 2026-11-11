@@ -24,6 +24,11 @@ extern RTC_DATA_ATTR uint8_t wake_reason;
 #define ULP_WAKE_ALARM      (1u << 1)
 #define ULP_WAKE_TIMER      (1u << 2)
 #define ULP_WAKE_MANUAL     (1u << 3)
+#define ULP_WAKE_SHAKE      (1u << 4)   // BMA400 INT1 force-wake tag
+#define ULP_WAKE_FORCE      (1u << 5)   // generic force-wake tag
+
+// Main CPU (or BMA path) sets this; ULP ORs it into wake_reason on next tick.
+extern RTC_DATA_ATTR uint8_t force_tag;
 
 #define ULP_TIMER_COUNT 3
 extern RTC_DATA_ATTR uint16_t timer0_remain_min;
