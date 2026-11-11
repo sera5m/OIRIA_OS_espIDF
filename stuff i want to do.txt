@@ -25,7 +25,10 @@ OPEN — from the working list
 - Add 1-Wire.
 - Make the device more of a mini cyberdeck.
 - Clean bad code.
-- Finish heart-rate / SpO2 (MAX30102).
+- Finish heart-rate / SpO2 algorithm (MAX30102 still does not compute BPM;
+  minute_history_t is never filled; ring is 50 Hz while chip is set to 100 Hz).
+  Passive log is in: hr_metrics (128→8 per minute, 5-min RLE into 1 KB NVS,
+  80% flush to /sdcard/hr/hrlog.bin).
 
 OPEN — older notes that were already in this file
 --------------------------------------------------
