@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
+#include <math.h>
 
 static const char *TAG = "MAX30102";
 
@@ -233,7 +234,15 @@ static void compute_spo2(max30102_dev_t *dev)
     dev->spo2 = (uint8_t)(spo2 + 0.5f);
 }
 
-esp_err_t max30102_update(max30102_dev_t *dev)
+// | |a| - 1 g | above this → treat the PPG as motion-corrupted.
+#define HR_MOTION_GATE_G  0.30f
+
+static bool motion_hot(max30102_dev_t *dev)
+{
+    return dev->motion_g > HR_MOTION_GATE_G;
+}
+
+static esp_err_t update_core(max30102_dev_t *dev)
 {
     if (!dev || dev->state == MAX30102_STATE_UNINIT) return ESP_ERR_INVALID_STATE;
     if (dev->state == MAX30102_STATE_SLEEP) return ESP_ERR_INVALID_STATE;
@@ -241,8 +250,6 @@ esp_err_t max30102_update(max30102_dev_t *dev)
     esp_err_t err = drain_fifo(dev);
     if (err != ESP_OK) return err;
 
-    // Run PBA on samples that arrived since the last update.
-    // We only have the window, so walk the newest stretch.
     static uint16_t s_seen;
     uint16_t start = (dev->win_n > 8) ? (uint16_t)(dev->win_n - 8) : 0;
     if (dev->win_n < s_seen) s_seen = 0;
@@ -254,21 +261,43 @@ esp_err_t max30102_update(max30102_dev_t *dev)
     }
     s_seen = dev->win_n;
 
+    dev->beat = false;
+    dev->motion_reject = false;
+
     if (beat) {
         int64_t now = esp_timer_get_time();
         if (dev->pba.last_beat_us) {
             int64_t dt = now - dev->pba.last_beat_us;
-            if (dt > 300000 && dt < 2000000) {          // 30..200 bpm
+            if (dt > 300000 && dt < 2000000) {
                 int bpm = (int)(60000000LL / dt);
                 dev->bpm = (uint8_t)bpm;
                 dev->beat = true;
                 compute_spo2(dev);
-                hr_metrics_push(dev->bpm, dev->spo2);
+                if (motion_hot(dev)) {
+                    dev->motion_reject = true;
+                } else {
+                    hr_metrics_push(dev->bpm, dev->spo2);
+                }
             }
         }
         dev->pba.last_beat_us = now;
     }
     return ESP_OK;
+}
+
+esp_err_t max30102_update(max30102_dev_t *dev)
+{
+    return update_core(dev);
+}
+
+esp_err_t max30102_update_with_motion(max30102_dev_t *dev, float x_g, float y_g, float z_g)
+{
+    if (!dev) return ESP_ERR_INVALID_ARG;
+    float mag = sqrtf(x_g * x_g + y_g * y_g + z_g * z_g);
+    float devg = mag - 1.0f;
+    if (devg < 0) devg = -devg;
+    dev->motion_g = devg;
+    return update_core(dev);
 }
 
 esp_err_t max30102_read_temperature(max30102_dev_t *dev, float *temp_c)

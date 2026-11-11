@@ -57,6 +57,8 @@ typedef struct {
     uint8_t bpm;
     uint8_t spo2;
     bool    beat;                 // true if a peak was seen this update
+    bool    motion_reject;        // last beat dropped because BMA said we moved
+    float   motion_g;             // | |a| - 1 | at last paired sample
 
     // Maxim PBA (peripheral beat amplitude) state. Streaming, one sample
     // at a time. The "window" is the 32-tap FIR delay line plus the DC
@@ -87,6 +89,11 @@ esp_err_t max30102_shutdown(max30102_dev_t *dev);
 // Drain FIFO into the window and recompute bpm/spo2.
 // Pushes a sample to hr_metrics when a new bpm is produced.
 esp_err_t max30102_update(max30102_dev_t *dev);
+
+// Pair a BMA400 reading with this update. Call with a fresh bma400_read_g()
+// result taken at the same time as the FIFO drain. If motion is high the
+// beat is computed but not logged (motion_reject = true).
+esp_err_t max30102_update_with_motion(max30102_dev_t *dev, float x_g, float y_g, float z_g);
 
 esp_err_t max30102_read_temperature(max30102_dev_t *dev, float *temp_c);
 
