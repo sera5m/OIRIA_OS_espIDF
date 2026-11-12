@@ -10,6 +10,7 @@
 #include "os_code/core/com/boot_role.hpp"
 #include "os_code/core/com/boot_mode_select.h"
 #include "hardware/drivers/heartMonitor/hr_metrics.h"
+#include "hardware/drivers/heartMonitor/hr_live.h"
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "os_code/core/rShell/rshell_appmanager.hpp"
@@ -504,6 +505,7 @@ extern "C" void app_main(void) {
 
     notification_system_init();
     hr_metrics_init();
+    hr_live_init();
     load_ulp();
 
     bootloader_final_app();

@@ -1,5 +1,6 @@
 #include "max30102_sensor.h"
 #include "hr_metrics.h"
+#include "hr_live.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -275,8 +276,10 @@ static esp_err_t update_core(max30102_dev_t *dev)
                 compute_spo2(dev);
                 if (motion_hot(dev)) {
                     dev->motion_reject = true;
+                    hr_live_push(dev->bpm, dev->spo2, dev->motion_g, true);
                 } else {
                     hr_metrics_push(dev->bpm, dev->spo2);
+                    hr_live_push(dev->bpm, dev->spo2, dev->motion_g, false);
                 }
             }
         }
