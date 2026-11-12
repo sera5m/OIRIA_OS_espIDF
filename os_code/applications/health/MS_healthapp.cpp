@@ -25,7 +25,7 @@ void HealthApp::on_start() {
 
 void HealthApp::on_stop() {
     if (hr_live_state() == HR_LIVE_RUNNING || hr_live_state() == HR_LIVE_PAUSED)
-        hr_live_stop();
+        hr_live_discard();
     if (win) {
         WindowManager::getInstance().unregisterWindow(win);
         win.reset();
@@ -232,7 +232,7 @@ void HealthApp::receive_event_input(const void* event) {
     if (ev->action != KeyAction::Tap) return;
 
     if (ev->key == KEY_BACK) {
-        if (mode == HealthMode::Live) hr_live_stop();
+        if (mode == HealthMode::Live) hr_live_discard();
         appManager::instance().close_current_and_open("MenuApp");
         return;
     }

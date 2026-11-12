@@ -103,16 +103,31 @@ static esp_err_t save_session(void)
     return ESP_OK;
 }
 
+static void clear_ring(void)
+{
+    s_n = 0;
+    s_head = 0;
+}
+
 esp_err_t hr_live_stop(void)
 {
     if (s_state != HR_LIVE_RUNNING && s_state != HR_LIVE_PAUSED)
         return ESP_ERR_INVALID_STATE;
     s_state = HR_LIVE_SAVING;
     esp_err_t err = save_session();
-    s_n = 0;
-    s_head = 0;
+    clear_ring();
     s_state = (err == ESP_OK || err == ESP_ERR_NOT_FOUND) ? HR_LIVE_IDLE : HR_LIVE_ERROR;
     return err;
+}
+
+esp_err_t hr_live_discard(void)
+{
+    if (s_state != HR_LIVE_RUNNING && s_state != HR_LIVE_PAUSED && s_state != HR_LIVE_ERROR)
+        return ESP_ERR_INVALID_STATE;
+    clear_ring();
+    s_state = HR_LIVE_IDLE;
+    ESP_LOGI(TAG, "live discarded");
+    return ESP_OK;
 }
 
 void hr_live_push(uint8_t bpm, uint8_t spo2, float motion_g, bool rejected)

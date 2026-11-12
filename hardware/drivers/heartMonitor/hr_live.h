@@ -38,8 +38,12 @@ const char      *hr_live_state_name(hr_live_state_t s);
 esp_err_t hr_live_start(void);
 esp_err_t hr_live_pause(void);
 esp_err_t hr_live_resume(void);
-// RUNNING/PAUSED → SAVING → IDLE. Writes /sdcard/hr/session_<n>.bin if SD is up.
+// Pack the session to an RLE buffer in RAM, then write it.
+// Only call this when the user confirms (ENTER).
 esp_err_t hr_live_stop(void);
+
+// RUNNING/PAUSED → IDLE. Drops the session. No file.
+esp_err_t hr_live_discard(void);
 
 // Only accepted while RUNNING. Ignored otherwise.
 void hr_live_push(uint8_t bpm, uint8_t spo2, float motion_g, bool rejected);
