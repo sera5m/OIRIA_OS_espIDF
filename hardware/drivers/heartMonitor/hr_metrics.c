@@ -47,6 +47,14 @@ static uint16_t cap_from_env(void)
 static bool     s_sd_ok;
 static bool     s_inited;
 
+// Viewer ring: last 48 reduced BPM values, newest at s_view_i-1.
+#define VIEW_N 48
+static uint8_t s_view[VIEW_N];
+static uint8_t s_view_n;
+static uint8_t s_view_i;
+static uint8_t s_last_spo2;
+static bool    s_last_motion;
+
 // Blob layout:
 //   uint16 used | uint16 blocks | payload...
 // Payload record (RLE of one 5-minute block):
@@ -204,6 +212,12 @@ esp_err_t hr_metrics_init(void)
 void hr_metrics_push(uint8_t bpm, uint8_t spo2)
 {
     if (!s_inited || bpm == 0) return;
+    s_last_spo2 = spo2;
+    s_last_motion = false;
+    s_view[s_view_i] = bpm;
+    s_view_i = (uint8_t)((s_view_i + 1) % VIEW_N);
+    if (s_view_n < VIEW_N) s_view_n++;
+
     if (s_raw_n >= RAW_N) {
         // Window full: close the minute so we don't drop the new sample.
         hr_metrics_end_minute();
@@ -211,6 +225,22 @@ void hr_metrics_push(uint8_t bpm, uint8_t spo2)
     s_raw_bpm[s_raw_n] = bpm;
     s_raw_spo2[s_raw_n] = spo2;
     s_raw_n++;
+}
+
+int hr_metrics_recent(uint8_t *bpm, int max_n,
+                      uint8_t *last_spo2, bool *motion_reject)
+{
+    if (last_spo2) *last_spo2 = s_last_spo2;
+    if (motion_reject) *motion_reject = s_last_motion;
+    if (!bpm || max_n <= 0 || s_view_n == 0) return 0;
+    int n = s_view_n < max_n ? s_view_n : max_n;
+    // Oldest of the ones we return is at (s_view_i - n)
+    int start = (int)s_view_i - n;
+    if (start < 0) start += VIEW_N;
+    for (int i = 0; i < n; i++) {
+        bpm[i] = s_view[(start + i) % VIEW_N];
+    }
+    return n;
 }
 
 void hr_metrics_end_minute(void)

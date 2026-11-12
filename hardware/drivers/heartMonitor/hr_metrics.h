@@ -33,6 +33,12 @@ void hr_metrics_end_minute(void);
 uint16_t hr_metrics_used(void);
 bool hr_metrics_sd_ok(void);
 
+// Live view for the health app. Copies the most recent reduced BPM
+// samples (newest last). Returns how many were written.
+// last_spo2 / motion_reject describe the newest accepted sample.
+int hr_metrics_recent(uint8_t *bpm, int max_n,
+                      uint8_t *last_spo2, bool *motion_reject);
+
 #ifdef __cplusplus
 }
 #endif

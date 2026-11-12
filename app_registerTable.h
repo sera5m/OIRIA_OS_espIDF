@@ -11,6 +11,7 @@
     register_toplethos(); \
     register_siggen(); \
     register_scope(); \
+    register_health(); \
     register_snake(); \
     register_2048(); \
     register_browser();

@@ -9,6 +9,7 @@
 #include <algorithm>   // for std::clamp, std::max, std::min
 #include "os_code/core/com/boot_role.hpp"
 #include "os_code/core/com/boot_mode_select.h"
+#include "hardware/drivers/heartMonitor/hr_metrics.h"
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "os_code/core/rShell/rshell_appmanager.hpp"
@@ -447,6 +448,7 @@ extern TaskHandle_t core2TaskHandle;
 
 //forward declarations for further bootfuncts
 //void register_watch();
+extern void register_health();
 //void register_menu();
 
 
@@ -501,6 +503,7 @@ extern "C" void app_main(void) {
     os_conf_apply_power();
 
     notification_system_init();
+    hr_metrics_init();
     load_ulp();
 
     bootloader_final_app();
