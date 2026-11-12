@@ -2,7 +2,8 @@
 // Health viewer.
 // Overview: passive log (BPM, SpO2, motion, sparkline).
 // Live: dense session driven by hr_live state machine.
-// ENTER toggles. BACK leaves (and stops a running session).
+// ENTER: overview/graph → live, live → overview.
+// UP: overview ↔ graph. BACK leaves (stops a running session).
 
 #include <stdint.h>
 #include <memory>
@@ -14,6 +15,7 @@
 
 enum class HealthMode : uint8_t {
     Overview = 0,
+    Graph,
     Live,
 };
 
@@ -35,6 +37,7 @@ private:
                    uint8_t mn, uint8_t mx);
 
     void redraw_overview();
+    void redraw_graph();
     void redraw_live();
     void redraw();
 };

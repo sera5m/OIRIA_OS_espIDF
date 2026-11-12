@@ -76,7 +76,7 @@ void HealthApp::redraw_overview() {
              "  HRV %u ms%s\n"
              "\n"
              "  %s\n"
-             "log %u B   ENTER live\n",
+             "log %u B\nUP graph  ENTER live\n",
              bpm, spo2,
              motion ? "motion: reject" : "motion: clear",
              band, prof.bpm_lo, prof.bpm_hi,
@@ -111,6 +111,63 @@ void HealthApp::draw_bars(const uint8_t *bpm, const uint8_t *flags, int n,
         else if (bpm[i] > 140) col = 0xF800;   // red if high
         canvas->AddShape(SHAPE_RECT, b, col, 1);
     }
+}
+
+void HealthApp::redraw_graph() {
+    uint8_t recent[40];
+    uint8_t spo2 = 0;
+    bool motion = false;
+    int n = hr_metrics_recent(recent, 40, &spo2, &motion);
+
+    if (canvas) canvas->ClearShapes();
+    if (n >= 2 && canvas) {
+        uint8_t mn = recent[0], mx = recent[0];
+        uint32_t sum = 0;
+        for (int i = 0; i < n; i++) {
+            if (recent[i] < mn) mn = recent[i];
+            if (recent[i] > mx) mx = recent[i];
+            sum += recent[i];
+        }
+        int span = (int)mx - (int)mn; if (span < 8) span = 8;
+        int step = 224 / (n - 1);
+        if (step < 1) step = 1;
+
+        // Line of the recent reduced samples.
+        for (int i = 0; i < n - 1; i++) {
+            int y0 = 86 - ((int)recent[i] - (int)mn) * 70 / span;
+            int y1 = 86 - ((int)recent[i + 1] - (int)mn) * 70 / span;
+            if (y0 < 0) y0 = 0; if (y1 < 0) y1 = 0;
+            if (y0 > 86) y0 = 86; if (y1 > 86) y1 = 86;
+            s_bounds_16u b;
+            b.x = (uint16_t)(i * step);
+            b.y = (uint16_t)(y0 < y1 ? y0 : y1);
+            b.w = (uint16_t)step;
+            b.h = (uint16_t)((y0 > y1 ? y0 : y1) - b.y + 1);
+            canvas->AddShape(SHAPE_LINE, b, 0x07E0, 1);
+        }
+
+        // One average bar on the right of the plot.
+        uint8_t avg = (uint8_t)(sum / n);
+        int h = ((int)avg - (int)mn) * 70 / span;
+        if (h < 2) h = 2; if (h > 80) h = 80;
+        s_bounds_16u bar;
+        bar.x = 200; bar.y = (uint16_t)(86 - h); bar.w = 12; bar.h = (uint16_t)h;
+        canvas->AddShape(SHAPE_RECT, bar, 0x001F, 1);
+
+        char screen[280];
+        snprintf(screen, sizeof screen,
+                 "HEALTH  graph\n"
+                 "\n"
+                 "  %3u bpm   avg %u\n"
+                 "  range %u-%u   n %d\n"
+                 "\n\n\n\n\n\n"
+                 "UP overview   ENTER live\n",
+                 recent[n - 1], avg, mn, mx, n);
+        win->SetText(screen);
+    } else {
+        win->SetText("HEALTH  graph\n\n  no samples yet\n\nUP overview   ENTER live\n");
+    }
+    win->dirty = true;
 }
 
 void HealthApp::redraw_live() {
@@ -158,6 +215,7 @@ void HealthApp::redraw_live() {
 void HealthApp::redraw() {
     if (!win) return;
     if (mode == HealthMode::Live) redraw_live();
+    else if (mode == HealthMode::Graph) redraw_graph();
     else redraw_overview();
 }
 
@@ -178,8 +236,14 @@ void HealthApp::receive_event_input(const void* event) {
         appManager::instance().close_current_and_open("MenuApp");
         return;
     }
+    if (ev->key == KEY_UP && mode != HealthMode::Live) {
+        mode = (mode == HealthMode::Overview) ? HealthMode::Graph : HealthMode::Overview;
+        if (mode == HealthMode::Overview && canvas) canvas->ClearShapes();
+        redraw();
+        return;
+    }
     if (ev->key == KEY_ENTER) {
-        if (mode == HealthMode::Overview) {
+        if (mode != HealthMode::Live) {
             hr_live_start();
             mode = HealthMode::Live;
         } else {
