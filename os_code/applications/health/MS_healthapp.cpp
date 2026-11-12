@@ -204,8 +204,8 @@ void HealthApp::redraw_live() {
              "  min %u  max %u   n %d\n"
              "\n"
              "\n\n\n\n\n"
-             "ENTER stop   BACK menu\n"
-             "saves .rle\n",
+             "ENTER save   BACK drop\n"
+             "ENTER writes .rle\n",
              hr_live_state_name(hr_live_state()),
              bpm, avg, spo2, mn, mx, hr_live_count());
     win->SetText(screen);
