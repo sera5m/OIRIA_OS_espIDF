@@ -1,5 +1,5 @@
 OIRIA_OS goals
-Updated 2026-11-11
+Updated 2026-11-12
 
 DONE
 ----
@@ -16,6 +16,10 @@ DONE
 - SSD1351 SPI driver (double FB, dirty rows, chunked push).
 - Window highlight border gated on window_highlighted; focus raises layer.
 - Vulcan IDE / VM port work already on main (separate from this list).
+- Heart rate path (2026-11-11/12): MAX30102 PBA + SpO2, motion gate,
+  hr_metrics passive log (128→8, 5-min RLE, NVS + SD), hr_live session
+  (RAM ring, ENTER writes /sdcard/hr/session_<n>.rle, BACK discards),
+  hr_profile bands + RMSSD, HealthApp overview / graph / live.
 
 OPEN — from the working list
 -----------------------------
@@ -25,10 +29,6 @@ OPEN — from the working list
 - Add 1-Wire.
 - Make the device more of a mini cyberdeck.
 - Clean bad code.
-- Finish heart-rate / SpO2 algorithm (MAX30102 still does not compute BPM;
-  minute_history_t is never filled; ring is 50 Hz while chip is set to 100 Hz).
-  Passive log is in: hr_metrics (128→8 per minute, 5-min RLE into 1 KB NVS,
-  80% flush to /sdcard/hr/hrlog.bin).
 
 OPEN — older notes that were already in this file
 --------------------------------------------------
@@ -56,3 +56,51 @@ Notes
 -----
 hostusb/todo.txt also has: mass storage (SD over SPI or read USB drives,
 later) and rubber ducky.
+
+OPEN — TODOs found in the tree (2026-11-12 grep)
+------------------------------------------------
+Notifications (os_code/core/notification_sys/rs_notif_dispatcher.c)
+  - Alert handler is a stub. Alarm set and timer are log-only
+    ("stub - implement later"). Not wired as a stream sink.
+
+Streams / CBOR (os_code/core/rShell/streams/)
+  - rshell_pump.cpp:99  TODO: CBOR serialize + d_sdc write.
+  - rshell_streamdefs.c:66  TODO (returns false).
+  - architectureGoal.md TODO: finish pump routing + sinks, PSRAM ring
+    template, real CBOR (qcbor), notifications as sink, end-to-end test
+    Knob → Streamer → Screen + SD log.
+
+Input routing (os_code/middle_layer/input/inputProscessorTask/ipt_x.cpp)
+  - TODO: route to wireless HID backend.
+  - TODO: route to StreamCore.
+  - Encoder is ticked directly "to save time"; device manager should
+    tick every present device, high-frequency first.
+
+Rubber ducky
+  - app_rubberducky.cpp:46  TODO: FATFS directory scan. File list is
+    a placeholder (payload1.duck, payload2.duck).
+  - kb_rd.cpp:160  TODO: improve string→key mapping.
+  - keymap.cpp:69  TODO: expand key names for debugging.
+  - hostusb/todo.txt: mass storage later; rubber ducky unfinished.
+
+Browser
+  - MS_browserapp.cpp: http/https is a stub page until esp_http_client
+    is hooked into html_to_mwenv.
+
+Watch
+  - MS_watchapp.cpp: NTP sync is a placeholder (fake delay, then success).
+
+Window / LCD
+  - MWenv.cpp:177  TODO: interpolation when interpolate == true.
+  - MWenv.cpp:468  TODO: title-bar rect with window name (the -[]x thing).
+  - MWenv.cpp:1557 TODO: dump canvas objects if shape list is exposed.
+  - lcDriver.c: fb_circle, fb_triangle, fb_ngon are stubs.
+  - wiring.h:93  TODO: new LCD has bigger dims and ~80 MHz support.
+
+VM / interop
+  - os_code/core/rs_vm/INTEROP.md: live memory interop is noted as
+    not implemented.
+
+Pool
+  - rshell_pool.cpp: some storage types "not yet supported", fall back
+    to RAM.
