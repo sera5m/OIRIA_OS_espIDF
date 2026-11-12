@@ -13,6 +13,11 @@ HealthApp::HealthApp(const ApplicationConfig& cfg) : AppBase(cfg) {}
 void HealthApp::on_start() {
     win = std::make_shared<Window>("Health", 0, 0, 240, 240);
     WindowManager::getInstance().registerWindow(win);
+    CanvasCfg cfg;
+    cfg.x = 8; cfg.y = 120; cfg.width = 224; cfg.height = 90;
+    cfg.bgColor = 0x0000;
+    cfg.parentWindow = win.get();
+    canvas = win->AddCanvas(cfg);
     mode = HealthMode::Overview;
     redraw();
 }
@@ -70,6 +75,33 @@ void HealthApp::redraw_overview() {
     win->dirty = true;
 }
 
+void HealthApp::draw_bars(const uint8_t *bpm, const uint8_t *flags, int n,
+                         uint8_t mn, uint8_t mx)
+{
+    if (!canvas) return;
+    canvas->ClearShapes();
+    if (n <= 0) return;
+    int span = (int)mx - (int)mn;
+    if (span < 8) span = 8;
+    int bw = 224 / (n > 0 ? n : 1);
+    if (bw < 2) bw = 2;
+    if (bw > 8) bw = 8;
+    for (int i = 0; i < n; i++) {
+        int h = ((int)bpm[i] - (int)mn) * 80 / span;
+        if (h < 2) h = 2;
+        if (h > 86) h = 86;
+        s_bounds_16u b;
+        b.x = (uint16_t)(i * (224 / n));
+        b.y = (uint16_t)(86 - h);
+        b.w = (uint16_t)(bw - 1);
+        b.h = (uint16_t)h;
+        uint16_t col = 0x07E0;                 // green
+        if (flags && (flags[i] & 1)) col = 0xFD20;  // orange if motion
+        else if (bpm[i] > 140) col = 0xF800;   // red if high
+        canvas->AddShape(SHAPE_RECT, b, col, 1);
+    }
+}
+
 void HealthApp::redraw_live() {
     hr_live_sample_t s[40];
     int n = hr_live_copy(s, 40);
@@ -91,21 +123,23 @@ void HealthApp::redraw_live() {
         }
     }
 
-    char screen[320];
+    uint8_t bpms[40], flags[40];
+    for (int i = 0; i < n; i++) { bpms[i] = s[i].bpm; flags[i] = s[i].flags; }
+    draw_bars(bpms, flags, n, mn, mx);
+
+    char screen[280];
     snprintf(screen, sizeof screen,
              "HEALTH  live:%s\n"
              "\n"
              "  %3u bpm   avg %u\n"
              "  SpO2 %u%%\n"
-             "  min %u  max %u\n"
-             "  samples %d\n"
+             "  min %u  max %u   n %d\n"
              "\n"
-             "  %s\n"
-             "\n"
-             "ENTER stop   BACK menu\n",
+             "\n\n\n\n\n"
+             "ENTER stop   BACK menu\n"
+             "saves .rle\n",
              hr_live_state_name(hr_live_state()),
-             bpm, avg, spo2, mn, mx, hr_live_count(),
-             spark);
+             bpm, avg, spo2, mn, mx, hr_live_count());
     win->SetText(screen);
     win->dirty = true;
 }
@@ -140,6 +174,7 @@ void HealthApp::receive_event_input(const void* event) {
         } else {
             hr_live_stop();
             mode = HealthMode::Overview;
+            if (canvas) canvas->ClearShapes();
         }
         redraw();
     }

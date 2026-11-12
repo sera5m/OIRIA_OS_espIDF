@@ -8,7 +8,9 @@
 #include <memory>
 #include "os_code/core/rShell/rshell_appFramework.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
+#include "os_code/core/window_env/Canvas.hpp"
 #include "hardware/drivers/heartMonitor/hr_live.h"
+#include "hardware/drivers/lcd/st7789v2/t_shapes.h"
 
 enum class HealthMode : uint8_t {
     Overview = 0,
@@ -25,8 +27,12 @@ public:
 
 private:
     std::shared_ptr<Window> win;
+    std::shared_ptr<Canvas> canvas;
     HealthMode mode = HealthMode::Overview;
     uint32_t acc_ms = 0;
+
+    void draw_bars(const uint8_t *bpm, const uint8_t *flags, int n,
+                   uint8_t mn, uint8_t mx);
 
     void redraw_overview();
     void redraw_live();

@@ -68,17 +68,36 @@ static esp_err_t save_session(void)
     if (s_n == 0) return ESP_OK;
     mkdir("/sdcard/hr", 0775);
     char path[48];
-    snprintf(path, sizeof path, "/sdcard/hr/session_%lu.bin", (unsigned long)s_session_seq++);
+    snprintf(path, sizeof path, "/sdcard/hr/session_%lu.rle", (unsigned long)s_session_seq++);
     FILE *f = fopen(path, "wb");
     if (!f) {
         ESP_LOGW(TAG, "session save skipped (no %s)", path);
         return ESP_ERR_NOT_FOUND;
     }
-    // oldest first
+    // HRLE v1: magic, version, sample count, then {bpm, count} runs.
+    // A jump stays its own run; a flat stretch collapses.
+    fwrite("HRLE", 1, 4, f);
+    uint8_t ver = 1;
+    fwrite(&ver, 1, 1, f);
+    uint16_t count = (uint16_t)s_n;
+    fwrite(&count, 2, 1, f);
+
     int start = (s_n == HR_LIVE_CAP) ? s_head : 0;
-    for (int i = 0; i < s_n; i++) {
-        fwrite(&s_ring[(start + i) % HR_LIVE_CAP], sizeof(hr_live_sample_t), 1, f);
+    uint8_t run_bpm = s_ring[start].bpm;
+    uint8_t run_n = 1;
+    for (int i = 1; i < s_n; i++) {
+        uint8_t b = s_ring[(start + i) % HR_LIVE_CAP].bpm;
+        if (b == run_bpm && run_n < 255) {
+            run_n++;
+        } else {
+            fwrite(&run_bpm, 1, 1, f);
+            fwrite(&run_n, 1, 1, f);
+            run_bpm = b;
+            run_n = 1;
+        }
     }
+    fwrite(&run_bpm, 1, 1, f);
+    fwrite(&run_n, 1, 1, f);
     fclose(f);
     ESP_LOGI(TAG, "saved %d samples to %s", s_n, path);
     return ESP_OK;
