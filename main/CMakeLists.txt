@@ -13,6 +13,7 @@ idf_component_register(
         "../hardware/drivers/heartMonitor/heartrate_sensor.c"
         "../hardware/drivers/heartMonitor/hr_metrics.c"
         "../hardware/drivers/heartMonitor/hr_live.c"
+        "../hardware/drivers/heartMonitor/hr_profile.c"
         "../os_code/applications/discord/discord_rpc.cpp"
         "../hardware/drivers/lcd/fonts/font_basic_types.c"
         "../hardware/drivers/abstraction_layers/al_scr.c"

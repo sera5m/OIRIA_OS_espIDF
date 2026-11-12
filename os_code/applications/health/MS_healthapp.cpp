@@ -1,5 +1,6 @@
 #include "MS_healthapp.hpp"
 #include "hardware/drivers/heartMonitor/hr_metrics.h"
+#include "hardware/drivers/heartMonitor/hr_profile.h"
 #include "os_code/core/rShell/rshell_appmanager.hpp"
 #include "os_code/middle_layer/input/hid_t.h"
 #include "esp_log.h"
@@ -56,20 +57,30 @@ void HealthApp::redraw_overview() {
         }
     }
 
-    char screen[320];
+    hr_profile_t prof;
+    hr_profile_get(&prof);
+    const char *band = "band: --";
+    if (prof.n >= 8) {
+        int b = hr_profile_bpm_band(bpm);
+        band = (b < 0) ? "band: low" : (b > 0) ? "band: high" : "band: normal";
+    }
+
+    char screen[360];
     snprintf(screen, sizeof screen,
              "HEALTH  overview\n"
              "\n"
              "  %3u bpm\n"
              "  SpO2 %u%%\n"
              "  %s\n"
+             "  %s  (%u-%u)\n"
+             "  HRV %u ms%s\n"
              "\n"
              "  %s\n"
-             "\n"
-             "log %u B\n"
-             "ENTER live   BACK menu\n",
+             "log %u B   ENTER live\n",
              bpm, spo2,
              motion ? "motion: reject" : "motion: clear",
+             band, prof.bpm_lo, prof.bpm_hi,
+             prof.hrv_rmssd_ms, prof.hrv_valid ? "" : " ?",
              spark, hr_metrics_used());
     win->SetText(screen);
     win->dirty = true;
