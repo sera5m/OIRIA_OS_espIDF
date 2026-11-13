@@ -104,3 +104,12 @@ VM / interop
 Pool
   - rshell_pool.cpp: some storage types "not yet supported", fall back
     to RAM.
+
+OPEN — Bluetooth
+----------------
+- Pair to an Android phone and keep the connection.
+  sdkconfig has CONFIG_BT_ENABLED unset. rs_autoconnect parses a
+  bluetooth_autoconnect block (name/pass) into v_env, but nothing
+  opens a BT/BLE stack, advertises, or maintains a link.
+  Need: enable NimBLE or Bluedroid, a pairing flow the phone can
+  complete, and a reconnect path that survives sleep.
