@@ -17,6 +17,7 @@
 #include "driver/spi_master.h"
 #include "hardware/wiring/wiring.h"
 #include "hardware/drivers/lcd/fonts/font_basic_types.h"
+#include "lcd_color.h"
 #include <stdlib.h>   // for min/max if needed
 // Move this **before** extern "C" so C++ headers are visible
 //#include "hardware/drivers/psram_std/psram_std.h"
