@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "esp_task_wdt.h"
+#include "lcd_color.h"
 #ifndef M_PI
 #define M_PI 3.141592653589 //JPL uses exactly 15 decimal places of pi. fuck i need more than 12 for?
 #endif
@@ -191,6 +192,7 @@ bool framebuffer_delete(void)
 
 void fb_clear(uint16_t color)
 {
+    color = lcd_color(color);
     if (!framebuffer) return;
     uint32_t c32 = ((uint32_t)color << 16) | color;
     uint32_t* p = (uint32_t*)framebuffer;
@@ -431,6 +433,8 @@ void fb_rect(bool isfilled, uint16_t borderThickness,
     int x, int y, int w, int h,
     uint16_t color, uint16_t secondarycolor)
 {
+color = lcd_color(color);
+secondarycolor = lcd_color(secondarycolor);
 if (x < 0) { w += x; x = 0; }
 if (y < 0) { h += y; y = 0; }
 if (x + w > SCREEN_W) w = SCREEN_W - x;
@@ -484,6 +488,8 @@ void fb_rect_border(bool isfilled, uint16_t borderThickness,
                     int x, int y, int w, int h,
                     uint16_t colorA, uint16_t colorB, uint8_t segment_len)
 {
+    colorA = lcd_color(colorA);
+    colorB = lcd_color(colorB);
     if (segment_len < 1) segment_len = 1;
 
     if (x < 0) { w += x; x = 0; }
@@ -533,6 +539,7 @@ void fb_rect_border(bool isfilled, uint16_t borderThickness,
 
 void fb_line(int x0, int y0, int x1, int y1, uint16_t color)
 {
+    color = lcd_color(color);
     int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
     int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
     int err = dx + dy;
@@ -609,6 +616,8 @@ void fb_draw_text(uint8_t angle, int x, int y, const char* str,
                   uint16_t maxTLenBeforeAutoWrapToNextLine,
                   fontdata fdat)
 {
+    color = lcd_color(color);
+    blockBackground_color = lcd_color(blockBackground_color);
     (void)transparency; (void)drawblocksforbackground; (void)blockBackground_color;
     (void)maxTLenBeforeAutoWrapToNextLine;
     

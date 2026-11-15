@@ -113,3 +113,14 @@ OPEN — Bluetooth
   opens a BT/BLE stack, advertises, or maintains a link.
   Need: enable NimBLE or Bluedroid, a pairing flow the phone can
   complete, and a reconnect path that survives sleep.
+
+OPEN — UI framework (started 2026-11-15)
+----------------------------------------
+- Color byte-swap lives in the ST7789 driver (lcd_byteswap flag,
+  lcd_color() on write, lcd_swap_buffer for bulk). Default true.
+- Styles: ui_style_t, dark theme, focus variant. Real uint16_t.
+- Fonts: ui_font() picks the existing 6x8 or 8x16.
+- Widgets: ui_label, ui_bar (fill fraction), ui_button (focus state).
+  Sit on the existing fb_* primitives. Window manager unchanged.
+- Next: more widgets (list/encoder selection), tile backgrounds,
+  radius once the primitives grow it.
