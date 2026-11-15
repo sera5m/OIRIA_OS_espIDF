@@ -24,6 +24,7 @@ idf_component_register(
         "../hardware/drivers/lcd/st7789v2/lcdriverAddon.cpp"
         "../hardware/drivers/lcd/crt_rca_mono/crt_rm.c"
         "../hardware/drivers/lcd/fonts/font_avr_classics.c"
+        "../hardware/drivers/lcd/fonts/font_digits.c"
         "../hardware/drivers/encoders/ky040_driver.cpp"
         "../hardware/drivers/generic/button_driver.cpp"
         "../os_code/middle_layer/input/input_handler.cpp"
