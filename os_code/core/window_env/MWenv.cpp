@@ -65,6 +65,9 @@ Window::~Window() {
     isTokenized = false;
     if (last_content.capacity() > 0) last_content.clear();  // if you added last_content
 
+    // Widget tree
+    if (root) { ui_w_free(root); root = nullptr; }
+
     // Canvas
     if (m_canvas) {
         m_canvas->ClearShapes();
@@ -829,6 +832,12 @@ if (last_x != wi_sizing.Xpos || last_y != wi_sizing.Ypos) {
     // Must run here: if apps draw the canvas first and then we fill the
     // window background on the next WinDraw, the sprites get wiped.
     DrawCanvas();
+
+    // Widget tree. Drawn after text and canvas so it sits on top.
+    // ox/oy is the window's physical origin.
+    if (root) {
+        ui_w_draw(root, currentPhysX, currentPhysY);
+    }
 
     // === 5. HIGHLIGHT DASHED BORDER (ONLY if window is highlighted) ===
     if (window_highlighted) {
@@ -1775,4 +1784,42 @@ void core2_push(void* pv)
 
 void launchTHESTUPIDMOTHERFUCKINGPEICEOFSHITDISPLAYPUSHTASKFUCKYOU(){
 xTaskCreatePinnedToCore(core2_push, "core2", 8192, NULL, 5, &core2TaskHandle, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Toolbar as a Window
+// ---------------------------------------------------------------------------
+
+Toolbar::Toolbar(const WindowCfg& cfg)
+    : Window(cfg, "")
+    , cfg_(g_defaultToolbarConfig)
+{
+    style = ui_style_dark();
+    root = ui_w_box(nullptr, cfg.win_width, cfg.win_height);
+    if (root) {
+        root->style = style;
+        title_ = ui_w_title(root, cfg.name[0] ? cfg.name : "toolbar");
+        if (title_) {
+            title_->w = cfg.win_width;
+            title_->h = 14;
+        }
+        ui_w_layout_v(root);
+    }
+}
+
+void Toolbar::set_text(const char* text)
+{
+    if (title_) title_->text = text;
+    dirty = true;
+}
+
+void Toolbar::set_items(toolbar_items_t items)
+{
+    cfg_.icons_shown = items;
+    dirty = true;
+}
+
+void Toolbar::DrawToolBar()
+{
+    if (root) ui_w_draw(root, wi_sizing.Xpos, wi_sizing.Ypos);
 }

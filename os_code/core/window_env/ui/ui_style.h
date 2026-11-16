@@ -11,7 +11,7 @@ typedef struct {
     uint16_t border;
     uint16_t highlight;
     uint8_t  pad;
-    uint8_t  radius;   // reserved, primitives are still hard-edged
+    uint8_t  radius;   // 0 = hard edge; used by button/title/list
 } ui_style_t;
 
 // Dark theme matching the phone companion: near-black, lavender, blue.

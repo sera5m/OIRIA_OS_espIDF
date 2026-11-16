@@ -30,6 +30,7 @@
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/core/window_env/ui/ui_style.h"
 #include "os_code/core/window_env/ui/ui_font.h"
+#include "os_code/core/window_env/ui/ui_widget.h"
 
 #include "PsramBackgroundTile.hpp"
 #include "Canvas.hpp"
@@ -241,6 +242,7 @@ public:
     uint16_t logicalH = 0;
     fontdata w_font_info;          // fallback is ui_font(UI_FONT_8)
     ui_style_t style;              // real colors, host order
+    ui_widget_t* root = nullptr;   // optional widget tree; drawn after text
 
     std::shared_ptr<PsramBackgroundTile> bgTile;
     BgFillType win_backgroundpattern = BgFillType::Solid;
@@ -360,6 +362,20 @@ typedef struct {
 } toolbarconfig;
 
 extern toolbarconfig g_defaultToolbarConfig;
+
+// Toolbar is a Window. The old free functions remain for now;
+// new code should use this so it gets style, clip, and the same draw path.
+class Toolbar : public Window {
+public:
+    explicit Toolbar(const WindowCfg& cfg);
+    void set_text(const char* text);
+    void set_items(toolbar_items_t items);
+    void DrawToolBar();   // draws via the widget tree
+private:
+    toolbarconfig cfg_;
+    ui_widget_t*  title_ = nullptr;
+};
+
 
 // ---------------------------------------------------------------------------
 // WindowManager (singleton)

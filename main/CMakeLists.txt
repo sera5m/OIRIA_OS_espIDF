@@ -21,6 +21,7 @@ idf_component_register(
         "../hardware/drivers/lcd/st7789v2/lcd_color.c"
         "../os_code/core/window_env/ui/ui_font.c"
         "../os_code/core/window_env/ui/ui_widgets.cpp"
+        "../os_code/core/window_env/ui/ui_widget.cpp"
         "../hardware/drivers/lcd/st7789v2/lcdriverAddon.cpp"
         "../hardware/drivers/lcd/crt_rca_mono/crt_rm.c"
         "../hardware/drivers/lcd/fonts/font_avr_classics.c"
