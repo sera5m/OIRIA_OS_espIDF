@@ -130,7 +130,7 @@ Window::Window(const WindowCfg& cfg, const std::string& initialContent)
     : content(stdpsram::String(initialContent.begin(), initialContent.end())),
       Initialcfg(cfg),
       Currentcfg(cfg),
-      w_font_info(ft_AVR_classic_6x8)   //init with default font
+      w_font_info(ui_font(UI_FONT_8))   // fallback face
 {
     text_mtx = xSemaphoreCreateMutex();
     // Make sure name is null-terminated
@@ -146,9 +146,15 @@ Window::Window(const WindowCfg& cfg, const std::string& initialContent)
     wi_sizing.Height   = Currentcfg.win_height;
     wi_sizing.rotation = Currentcfg.win_rotation;
 
-    win_internal_color_background = Currentcfg.BgColor;
-    win_internal_color_border     = Currentcfg.BorderColor;
-    win_internal_color_text       = Currentcfg.WinTextColor;
+    // Style is the source of truth for colors. Cfg values seed it.
+    style = ui_style_dark();
+    if (Currentcfg.BgColor)       style.bg     = Currentcfg.BgColor;
+    if (Currentcfg.BorderColor)   style.border = Currentcfg.BorderColor;
+    if (Currentcfg.WinTextColor)  style.fg     = Currentcfg.WinTextColor;
+
+    win_internal_color_background = style.bg;
+    win_internal_color_border     = style.border;
+    win_internal_color_text       = style.fg;
     win_internal_textsize_mult    = Currentcfg.TextSizeMult;
 
     UpdateTickRate          = Currentcfg.UpdateRate;
@@ -1117,7 +1123,7 @@ static void draw_toolbar_background(int x, int y, int width, int height, uint16_
 
 static void draw_toolbar_text(int x, int y, const char* text, uint16_t text_color) {
     if (!text || !text[0]) return;
-    fb_draw_text(x, y, 200, text, text_color, 1, 0, true, 0x0000, 40, ft_AVR_classic_6x8);
+    fb_draw_text(x, y, 200, text, text_color, 1, 0, true, 0x0000, 40, ui_font(UI_FONT_8));
 }
 
 // NEW: Implementation in WindowManager class
@@ -1270,9 +1276,9 @@ void WindowManager::DrawToolBar() {
             static char truncated[32];
             strncpy(truncated, toolbar_text.c_str(), sizeof(truncated) - 4);
             strcat(truncated, "...");
-            fb_draw_text(text_x, text_y, bar_width - 4, truncated, 0xFFFF, 1, 0, true, 0x0000, 40, ft_AVR_classic_6x8);
+            fb_draw_text(text_x, text_y, bar_width - 4, truncated, 0xFFFF, 1, 0, true, 0x0000, 40, ui_font(UI_FONT_8));
         } else {
-            fb_draw_text(text_x, text_y, bar_width - 4, toolbar_text.c_str(), 0xFFFF, 1, 0, true, 0x0000, 40, ft_AVR_classic_6x8);
+            fb_draw_text(text_x, text_y, bar_width - 4, toolbar_text.c_str(), 0xFFFF, 1, 0, true, 0x0000, 40, ui_font(UI_FONT_8));
         }
     }
     

@@ -1,4 +1,5 @@
 #include "Canvas.hpp"
+#include "ui/ui_font.h"
 #include "MWenv.hpp" // Window
 
 #include "esp_log.h"
@@ -143,7 +144,7 @@ void Canvas::Draw() {
                         fb_draw_text(0, screenBounds.x, screenBounds.y,
                                      (const char*)shape->data,
                                      shape->color, 1, 0, true, 0x0000,
-                                     screenBounds.w, ft_AVR_classic_6x8);
+                                     screenBounds.w, ui_font(UI_FONT_8));
                     }
                     break;
 

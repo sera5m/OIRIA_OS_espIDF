@@ -28,7 +28,8 @@
 #include "hardware/drivers/abstraction_layers/al_scr.h"
 #include "hardware/drivers/psram_std/psram_std.hpp"
 #include "os_code/core/rShell/enviroment/env_vars.h"
-#include "os_code/core/window_env/wenv_basicThemes.h"
+#include "os_code/core/window_env/ui/ui_style.h"
+#include "os_code/core/window_env/ui/ui_font.h"
 
 #include "PsramBackgroundTile.hpp"
 #include "Canvas.hpp"
@@ -238,7 +239,8 @@ public:
 
     uint16_t logicalW = 0;
     uint16_t logicalH = 0;
-    fontdata w_font_info;
+    fontdata w_font_info;          // fallback is ui_font(UI_FONT_8)
+    ui_style_t style;              // real colors, host order
 
     std::shared_ptr<PsramBackgroundTile> bgTile;
     BgFillType win_backgroundpattern = BgFillType::Solid;
