@@ -8,6 +8,7 @@
 #include "os_code/core/window_env/MWenv.hpp"
 #include "os_code/middle_layer/input/hid_t.h"
 #include "os_code/core/rShell/streams/rshell_pump.hpp"
+#include "os_code/core/com/remote_cmds.h"
 //#include "os_code/middle_layer/input/input_handler.hpp" 
 #include "os_code/middle_layer/input/hid_t.h"
 
@@ -685,6 +686,11 @@ void appManager::terminal_task_fn(void* arg) {
         li = 0;
         if (line[0] == 0) continue;
 
+        // Phone link commands: /bootseq and /sensor
+        if (line[0] == '/') {
+            remote_handle_line(line);
+            continue;
+        }
         if (strncmp(line, "run ", 4) == 0) {
             self->load_serial_script(line + 4);
             ai = 0;

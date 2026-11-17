@@ -6,6 +6,7 @@ idf_component_register(
         "../tusb_hid_example_main.cpp"
         "../os_code/core/com/rs_autoconnect.cpp"
         "../os_code/core/com/boot_mode_select.c"
+        "../os_code/core/com/remote_cmds.c"
         "../code_stuff/helperfunctions.cpp"
         "../code_stuff/types.c"
         "../hardware/drivers/devices_i2c/i2cHelpers.c"
