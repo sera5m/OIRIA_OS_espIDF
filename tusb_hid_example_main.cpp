@@ -9,6 +9,7 @@
 #include <algorithm>   // for std::clamp, std::max, std::min
 #include "os_code/core/com/boot_role.hpp"
 #include "os_code/core/com/boot_mode_select.h"
+#include "os_code/core/com/ble_link.h"
 #include "hardware/drivers/heartMonitor/hr_metrics.h"
 #include "hardware/drivers/heartMonitor/hr_live.h"
 #include "hardware/drivers/heartMonitor/hr_profile.h"
@@ -510,6 +511,7 @@ extern "C" void app_main(void) {
     hr_profile_init();
     load_ulp();
 
+    ble_link_start();
     bootloader_final_app();
 }
 
