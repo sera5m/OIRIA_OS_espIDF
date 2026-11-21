@@ -390,17 +390,20 @@ is_ring_ = ring;
 }
 
 bool DataPool::validate_access(const void* requester, AccessMode requested_mode) const {
-(void)requester;  // Unused parameter but keep for future validation
+    if (perms_.read_only && requested_mode != AccessMode::READ_ONLY) {
+        return false;
+    }
 
-if (perms_.read_only && requested_mode != AccessMode::READ_ONLY) {
-return false;
-}
+    if (perms_.exclusive_write && requested_mode == AccessMode::READ_WRITE) {
+        return false;
+    }
 
-if (perms_.exclusive_write && requested_mode == AccessMode::READ_WRITE) {
-return false;
-}
+    // Optional ownership gate: if the pool was created with a non-null owner
+    // name we still allow any requester for now (software isolation only).
+    // A future IS_sandboxed path can require requester == owner pointer.
+    (void)requester;
 
-return true;
+    return true;
 }
 
 bool DataPool::push_ring(const void* data, size_t size) {
