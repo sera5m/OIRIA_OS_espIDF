@@ -5,10 +5,25 @@
 
 
 namespace rpool{
-    // UTF-8. FILE_BEGIN is 18 bytes, FILE_END is 16. Do not compare them
-    // against a 16-byte stack buffer; load will reject every file.
-    static constexpr char FILE_BEGIN[] = "<START";
-    static constexpr char FILE_END[]   = "END>";
+    // Original on-disk magic is UTF-8 U+1F5CE (F0 9F 97 8E) three times.
+    // FILE_BEGIN is 18 bytes, FILE_END is 16. Kept as explicit bytes so a
+    // transport cannot eat the glyphs and so load does not use a 16-byte buf.
+    static constexpr char FILE_BEGIN[] = {
+        '<',
+        '\xF0', '\x9F', '\x97', '\x8E',
+        '\xF0', '\x9F', '\x97', '\x8E',
+        '\xF0', '\x9F', '\x97', '\x8E',
+        'S', 'T', 'A', 'R', 'T',
+        '\0'
+    };
+    static constexpr char FILE_END[] = {
+        'E', 'N', 'D',
+        '\xF0', '\x9F', '\x97', '\x8E',
+        '\xF0', '\x9F', '\x97', '\x8E',
+        '\xF0', '\x9F', '\x97', '\x8E',
+        '>',
+        '\0'
+    };
 
     #pragma pack(push, 1)
 
@@ -38,18 +53,5 @@ namespace rpool{
 
     #pragma pack(pop)
 }//end namespace
-
-
-
-    // -------------------------------------------------------------------------
-    // RPOOL File Header
-    //
-     //
-    // <document-emoji x3>START
-    // [packed Header]
-    // [pool data]
-    // [optional ring geometry if flags bit 3]
-    // END<document-emoji x3>>
-    // -------------------------------------------------------------------------
 
 
