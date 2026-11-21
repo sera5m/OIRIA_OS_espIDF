@@ -3,24 +3,20 @@
 #include <cstdint>
 #include <memory>
 #include <atomic>
+#include <string>
 #include <vector>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-  // Make sure this is before AppBase in all files
 #include "os_code/core/rShell/enviroment/env_vars.h"
 #include "os_code/core/rShell/streams/rshell_pool.hpp"
 #include "os_code/core/window_env/MWenv.hpp"
 #include "os_code/core/rShell/streams/rshell_pipe.hpp"
-//lol
-//#include "os_code/core/rShell/rshell_appmanager.hpp"//warning:circular dependency
 
 #include "hardware/drivers/psram_std/psram_std.hpp"
 #include "os_code/middle_layer/input/hid_t.h"
 #include "os_code/core/notification_sys/rs_notif_dispatcher.h"
 
-
-// Forward declarations
 class Window;
 class DataPool;
 class appManager;
@@ -28,8 +24,6 @@ struct DataItem;
 
 using AppCapabilities = uint32_t;
 
-
-// AppCapability enum (moved from old s_hell.hpp)
 enum class AppCapability : uint32_t {
     NONE                = 0,
     MINIMIZABLE         = 1 << 0,
@@ -48,12 +42,9 @@ enum class AppCapability : uint32_t {
     ST_RING_CAPABLE     = 1 << 13,
     ST_PF_CAPABLE       = 1 << 14,
     ST_PREF_RT_IPC      = 1 << 15,
-    TOPLETHOS_HOST = 1 << 16,   // app may host / bridge RS-VM
-    TOPLETHOS_CLIENT = 1 << 17 // app may connect to RS-VM host
+    TOPLETHOS_HOST = 1 << 16,
+    TOPLETHOS_CLIENT = 1 << 17
 };
-
-
-
 
 inline AppCapability operator|(AppCapability a, AppCapability b) {
     return static_cast<AppCapability>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
@@ -62,16 +53,6 @@ inline AppCapability operator|(AppCapability a, AppCapability b) {
 inline AppCapability operator&(AppCapability a, AppCapability b) {
     return static_cast<AppCapability>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
 }
-
-
-
-
-
-
-
-
-
-
 
 struct ApplicationConfig {
     AppCapabilities capabilities;
@@ -87,7 +68,7 @@ struct AppManifest {
     std::string description;
     AppCapabilities capabilities;
     size_t stack_size_bytes = 4096;
-    int priority = 5;           // Use int instead of UBaseType_t to avoid FreeRTOS include
+    int priority = 5;
     int tick_rate_hz = 10;
     bool is_system_app = true;
 
@@ -95,22 +76,14 @@ struct AppManifest {
     EntryPoint create;
 };
 
-
-
-using AppFactory = std::function<std::shared_ptr<AppBase>(const ApplicationConfig&)>;  // now takes config
-
+using AppFactory = std::function<std::shared_ptr<AppBase>(const ApplicationConfig&)>;
 
 class AppBase : public std::enable_shared_from_this<AppBase> {
 public:
     explicit AppBase(const ApplicationConfig& cfg);
     virtual ~AppBase();
 
-
-
-
-
-
-    void init();          // do NOT call register_app here
+    void init();
     void start_task();
     void stop_task();
     void force_close();
@@ -124,8 +97,6 @@ public:
     virtual void on_resume() {}
     virtual void on_draw() {}
 
-
- // Syscalls
     virtual void on_syscall(uint32_t syscall_id, void* data) {}
     virtual bool send_data_upstream(const void* data, size_t size) { return false; }
 
@@ -137,13 +108,8 @@ public:
     std::shared_ptr<Window> get_main_window() const { return window_; }
 
     bool has_capability(AppCapability cap) const;
-    // Android-style: declare in the manifest, check before the privileged op.
-    // Returns false and logs if the app did not declare `cap`.
     bool require_capability(AppCapability cap, const char* what) const;
 
-    // Android-style gates. Call before the privileged op. Fail closed.
-    // These are the documented entry points; raw GPIO / wifi / wake from
-    // an app should go through them.
     bool request_gpio_access(const char* why = nullptr) const;
     bool request_wireless(const char* why = nullptr) const;
     bool request_wake(const char* why = nullptr) const;
@@ -151,7 +117,6 @@ public:
     const char* get_app_name() const { return cfg_.name; }
 
     std::shared_ptr<DataPool> establish_pool(size_t bytes, e_type_storage stype);
-    // Clean ring. Hard-storage types require USES_SD_CARD.
     std::unique_ptr<PoolRing> establish_ring(size_t bytes, e_type_storage stype);
     bool save_state_to_rpool(const std::string& path);
     bool load_state_from_rpool(const std::string& path);
@@ -177,5 +142,9 @@ protected:
     std::vector<std::shared_ptr<DataPool>> owned_pools;
 
 private:
+    void exit_from_self();
     static void task_func(void* arg);
+
+    std::string name_storage_;
+    bool self_stop_ = false;
 };

@@ -2,26 +2,23 @@
 #include "os_code/core/rShell/rshell_appmanager.hpp"
 #include "esp_task_wdt.h"
 #include "esp_log.h"
-#include "hardware/drivers/psram_std/psram_std.hpp"
-#include "os_code/middle_layer/input/hid_t.h"
-#include "os_code/core/notification_sys/rs_notif_dispatcher.h"
+#include "esp_timer.h"
 #include "os_code/core/window_env/MWenv.hpp"
-#include "esp_task_wdt.h"
-#include "esp_log.h"
-//lol
+
 static const char* TAG = "AppFramework";
 
 AppBase::AppBase(const ApplicationConfig& cfg)
     : cfg_(cfg),
-      appTickRateHZ(cfg.tick_rate_hz),
-      window_(nullptr),
-      task_handle_(nullptr)
+      name_storage_(cfg.name ? cfg.name : "app"),
+      appTickRateHZ(cfg.tick_rate_hz)
 {
-    ESP_LOGI(TAG, "App created: %s", cfg.name);
+    // Own the bytes. Callers often pass manifest.name.c_str().
+    cfg_.name = name_storage_.c_str();
+    ESP_LOGI(TAG, "App created: %s", cfg_.name);
 }
 
 AppBase::~AppBase() {
-    stop_task();  // Ensure cleanup
+    stop_task();
 }
 
 void AppBase::start_task() {
@@ -31,7 +28,8 @@ void AppBase::start_task() {
     }
     ESP_LOGI(TAG, "attempting Creating task for app %s with stack %zu", cfg_.name, cfg_.stack_size_bytes);
 
-    BaseType_t result = xTaskCreate(
+    self_stop_ = false;
+    const BaseType_t result = xTaskCreate(
         task_func,
         cfg_.name,
         cfg_.stack_size_bytes,
@@ -40,59 +38,69 @@ void AppBase::start_task() {
         &task_handle_
     );
 
-
     if (result != pdPASS) {
         ESP_LOGE(TAG, "Failed to create task for app %s", get_app_name());
         task_handle_ = nullptr;
     } else {
         ESP_LOGI(TAG, "Task created for app %s", get_app_name());
-        // Add task to watchdog (ignore error if already added)
         esp_task_wdt_add(task_handle_);
-        on_start(); //invoke app local on start function calldown
+        on_start();
         on_draw();
-         
-        WindowManager::getInstance().UpdateAll(true, true, false, false); //redraw all windows after starting the app, bit's added with a win
+        WindowManager::getInstance().UpdateAll(true, true, false, false);
     }
+}
+
+void AppBase::exit_from_self() {
+    on_stop();
+    if (task_handle_ != nullptr) {
+        esp_task_wdt_delete(task_handle_);
+        task_handle_ = nullptr;
+    }
+    vTaskDelete(nullptr);
 }
 
 void AppBase::stop_task() {
     should_stop_ = true;
 
-    if (task_handle_ != nullptr) {
-        esp_task_wdt_delete(task_handle_);
-
-        // Wait for task to exit (max 1 second)
-        TickType_t timeout = pdMS_TO_TICKS(1000);
-        while (timeout > 0 && eTaskGetState(task_handle_) != eDeleted) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-            timeout -= pdMS_TO_TICKS(10);
-        }
-        // Force delete if still alive
-        if (eTaskGetState(task_handle_) != eDeleted) {
-            ESP_LOGW(TAG, "Force deleting task for app %s", get_app_name());
-            vTaskDelete(task_handle_);
-        }
-        task_handle_ = nullptr;
+    if (task_handle_ != nullptr && task_handle_ == xTaskGetCurrentTaskHandle()) {
+        // The task loop calls exit_from_self. Do not delete ourselves and continue.
+        self_stop_ = true;
+        return;
     }
 
-    on_stop();
+    if (task_handle_ != nullptr) {
+        for (int i = 0; i < 100 && task_handle_ != nullptr; ++i) {
+            eTaskState st = eTaskGetState(task_handle_);
+            if (st == eDeleted) break;
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        if (task_handle_ != nullptr) {
+            eTaskState st = eTaskGetState(task_handle_);
+            if (st != eDeleted) {
+                ESP_LOGW(TAG, "Force deleting task for app %s", get_app_name());
+                esp_task_wdt_delete(task_handle_);
+                vTaskDelete(task_handle_);
+            }
+            task_handle_ = nullptr;
+        }
+    }
+
+    if (!self_stop_) on_stop();
 }
 
 void AppBase::force_close() {
     should_stop_ = true;
-    
+    if (task_handle_ != nullptr && task_handle_ == xTaskGetCurrentTaskHandle()) {
+        self_stop_ = true;
+        return;
+    }
     if (task_handle_ != nullptr) {
         esp_task_wdt_delete(task_handle_);
         vTaskDelete(task_handle_);
         task_handle_ = nullptr;
     }
-    
     on_stop();
 }
-
-// =======================================================
-// Lifecycle Methods
-// =======================================================
 
 void AppBase::pause() {
     if (!paused_) {
@@ -108,44 +116,31 @@ void AppBase::resume() {
     }
 }
 
-//nothing is implemented here?
-
-
-
 bool AppBase::on_outlet_established(DataPool* pool) {
-    // Apps can override to react
+    (void)pool;
     return true;
 }
 
 bool AppBase::on_inlet_established(DataPool* pool, Rshell_pipe_flowType flow) {
+    (void)pool;
+    (void)flow;
     return true;
 }
 
 void AppBase::request_check_pool(DataPool* pool) {
-    // App-initiated poll of its pool
-    if (pool) {
-        PoolAccessToken token(pool, this, AccessMode::READ_ONLY);
-        if (token.is_valid()) {
-            // Example: process ring buffer
-            if (pool->is_ring()) {
-                // handle data...
-            }
-        }
-    }
+    if (!pool) return;
+    PoolAccessToken token(pool, this, AccessMode::READ_ONLY);
+    (void)token;
 }
 
 void AppBase::force_check_pool(DataPool* pool) {
-    request_check_pool(pool);  // default behavior
+    request_check_pool(pool);
 }
-
-
 
 void AppBase::bind_main_window(std::shared_ptr<Window> win) {
     window_ = std::move(win);
     if (!window_) return;
     ESP_LOGD(TAG, "Window bound to app %s", get_app_name());
-    // If focus was published before this window existed, apply highlight + raise
-    // through the single writer. No-op when this app is not the focused one.
     appManager::instance().on_main_window_bound(this);
 }
 
@@ -173,7 +168,6 @@ bool AppBase::request_wake(const char* why) const {
 }
 
 std::shared_ptr<DataPool> AppBase::establish_pool(size_t bytes, e_type_storage stype) {
-    // Hard storage requires the SD capability, like an Android permission.
     if ((stype == STORAGE_MICROSD || stype == STORAGE_NVS || stype == STORAGE_EXT_NONVOL) &&
         !require_capability(AppCapability::USES_SD_CARD, "hard-storage pool")) {
         return nullptr;
@@ -203,14 +197,13 @@ void AppBase::task_func(void* arg) {
     AppBase* self = static_cast<AppBase*>(arg);
     if (!self) {
         ESP_LOGE(TAG, "Task started with null self pointer");
-        vTaskDelete(NULL);
+        vTaskDelete(nullptr);
         return;
     }
 
     ESP_LOGI(TAG, "Task running for app %s", self->get_app_name());
 
-    // Calculate tick period in ms
-    uint32_t tick_period_ms = 1000 / self->appTickRateHZ;
+    uint32_t tick_period_ms = 1000 / (self->appTickRateHZ > 0 ? self->appTickRateHZ : 1);
     if (tick_period_ms == 0) tick_period_ms = 10;
 
     uint32_t last_tick = 0;
@@ -224,22 +217,29 @@ void AppBase::task_func(void* arg) {
             self->tick_app(delta);
         }
 
-        // Watchdog reset
         esp_task_wdt_reset();
-
-        // Delay
         vTaskDelay(pdMS_TO_TICKS(tick_period_ms));
     }
 
     ESP_LOGI(TAG, "Task stopping for app %s", self->get_app_name());
-    vTaskDelete(NULL);
+    if (self->self_stop_) {
+        self->exit_from_self();
+        return;
+    }
+    vTaskDelete(nullptr);
 }
 
-// =======================================================
-// Init (already exists)
-// =======================================================
-
 void AppBase::init() {
-    // Registration is handled by appManager via manifest
-    // Do NOT call appManager::instance().register_app() here
+}
+
+bool AppBase::save_state_to_rpool(const std::string& path) {
+    if (!require_capability(AppCapability::USES_SD_CARD, "save_state_to_rpool")) return false;
+    if (owned_pools.empty() || !owned_pools.front()) return false;
+    return owned_pools.front()->save_to_rpool(path);
+}
+
+bool AppBase::load_state_from_rpool(const std::string& path) {
+    if (!require_capability(AppCapability::USES_SD_CARD, "load_state_from_rpool")) return false;
+    if (owned_pools.empty() || !owned_pools.front()) return false;
+    return owned_pools.front()->load_from_rpool(path);
 }

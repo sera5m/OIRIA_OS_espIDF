@@ -10,13 +10,29 @@
 
 static const char* TAG = "RshellPipe";
 
-// ---------------------------------------------------------------------------
-// Base
-// ---------------------------------------------------------------------------
+namespace {
+
+int clamp_dec(std::atomic<int>& counter) {
+    int prev = counter.fetch_sub(1);
+    if (prev <= 0) {
+        counter.fetch_add(1);
+        return 0;
+    }
+    return prev - 1;
+}
+
+bool uart_emit(const void* p, size_t n) {
+    if (n == 0) return true;
+    const int w = rs_coll_uart_write(p, n);
+    return w >= 0 && static_cast<size_t>(w) == n;
+}
+
+} // namespace
+
 bool RshellPipe::add_target(PipeTarget t) {
     if (!t.app && !t.pool) return false;
     targets.push_back(t);
-    target_filters_.emplace_back();  // empty = always accept
+    target_filters_.emplace_back();
     return true;
 }
 
@@ -43,9 +59,6 @@ bool RshellPipe::take_bytes(const DataItem* item, std::vector<uint8_t>& out) con
     return filter_.apply(src, n, out);
 }
 
-// ---------------------------------------------------------------------------
-// InterDevicePipe — batched, CRC on flush
-// ---------------------------------------------------------------------------
 InterDevicePipe::InterDevicePipe(uint8_t batch_count) {
     set_batch_count(batch_count);
     batch_.reserve(batch_count_);
@@ -53,11 +66,10 @@ InterDevicePipe::InterDevicePipe(uint8_t batch_count) {
 
 void InterDevicePipe::set_batch_count(uint8_t n) {
     if (n == 0) n = 1;
-    batch_count_ = n;  // uint8_t already caps at 255
+    batch_count_ = n;
 }
 
 uint32_t InterDevicePipe::crc32(const uint8_t* data, size_t len) {
-    // Simple CRC-32 (poly 0xEDB88320). Good enough for UART verification.
     uint32_t crc = 0xFFFFFFFFu;
     for (size_t i = 0; i < len; ++i) {
         crc ^= data[i];
@@ -73,6 +85,11 @@ bool InterDevicePipe::push(DataItem* item) {
     if (!item) return false;
     std::vector<uint8_t> bytes;
     if (!take_bytes(item, bytes)) return false;
+    if (bytes.size() > 0xFFFF) {
+        ESP_LOGE(TAG, "InterDevice %s: payload %u does not fit in uint16",
+                 id.c_str(), (unsigned)bytes.size());
+        return false;
+    }
     batch_.push_back(std::move(bytes));
     if (batch_.size() >= batch_count_) {
         return flush();
@@ -83,6 +100,14 @@ bool InterDevicePipe::push(DataItem* item) {
 bool InterDevicePipe::flush() {
     if (batch_.empty()) return true;
 
+    for (const auto& bytes : batch_) {
+        if (bytes.size() > 0xFFFF) {
+            ESP_LOGE(TAG, "InterDevice %s: oversized payload, batch dropped", id.c_str());
+            batch_.clear();
+            return false;
+        }
+    }
+
     uint32_t crc = 0;
     for (const auto& bytes : batch_) {
         if (!bytes.empty()) {
@@ -91,33 +116,32 @@ bool InterDevicePipe::flush() {
     }
     last_crc_ = crc;
 
-    ESP_LOGI(TAG, "InterDevice flush id=%s count=%u crc=0x%08lx",
-             id.c_str(), (unsigned)batch_.size(), (unsigned long)last_crc_);
-
-    // Transmit the batch over the collective UART if the link is up.
-    // Format is minimal: count (1 byte) + each length (uint16) + payload + final CRC.
-    if (rs_coll_uart_ready()) {
-        uint8_t count = static_cast<uint8_t>(batch_.size());
-        rs_coll_uart_write(&count, 1);
-        for (const auto& bytes : batch_) {
-            uint16_t len = static_cast<uint16_t>(bytes.size());
-            rs_coll_uart_write(&len, sizeof(len));
-            if (!bytes.empty()) {
-                rs_coll_uart_write(bytes.data(), bytes.size());
-            }
-        }
-        rs_coll_uart_write(&last_crc_, sizeof(last_crc_));
-    } else {
+    if (!rs_coll_uart_ready()) {
         ESP_LOGW(TAG, "InterDevice flush: collective UART not ready, batch dropped");
+        batch_.clear();
+        return false;
     }
 
+    bool ok = true;
+    uint8_t count = static_cast<uint8_t>(batch_.size());
+    ok = ok && uart_emit(&count, 1);
+    for (const auto& bytes : batch_) {
+        uint16_t len = static_cast<uint16_t>(bytes.size());
+        ok = ok && uart_emit(&len, sizeof(len));
+        if (!bytes.empty()) ok = ok && uart_emit(bytes.data(), bytes.size());
+    }
+    ok = ok && uart_emit(&last_crc_, sizeof(last_crc_));
+
     batch_.clear();
+    if (!ok) {
+        ESP_LOGE(TAG, "InterDevice flush id=%s short UART write", id.c_str());
+        return false;
+    }
+    ESP_LOGI(TAG, "InterDevice flush id=%s count=%u crc=0x%08lx",
+             id.c_str(), (unsigned)count, (unsigned long)last_crc_);
     return true;
 }
 
-// ---------------------------------------------------------------------------
-// InterProcessPipe — semi-async FreeRTOS queue
-// ---------------------------------------------------------------------------
 InterProcessPipe::InterProcessPipe(size_t queue_depth)
     : depth_(queue_depth ? queue_depth : 16) {
     queue_ = xQueueCreate(static_cast<UBaseType_t>(depth_), sizeof(DataItem*));
@@ -130,7 +154,8 @@ InterProcessPipe::~InterProcessPipe() {
     if (queue_) {
         DataItem* leftover = nullptr;
         while (xQueueReceive(static_cast<QueueHandle_t>(queue_), &leftover, 0) == pdTRUE) {
-            // caller still owns the item; we do not free it
+            // push() transferred ownership. A null slot is the EOF sentinel.
+            dataitem_free(leftover);
         }
         vQueueDelete(static_cast<QueueHandle_t>(queue_));
         queue_ = nullptr;
@@ -139,14 +164,19 @@ InterProcessPipe::~InterProcessPipe() {
 
 bool InterProcessPipe::push(DataItem* item) {
     if (!item || !queue_) return false;
-    // Unix: write to a pipe with no readers is a broken pipe.
-    if (read_open_ <= 0) {
+    if (read_open_.load() <= 0) {
         ESP_LOGW(TAG, "InterProcessPipe %s: broken (no readers)", id.c_str());
         return false;
     }
+
     if (!filter_.empty()) {
         std::vector<uint8_t> out;
         if (!filter_.apply(item->payload, item->payload_len, out)) return false;
+        if (atomic_small_.load() && out.size() > kAtomicLimit) {
+            ESP_LOGW(TAG, "InterProcessPipe %s: atomic_small refuses %u bytes",
+                     id.c_str(), (unsigned)out.size());
+            return false;
+        }
         uint8_t* fresh = nullptr;
         if (!out.empty()) {
             fresh = static_cast<uint8_t*>(malloc(out.size()));
@@ -156,21 +186,18 @@ bool InterProcessPipe::push(DataItem* item) {
         free(item->payload);
         item->payload = fresh;
         item->payload_len = out.size();
-    }
-    // Atomic small-chunk: a single FreeRTOS queue send is already atomic.
-    // The toggle just refuses oversized "small" claims and logs the intent.
-    if (atomic_small_ && item->payload_len > kAtomicLimit) {
-        ESP_LOGW(TAG, "InterProcessPipe %s: atomic_small refuses %zu bytes",
-                 id.c_str(), item->payload_len);
+    } else if (atomic_small_.load() && item->payload_len > kAtomicLimit) {
+        ESP_LOGW(TAG, "InterProcessPipe %s: atomic_small refuses %u bytes",
+                 id.c_str(), (unsigned)item->payload_len);
         return false;
     }
-    // Hint: if the queue is full we are about to pause the writer.
+
     if (uxQueueSpacesAvailable(static_cast<QueueHandle_t>(queue_)) == 0) {
-        writer_pausing_ = true;
+        writer_pausing_.store(true);
         ESP_LOGD(TAG, "InterProcessPipe %s: writer pausing (queue full)", id.c_str());
     }
-    BaseType_t ok = xQueueSend(static_cast<QueueHandle_t>(queue_), &item, 0);
-    writer_pausing_ = false;
+    const BaseType_t ok = xQueueSend(static_cast<QueueHandle_t>(queue_), &item, 0);
+    if (ok == pdTRUE) writer_pausing_.store(false);
     return ok == pdTRUE;
 }
 
@@ -181,22 +208,20 @@ bool InterProcessPipe::try_pop(DataItem*& out) {
 bool InterProcessPipe::pop_wait(DataItem*& out, uint32_t timeout_ms) {
     if (!queue_) return false;
     DataItem* item = nullptr;
-    TickType_t ticks;
+    TickType_t ticks = 0;
     if (timeout_ms == 0) {
         ticks = 0;
     } else if (timeout_ms == portMAX_DELAY) {
-        // No timeout. Block until data or the writer side closes.
         ticks = portMAX_DELAY;
-        reader_pausing_ = true;
+        reader_pausing_.store(true);
         ESP_LOGD(TAG, "InterProcessPipe %s: reader pausing (waiting)", id.c_str());
     } else {
         ticks = pdMS_TO_TICKS(timeout_ms);
-        reader_pausing_ = true;
+        reader_pausing_.store(true);
     }
-    BaseType_t ok = xQueueReceive(static_cast<QueueHandle_t>(queue_), &item, ticks);
-    reader_pausing_ = false;
+    const BaseType_t ok = xQueueReceive(static_cast<QueueHandle_t>(queue_), &item, ticks);
+    reader_pausing_.store(false);
     if (ok == pdTRUE) {
-        // Null sentinel from close_write means EOF. Do not hand it to the caller.
         if (item == nullptr) {
             out = nullptr;
             return false;
@@ -221,44 +246,35 @@ size_t InterProcessPipe::drain(std::function<bool(DataItem*)> cb, size_t max) {
     return n;
 }
 
-void InterProcessPipe::open_read()  { ++read_open_; }
-void InterProcessPipe::open_write() { ++write_open_; }
+void InterProcessPipe::open_read()  { read_open_.fetch_add(1); }
+void InterProcessPipe::open_write() { write_open_.fetch_add(1); }
 
 void InterProcessPipe::close_read() {
-    if (read_open_ > 0) --read_open_;
+    clamp_dec(read_open_);
 }
 
 void InterProcessPipe::close_write() {
-    if (write_open_ > 0) --write_open_;
-    // Last writer: wake any reader blocked in pop_wait(portMAX_DELAY).
-    // A blocked reader means the queue is empty, so the sentinel fits.
-    // nullptr is the EOF token; pop_wait treats it as end-of-stream.
-    if (write_open_ == 0 && queue_ && read_open_ > 0) {
-        int n = read_open_;
-        if (n > 8) n = 8;
-        for (int i = 0; i < n; ++i) {
-            DataItem* eof_tok = nullptr;
-            if (xQueueSend(static_cast<QueueHandle_t>(queue_), &eof_tok, 0) != pdTRUE) {
-                break;
-            }
-        }
-        ESP_LOGD(TAG, "InterProcessPipe %s: writers closed, readers woken", id.c_str());
+    const int left = clamp_dec(write_open_);
+    if (left != 0 || !queue_ || read_open_.load() <= 0) return;
+    int n = read_open_.load();
+    if (n > 8) n = 8;
+    for (int i = 0; i < n; ++i) {
+        DataItem* eof_tok = nullptr;
+        if (xQueueSend(static_cast<QueueHandle_t>(queue_), &eof_tok, 0) != pdTRUE) break;
     }
+    ESP_LOGD(TAG, "InterProcessPipe %s: writers closed, readers woken", id.c_str());
 }
 
 bool InterProcessPipe::eof() const {
-    if (write_open_ > 0) return false;
+    if (write_open_.load() > 0) return false;
     if (!queue_) return true;
     return uxQueueMessagesWaiting(static_cast<QueueHandle_t>(queue_)) == 0;
 }
 
 bool InterProcessPipe::broken() const {
-    return read_open_ <= 0;
+    return read_open_.load() <= 0;
 }
 
-// ---------------------------------------------------------------------------
-// InterBufferPipe — pointer pass-through (transform later)
-// ---------------------------------------------------------------------------
 bool InterBufferPipe::push(DataItem* item) {
     if (!item) return false;
     if (filter_.empty()) {
@@ -267,7 +283,6 @@ bool InterBufferPipe::push(DataItem* item) {
     }
     std::vector<uint8_t> out;
     if (!take_bytes(item, out)) return false;
-    // Temporary view. The sink must not free it or keep the pointer.
     DataItem view = *item;
     view.payload = out.empty() ? nullptr : out.data();
     view.payload_len = out.size();
