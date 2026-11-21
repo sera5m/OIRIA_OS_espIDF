@@ -81,8 +81,6 @@ struct ApplicationConfig {
     int tick_rate_hz = 10;
 };
 
-using AppCapabilities = uint32_t;
-
 struct AppManifest {
     std::string name;
     std::string display_name;

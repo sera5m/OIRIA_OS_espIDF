@@ -5,8 +5,10 @@
 
 
 namespace rpool{
-    static constexpr char FILE_BEGIN[] = "<🗎🗎🗎START";
-    static constexpr char FILE_END[]   = "END🗎🗎🗎>";
+    // UTF-8. FILE_BEGIN is 18 bytes, FILE_END is 16. Do not compare them
+    // against a 16-byte stack buffer; load will reject every file.
+    static constexpr char FILE_BEGIN[] = "<START";
+    static constexpr char FILE_END[]   = "END>";
 
     #pragma pack(push, 1)
 
@@ -29,7 +31,8 @@ namespace rpool{
         uint8_t flags;
         // bit 0 = isElif
         // bit 1 = isSwapMem
-        // bit 2 = isBad? Indicates the pool should be considered invalid or wipedduring initialization/startup recovery.
+        // bit 2 = isBad? Indicates the pool should be considered invalid or wiped during initialization/startup recovery.
+        // bit 3 = ring geometry follows the payload (uint32 magic 'RING', head, tail, count)
         uint8_t reserved[7];// Pad to an 8-byte boundary.
     };//end struct
 
@@ -42,19 +45,11 @@ namespace rpool{
     // RPOOL File Header
     //
      //
-    // <🗎🗎🗎
-    // START
-    // pbgn
-    // ~sz[size_bytes]
-    // ~pownr[pointer]
-    // ~OWNERAPPNAME[name]
-    // ~isElif[bool]
-    // ~isSwapMem[bool]
-    // ~isBad[bool]
-    //
+    // <document-emoji x3>START
+    // [packed Header]
     // [pool data]
-    //
-    // END🗎🗎🗎>
+    // [optional ring geometry if flags bit 3]
+    // END<document-emoji x3>>
     // -------------------------------------------------------------------------
 
 
