@@ -32,6 +32,10 @@ struct DataItem* dataitem_new(SourceType src, size_t payload_size) {
         if (payload_size > 0) {
             item->payload = (uint8_t*)malloc(payload_size);
             item->payload_len = payload_size;
+            if (!item->payload) {
+                free(item);
+                return NULL;
+            }
         }
     }
     return item;
@@ -46,30 +50,30 @@ void dataitem_free(DataItem* item) {
 }
 
 bool dataitem_add_cbor_tag(DataItem* item, const char* key, const char* value) {
-    // Stub - implement with actual CBOR lib later
-    ESP_LOGI(TAG, "Tag added (stub): %s = %s", key, value);
-    return true;
+    // Stub. A real CBOR map is not written yet, so do not claim the tag stuck.
+    (void)item;
+    ESP_LOGW(TAG, "CBOR tag not stored (no encoder): %s = %s", key ? key : "?", value ? value : "?");
+    return false;
 }
 
-// Stub implementations - expand as needed
 void datastream_init(void) {
     ESP_LOGI(TAG, "Datastream initialized");
 }
 
-void datastream_pump_start(void) {
-    // Call your pump start
-    ESP_LOGI(TAG, "Pump started");
-}
-
-bool datastream_push_input(const InputEvent* ev) {
-    // Bridge to pump
-    return false; // TODO
-}
+// datastream_pump_start and datastream_push_input are defined in rshell_pump.cpp.
 
 bool sink_register(SinkType type, SinkHandler handler, void* ctx) {
-    return true; // stub
+    (void)type;
+    (void)handler;
+    (void)ctx;
+    return false; // no registry yet; do not pretend the sink was installed
 }
 
-void sink_screen(DataItem* item, void* ctx) {}
-void sink_storage_cbor(DataItem* item, void* ctx) {}
-void sink_hid(DataItem* item, void* ctx) {}
+void sink_notification(DataItem* item, void* ctx) {
+    (void)item;
+    (void)ctx;
+}
+
+void sink_screen(DataItem* item, void* ctx) { (void)item; (void)ctx; }
+void sink_storage_cbor(DataItem* item, void* ctx) { (void)item; (void)ctx; }
+void sink_hid(DataItem* item, void* ctx) { (void)item; (void)ctx; }
