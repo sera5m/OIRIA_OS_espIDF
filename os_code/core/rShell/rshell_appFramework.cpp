@@ -29,6 +29,7 @@ void AppBase::start_task() {
     ESP_LOGI(TAG, "attempting Creating task for app %s with stack %zu", cfg_.name, cfg_.stack_size_bytes);
 
     self_stop_ = false;
+    parked_.store(false);
     const BaseType_t result = xTaskCreate(
         task_func,
         cfg_.name,
@@ -69,19 +70,14 @@ void AppBase::stop_task() {
     }
 
     if (task_handle_ != nullptr) {
-        for (int i = 0; i < 100 && task_handle_ != nullptr; ++i) {
-            eTaskState st = eTaskGetState(task_handle_);
-            if (st == eDeleted) break;
+        for (int i = 0; i < 100 && !parked_.load(); ++i) {
             vTaskDelay(pdMS_TO_TICKS(10));
         }
-        if (task_handle_ != nullptr) {
-            eTaskState st = eTaskGetState(task_handle_);
-            if (st != eDeleted) {
-                ESP_LOGW(TAG, "Force deleting task for app %s", get_app_name());
-                esp_task_wdt_delete(task_handle_);
-                vTaskDelete(task_handle_);
-            }
-            task_handle_ = nullptr;
+        TaskHandle_t h = task_handle_;
+        task_handle_ = nullptr;
+        if (h) {
+            esp_task_wdt_delete(h);
+            vTaskDelete(h);
         }
     }
 
@@ -95,9 +91,10 @@ void AppBase::force_close() {
         return;
     }
     if (task_handle_ != nullptr) {
-        esp_task_wdt_delete(task_handle_);
-        vTaskDelete(task_handle_);
+        TaskHandle_t h = task_handle_;
         task_handle_ = nullptr;
+        esp_task_wdt_delete(h);
+        vTaskDelete(h);
     }
     on_stop();
 }
@@ -226,7 +223,9 @@ void AppBase::task_func(void* arg) {
         self->exit_from_self();
         return;
     }
-    vTaskDelete(nullptr);
+    // External stop_task is the only deleter. Suspend so it can vTaskDelete us.
+    self->parked_.store(true);
+    vTaskSuspend(nullptr);
 }
 
 void AppBase::init() {
