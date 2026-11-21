@@ -47,6 +47,30 @@ bool DataStreamerPump::unregister_pipe(RshellPipe* pipe) {
     return true;
 }
 
+size_t DataStreamerPump::drain_interprocess_for(AppBase* app, size_t max) {
+    if (!app) return 0;
+    size_t delivered = 0;
+    for (auto* pipe : active_pipes) {
+        if (!pipe || pipe->kind() != RshellPipe::Kind::InterProcess) continue;
+        auto* ip = static_cast<InterProcessPipe*>(pipe);
+        bool targets_app = false;
+        for (const auto& t : pipe->targets) {
+            if (t.type == PipeTarget::Type::APP && t.app == app) {
+                targets_app = true;
+                break;
+            }
+        }
+        if (!targets_app && pipe->source_app != app) continue;
+
+        delivered += ip->drain([&](DataItem* item) {
+            app->on_stream_data(item);
+            dataitem_free(item);
+            return true;
+        }, max);
+    }
+    return delivered;
+}
+
 bool DataStreamerPump::pushInputEvent(const InputEvent& ev) {
     DataItem* item = dataitem_new(SOURCE_INPUT_SYSTEM, 0);
     if (!item) return false;
@@ -81,17 +105,20 @@ static void pump_task(void* param) {
                 }
             }
 
-            // Local pipes keep the old fan-out.
-            // InterDevice stays off this loop; callers push() it explicitly.
-            // InterProcess is queued via push(); consumers are expected to try_pop().
+            // Dispatch by flow mode.
+            // InterDevice is caller-driven (push/flush).
+            // InterProcess is queued; consumers try_pop/drain.
+            // direct/fan/clone/c_fan/c_merge/merge are handled here.
             for (auto* pipe : DataStreamerPump::active_pipes) {
                 if (!pipe) continue;
-                if (!(pipe->mode == direct || pipe->mode == fan || pipe->mode == clone)) continue;
+                const auto mode = pipe->mode;
+                const bool is_fanout = (mode == direct || mode == fan || mode == clone || mode == c_fan);
+                const bool is_merge = (mode == merge || mode == c_merge);
+                if (!is_fanout && !is_merge) continue;
                 if (pipe->kind() == RshellPipe::Kind::InterDevice) continue;
 
                 if (pipe->kind() == RshellPipe::Kind::InterProcess) {
-                    // Queue a clone so the pump can still free the original.
-                    // The consumer owns the clone and must free it after try_pop.
+                    // Queue a clone. Consumer owns it and must free after try_pop/drain.
                     DataItem* clone = dataitem_new(item->source_type, item->payload_len);
                     if (clone) {
                         clone->timestamp = item->timestamp;
@@ -109,13 +136,50 @@ static void pump_task(void* param) {
                     continue;
                 }
 
-                for (const auto& t : pipe->targets) {
+                // Conditional merge / merge: pipe filter is the gate. Single target.
+                if (is_merge) {
+                    std::vector<uint8_t> out;
+                    if (!pipe->filter().empty() &&
+                        !pipe->filter().apply(item->payload, item->payload_len, out)) {
+                        continue;  // condition failed
+                    }
+                    if (!pipe->targets.empty()) {
+                        const auto& t = pipe->targets[0];
+                        if (t.type == PipeTarget::Type::APP && t.app) {
+                            t.app->on_stream_data(item);
+                        } else if (t.type == PipeTarget::Type::POOL && t.pool && t.pool->is_ring()) {
+                            PoolAccessToken token(t.pool, "pump", AccessMode::READ_WRITE);
+                            if (token.is_valid()) {
+                                const void* src = out.empty() ? item->payload : out.data();
+                                size_t n = out.empty() ? item->payload_len : out.size();
+                                t.pool->push_ring(src, n);
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                // Fan-out (direct/fan/clone) and conditional fan.
+                for (size_t i = 0; i < pipe->targets.size(); ++i) {
+                    const auto& t = pipe->targets[i];
+                    const PipeFilter* tf = pipe->target_filter(i);
+
+                    std::vector<uint8_t> filtered;
+                    const bool use_filter = (mode == c_fan) && tf && !tf->empty();
+                    if (use_filter) {
+                        if (!tf->apply(item->payload, item->payload_len, filtered)) {
+                            continue;  // this target rejects the item
+                        }
+                    }
+
                     if (t.type == PipeTarget::Type::APP && t.app) {
                         t.app->on_stream_data(item);
                     } else if (t.type == PipeTarget::Type::POOL && t.pool && t.pool->is_ring()) {
                         PoolAccessToken token(t.pool, "pump", AccessMode::READ_WRITE);
                         if (token.is_valid()) {
-                            t.pool->push_ring(item->payload, item->payload_len);
+                            const void* src = filtered.empty() ? item->payload : filtered.data();
+                            size_t n = filtered.empty() ? item->payload_len : filtered.size();
+                            t.pool->push_ring(src, n);
                         }
                     }
                 }

@@ -16,6 +16,10 @@ public:
     static void stop();
     static bool register_pipe(RshellPipe* pipe);
     static bool unregister_pipe(RshellPipe* pipe);
+    // Pull queued InterProcess items for pipes that target this app
+    // (or that have no specific target match) and deliver via on_stream_data.
+    // Returns number of items delivered. Caller does not free them.
+    static size_t drain_interprocess_for(AppBase* app, size_t max = 8);
     static bool pushInputEvent(const InputEvent& ev);
     static bool pushDataItem(DataItem* item);
 

@@ -90,6 +90,12 @@ public:
     size_t size() const;
     e_type_storage storage_type() const;
     const char* owner() const;
+    const void* owner_identity() const;
+    // When enforce is true, write/exclusive acquire requires requester == identity.
+    // Call with the AppBase* (or other stable identity) after create.
+    void set_owner_identity(const void* identity, bool enforce = true);
+    bool owner_enforced() const;
+
     const MemoryPermission& permissions() const;
 
     bool is_ring() const;
@@ -132,6 +138,8 @@ private:
     e_type_storage type_;
     MemoryPermission perms_;
     const char* owner_;
+    const void* owner_identity_ = nullptr;
+    bool enforce_owner_ = false;
 
     mutable std::mutex access_mutex_;
     std::atomic<uint32_t> reader_count_{0};

@@ -398,12 +398,34 @@ bool DataPool::validate_access(const void* requester, AccessMode requested_mode)
         return false;
     }
 
-    // Optional ownership gate: if the pool was created with a non-null owner
-    // name we still allow any requester for now (software isolation only).
-    // A future IS_sandboxed path can require requester == owner pointer.
-    (void)requester;
+    // Full ownership: when enforce_owner_ is set and an identity is recorded,
+    // write and exclusive acquires must come from that identity.
+    // Reads remain open (software isolation, not a sandbox).
+    if (enforce_owner_ && owner_identity_ != nullptr &&
+        requested_mode != AccessMode::READ_ONLY &&
+        requester != owner_identity_) {
+        return false;
+    }
 
     return true;
+}
+
+const char* DataPool::owner() const {
+    return owner_;
+}
+
+const void* DataPool::owner_identity() const {
+    return owner_identity_;
+}
+
+void DataPool::set_owner_identity(const void* identity, bool enforce) {
+    std::lock_guard<std::mutex> lock(access_mutex_);
+    owner_identity_ = identity;
+    enforce_owner_ = enforce && identity != nullptr;
+}
+
+bool DataPool::owner_enforced() const {
+    return enforce_owner_;
 }
 
 bool DataPool::push_ring(const void* data, size_t size) {

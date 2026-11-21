@@ -16,7 +16,19 @@ static const char* TAG = "RshellPipe";
 bool RshellPipe::add_target(PipeTarget t) {
     if (!t.app && !t.pool) return false;
     targets.push_back(t);
+    target_filters_.emplace_back();  // empty = always accept
     return true;
+}
+
+bool RshellPipe::add_target_with_filter(PipeTarget t, PipeFilter filter) {
+    if (!add_target(t)) return false;
+    target_filters_.back() = std::move(filter);
+    return true;
+}
+
+const PipeFilter* RshellPipe::target_filter(size_t index) const {
+    if (index >= target_filters_.size()) return nullptr;
+    return &target_filters_[index];
 }
 
 bool RshellPipe::take_bytes(const DataItem* item, std::vector<uint8_t>& out) const {
@@ -154,6 +166,19 @@ bool InterProcessPipe::try_pop(DataItem*& out) {
         return true;
     }
     return false;
+}
+
+size_t InterProcessPipe::drain(std::function<bool(DataItem*)> cb, size_t max) {
+    size_t n = 0;
+    while (n < max) {
+        DataItem* item = nullptr;
+        if (!try_pop(item)) break;
+        if (!cb || !cb(item)) {
+            dataitem_free(item);
+        }
+        ++n;
+    }
+    return n;
 }
 
 // ---------------------------------------------------------------------------

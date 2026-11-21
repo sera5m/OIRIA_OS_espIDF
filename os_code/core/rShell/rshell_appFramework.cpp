@@ -116,6 +116,8 @@ void AppBase::resume() {
 std::shared_ptr<DataPool> AppBase::establish_pool(size_t bytes, e_type_storage stype) {
     auto pool = DataPool::create_shared(bytes, stype, get_app_name());
     if (pool) {
+        // Enforce that only this app can acquire write/exclusive.
+        pool->set_owner_identity(this, true);
         owned_pools.push_back(pool);
         on_outlet_established(pool.get());
     }

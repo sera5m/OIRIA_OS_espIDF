@@ -61,10 +61,16 @@ public:
     std::vector<PipeTarget> targets;
 
     bool add_target(PipeTarget t);
+    // Parallel to targets. Used by c_fan so each target can have its own accept filter.
+    // Empty filter means "always accept".
+    bool add_target_with_filter(PipeTarget t, PipeFilter filter);
 
     // Shared by every subtype. Empty until someone adds transform steps.
     PipeFilter& filter() { return filter_; }
     const PipeFilter& filter() const { return filter_; }
+
+    // Per-target filter (index matches targets). Empty if none was set.
+    const PipeFilter* target_filter(size_t index) const;
 
     // Push one item. Subtypes implement the actual transfer.
     // Returns false if the item was dropped or the pipe is full.
@@ -75,6 +81,7 @@ public:
 
 protected:
     PipeFilter filter_;
+    std::vector<PipeFilter> target_filters_;
 
     // Filter into `out`. Empty filter copies the payload. False if a CRUD step fails.
     bool take_bytes(const DataItem* item, std::vector<uint8_t>& out) const;
@@ -116,7 +123,12 @@ public:
     bool push(DataItem* item) override;
 
     // Non-blocking pop for the consumer side.
+    // Caller owns the returned item and must dataitem_free it.
     bool try_pop(DataItem*& out);
+
+    // Drain up to max items, calling cb for each. Returns number delivered.
+    // cb takes ownership and must free the item (or the drain frees on false).
+    size_t drain(std::function<bool(DataItem*)> cb, size_t max = 16);
 
 private:
     void* queue_ = nullptr;  // QueueHandle_t, kept opaque in the header
