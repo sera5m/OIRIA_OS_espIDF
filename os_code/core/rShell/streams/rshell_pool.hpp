@@ -137,6 +137,7 @@ private:
     std::atomic<uint32_t> reader_count_{0};
     const void* writer_ = nullptr;
     std::atomic<AccessMode> current_mode_{AccessMode::READ_ONLY};
+    bool used_psram_ = false;  // tracks actual allocation method for free()
 
     bool is_ring_ = false;
     std::unique_ptr<RingBuffer> ring_buffer_;

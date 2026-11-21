@@ -11,6 +11,8 @@ the general goal is to have a mini cyberdeck thingy/non shitty smartwatch.
 far too many smartwatches focus on being a second, shittier phone strapped to your wrist.
  why not do something different
 
+**Note (2026-11-21):** Significant architectural fixes and hardening have been applied by AI tooling since commit `09f2a9c` (Add sdkconfig.defaults for NimBLE peripheral). Changes include DataPool concurrency and allocator matching, `.rpool` validation, pipe lifetime (unregister before destroy), and ELF loader lifetime notes. Treat the tree as having been substantially revised past that commit.
+
 
 currently working:
 lcd and window enviroment: benchmarked at 100fps on 240*280; limited to 45 fps via configuration....

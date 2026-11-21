@@ -15,6 +15,7 @@ public:
     static void start();
     static void stop();
     static bool register_pipe(RshellPipe* pipe);
+    static bool unregister_pipe(RshellPipe* pipe);
     static bool pushInputEvent(const InputEvent& ev);
     static bool pushDataItem(DataItem* item);
 

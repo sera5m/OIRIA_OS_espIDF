@@ -59,6 +59,9 @@ public:
     // Registration
     void register_app(const AppManifest& manifest);
     void register_dynamic_app(const AppManifest& manifest);
+    // Removes a dynamic manifest. Required before unloading an ELF whose
+    // create lambda captured a shared_ptr, otherwise the AppBase outlives the ELF.
+    bool unregister_dynamic_app(const std::string& name);
 
     OpenAppResult open_app(const std::string& name);
     std::shared_ptr<AppBase> get_app_by_name(const std::string& name);

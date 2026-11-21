@@ -8,6 +8,7 @@
 #include "os_code/core/window_env/wenv_basicThemes.h"
 #include "os_code/core/rShell/rshell_appFramework.hpp"
 #include "os_code/core/rShell/rshell_appmanager.hpp"
+#include <algorithm>
 
 // Remove duplicate includes of esp_log.h and esp_timer.h
 
@@ -33,6 +34,15 @@ bool DataStreamerPump::register_pipe(RshellPipe* pipe) {
     if (!pipe) return false;
     active_pipes.push_back(pipe);
     ESP_LOGI(TAG, "Registered pipe %s mode=%d", pipe->id.c_str(), (int)pipe->mode);
+    return true;
+}
+
+bool DataStreamerPump::unregister_pipe(RshellPipe* pipe) {
+    if (!pipe) return false;
+    auto it = std::find(active_pipes.begin(), active_pipes.end(), pipe);
+    if (it == active_pipes.end()) return false;
+    active_pipes.erase(it);
+    ESP_LOGI(TAG, "Unregistered pipe %s", pipe->id.c_str());
     return true;
 }
 
@@ -72,10 +82,17 @@ static void pump_task(void* param) {
 
             // Local pipes keep the old fan-out.
             // InterDevice stays off this loop; callers push() it explicitly.
+            // InterProcess is queued via push(); consumers are expected to try_pop().
             for (auto* pipe : DataStreamerPump::active_pipes) {
                 if (!pipe) continue;
                 if (!(pipe->mode == direct || pipe->mode == fan || pipe->mode == clone)) continue;
                 if (pipe->kind() == RshellPipe::Kind::InterDevice) continue;
+
+                if (pipe->kind() == RshellPipe::Kind::InterProcess) {
+                    // Queue the item. The pump does not deliver it itself.
+                    pipe->push(item);
+                    continue;
+                }
 
                 for (const auto& t : pipe->targets) {
                     if (t.type == PipeTarget::Type::APP && t.app) {

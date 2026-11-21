@@ -195,15 +195,19 @@ bool RshellElifLoader::unload_app(const std::string& name) {
     
     LoadedApp& loaded = it->second;
     
-    // Close the app
+    // Close the app. Drop the dynamic manifest so the captured shared_ptr
+    // in the create lambda is released before the ELF is unloaded.
     if (loaded.app) {
         loaded.app->stop_task();
         loaded.app.reset();
     }
+    appManager::instance().unregister_dynamic_app(name);
     
-    // Unload the ELF
+    // Unload the ELF. After this point any remaining function pointers into
+    // the ELF are invalid. FreeRTOS task isolation does not protect memory.
     if (loaded.elf_handle) {
         esp_elf_unload(loaded.elf_handle);
+        loaded.elf_handle = nullptr;
     }
     
     ESP_LOGI(TAG, "Unloaded app: %s", name.c_str());

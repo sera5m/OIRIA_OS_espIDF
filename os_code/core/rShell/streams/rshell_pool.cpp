@@ -69,21 +69,35 @@ bool DataPool::load_from_rpool(const std::string& filepath) {
         return false;
     }
 
-    char magic[12];
-    read(fd, magic, strlen(rpool::FILE_BEGIN));
-    if (strncmp(magic, rpool::FILE_BEGIN, strlen(rpool::FILE_BEGIN)) != 0) {
+    // Magic
+    char magic[16] = {};
+    const size_t magic_len = strlen(rpool::FILE_BEGIN);
+    if (magic_len >= sizeof(magic) || read(fd, magic, magic_len) != static_cast<ssize_t>(magic_len) ||
+        strncmp(magic, rpool::FILE_BEGIN, magic_len) != 0) {
         ESP_LOGE(TAG, "Invalid .rpool magic");
         close(fd);
         return false;
     }
 
     rpool::Header hdr{};
-    read(fd, &hdr, sizeof(hdr));
+    if (read(fd, &hdr, sizeof(hdr)) != static_cast<ssize_t>(sizeof(hdr))) {
+        ESP_LOGE(TAG, "Short read on .rpool header");
+        close(fd);
+        return false;
+    }
+
+    // Sanity: refuse absurd sizes (ESP32-S3 PSRAM is typically <= 8 MiB).
+    constexpr uint64_t kMaxPoolBytes = 8ull * 1024 * 1024;
+    if (hdr.sizeBytes == 0 || hdr.sizeBytes > kMaxPoolBytes) {
+        ESP_LOGE(TAG, "Refusing .rpool size %llu", (unsigned long long)hdr.sizeBytes);
+        close(fd);
+        return false;
+    }
 
     // Re-allocate if needed
     if (buffer_) free_memory();
-    size_ = hdr.sizeBytes;
-    type_ = STORAGE_MICROSD;   // or STORAGE_PSRAM if you want
+    size_ = static_cast<size_t>(hdr.sizeBytes);
+    type_ = STORAGE_PSRAM;   // prefer PSRAM for loaded pools
     buffer_ = static_cast<std::byte*>(allocate_memory(size_, type_));
 
     if (!buffer_) {
@@ -92,8 +106,25 @@ bool DataPool::load_from_rpool(const std::string& filepath) {
         return false;
     }
 
-    // Read data
-    read(fd, buffer_, size_);
+    // Read data and verify completeness
+    ssize_t nread = read(fd, buffer_, size_);
+    if (nread != static_cast<ssize_t>(size_)) {
+        ESP_LOGE(TAG, "Short read of pool payload (%zd / %zu)", nread, size_);
+        free_memory();
+        close(fd);
+        return false;
+    }
+
+    // Closing marker
+    char endmark[16] = {};
+    const size_t end_len = strlen(rpool::FILE_END);
+    if (end_len >= sizeof(endmark) || read(fd, endmark, end_len) != static_cast<ssize_t>(end_len) ||
+        strncmp(endmark, rpool::FILE_END, end_len) != 0) {
+        ESP_LOGE(TAG, "Missing or corrupt .rpool end marker");
+        free_memory();
+        close(fd);
+        return false;
+    }
 
     close(fd);
     ESP_LOGI(TAG, "Loaded pool from %s (size=%zu)", fullpath.c_str(), size_);
@@ -175,6 +206,7 @@ DataPool::~DataPool() {
 
 void* DataPool::allocate_memory(size_t size, e_type_storage type) {
     void* ptr = nullptr;
+    used_psram_ = false;
     
     switch (type) {
         case STORAGE_RAM:
@@ -183,7 +215,9 @@ void* DataPool::allocate_memory(size_t size, e_type_storage type) {
             
         case STORAGE_PSRAM:
             ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-            if (!ptr) {
+            if (ptr) {
+                used_psram_ = true;
+            } else {
                 ESP_LOGW(TAG, "PSRAM allocation failed, falling back to internal RAM");
                 ptr = malloc(size);
             }
@@ -206,19 +240,15 @@ void* DataPool::allocate_memory(size_t size, e_type_storage type) {
     return ptr;
 }
 
-
-
 void DataPool::free_memory() {
     if (buffer_) {
-        switch (type_) {
-            case STORAGE_PSRAM:
-                heap_caps_free(buffer_);
-                break;
-            default:
-                free(buffer_);
-                break;
+        if (used_psram_) {
+            heap_caps_free(buffer_);
+        } else {
+            free(buffer_);
         }
         buffer_ = nullptr;
+        used_psram_ = false;
     }
 }
 
@@ -246,70 +276,71 @@ return nullptr;
 }
 
 bool DataPool::acquire(const void* requester, AccessMode mode) {
-std::lock_guard<std::mutex> lock(access_mutex_);
+    std::lock_guard<std::mutex> lock(access_mutex_);
 
-if (!validate_access(requester, mode)) {
-return false;
-}
+    if (!validate_access(requester, mode)) {
+        return false;
+    }
 
-switch (mode) {
-case AccessMode::READ_ONLY:
-reader_count_++;
-break;
+    switch (mode) {
+    case AccessMode::READ_ONLY:
+        // Readers are not allowed while a writer holds the pool.
+        if (writer_ != nullptr) {
+            return false;
+        }
+        reader_count_++;
+        break;
 
-case AccessMode::READ_WRITE:
-if (writer_ != nullptr && writer_ != requester) {
-return false;
-}
-if (reader_count_ > 0) {
-return false;
-}
-writer_ = requester;
-break;
+    case AccessMode::READ_WRITE:
+        if (writer_ != nullptr && writer_ != requester) {
+            return false;
+        }
+        if (reader_count_ > 0) {
+            return false;
+        }
+        writer_ = requester;
+        break;
 
-case AccessMode::EXCLUSIVE:
-if (writer_ != nullptr || reader_count_ > 0) {
-return false;
-}
-writer_ = requester;
-break;
-}
+    case AccessMode::EXCLUSIVE:
+        if (writer_ != nullptr || reader_count_ > 0) {
+            return false;
+        }
+        writer_ = requester;
+        break;
+    }
 
-current_mode_ = mode;
-return true;
+    current_mode_ = mode;
+    return true;
 }
 
 void DataPool::release(const void* requester) {
-std::lock_guard<std::mutex> lock(access_mutex_);
+    std::lock_guard<std::mutex> lock(access_mutex_);
 
-switch (current_mode_) {
-case AccessMode::READ_ONLY:
-if (reader_count_ > 0) {
-reader_count_--;
-}
-break;
+    // Prefer identity over the global mode so a concurrent reader cannot
+    // clobber a writer's release path.
+    if (writer_ == requester) {
+        writer_ = nullptr;
+        return;
+    }
 
-case AccessMode::READ_WRITE:
-case AccessMode::EXCLUSIVE:
-if (writer_ == requester) {
-writer_ = nullptr;
-}
-break;
-}
+    if (reader_count_ > 0) {
+        reader_count_--;
+    }
 }
 
 bool DataPool::has_access(const void* requester) const {
-std::lock_guard<std::mutex> lock(access_mutex_);
+    std::lock_guard<std::mutex> lock(access_mutex_);
 
-if (requester == writer_) {
-return true;
-}
+    if (requester == writer_) {
+        return true;
+    }
 
-if (current_mode_ == AccessMode::READ_ONLY) {
-return true;
-}
+    // Readers only count while no writer is active.
+    if (writer_ == nullptr && reader_count_ > 0) {
+        return true;
+    }
 
-return false;
+    return false;
 }
 
 AccessMode DataPool::current_access_mode() const {
@@ -317,11 +348,21 @@ return current_mode_;
 }
 
 std::byte* DataPool::data() { 
-return buffer_; 
+    // Prefer PoolAccessToken. Raw access is allowed only while someone holds
+    // the pool, so the bypass is at least not completely open.
+    std::lock_guard<std::mutex> lock(access_mutex_);
+    if (writer_ == nullptr && reader_count_ == 0) {
+        ESP_LOGW(TAG, "data() called with no active acquisition on pool '%s'", owner_ ? owner_ : "?");
+    }
+    return buffer_; 
 }
 
 const std::byte* DataPool::data() const { 
-return buffer_; 
+    std::lock_guard<std::mutex> lock(access_mutex_);
+    if (writer_ == nullptr && reader_count_ == 0) {
+        ESP_LOGW(TAG, "data() called with no active acquisition on pool '%s'", owner_ ? owner_ : "?");
+    }
+    return buffer_; 
 }
 
 size_t DataPool::size() const { 

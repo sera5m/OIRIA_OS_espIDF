@@ -76,6 +76,17 @@ void appManager::register_dynamic_app(const AppManifest& manifest) {
     ESP_LOGI(TAG, "Registered dynamic app: %s", manifest.name.c_str());
 }
 
+bool appManager::unregister_dynamic_app(const std::string& name) {
+    auto it = app_manifests.find(name);
+    if (it == app_manifests.end()) {
+        ESP_LOGW(TAG, "unregister_dynamic_app: not found: %s", name.c_str());
+        return false;
+    }
+    app_manifests.erase(it);
+    ESP_LOGI(TAG, "Unregistered dynamic app: %s", name.c_str());
+    return true;
+}
+
 // =======================================================
 // App Lookup
 // =======================================================
@@ -188,6 +199,12 @@ void appManager::DestroyAllApps() {
     }
     apps.clear();
     running_apps.clear();
+
+    // Unregister from the pump before the unique_ptrs go away,
+    // otherwise the pump's raw-pointer vector dangles.
+    for (auto& pipe : active_pipes) {
+        if (pipe) DataStreamerPump::unregister_pipe(pipe.get());
+    }
     active_pipes.clear();
     ESP_LOGI(TAG, "All apps destroyed");
 }

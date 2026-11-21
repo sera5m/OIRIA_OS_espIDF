@@ -9,7 +9,12 @@
 #include "esp_elf_adapter.h"
 #include "esp_elf_symbol.h"
 
-// Dynamic app loading via ELF / binary on SD card
+// Dynamic app loading via ELF / binary on SD card.
+// NOTE: These ELFs execute native code in the firmware address space.
+// FreeRTOS task separation is not a memory sandbox. A future IS_sandboxed
+// toggle should gate whether an ELF is allowed to call privileged host
+// symbols; capability flags currently exist on ApplicationConfig but are
+// not yet enforced by rShell.
 class RshellElifLoader {
 public:
     static RshellElifLoader& instance();

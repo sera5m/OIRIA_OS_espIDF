@@ -6,6 +6,7 @@
 #include <freertos/queue.h>
 #include <cstring>
 #include <cstdlib>
+#include "os_code/core/com/rs_collective_uart.h"
 
 static const char* TAG = "RshellPipe";
 
@@ -81,7 +82,23 @@ bool InterDevicePipe::flush() {
     ESP_LOGI(TAG, "InterDevice flush id=%s count=%u crc=0x%08lx",
              id.c_str(), (unsigned)batch_.size(), (unsigned long)last_crc_);
 
-    // UART send of the batch stays with the collective link. Copies are local.
+    // Transmit the batch over the collective UART if the link is up.
+    // Format is minimal: count (1 byte) + each length (uint16) + payload + final CRC.
+    if (rs_coll_uart_ready()) {
+        uint8_t count = static_cast<uint8_t>(batch_.size());
+        rs_coll_uart_write(&count, 1);
+        for (const auto& bytes : batch_) {
+            uint16_t len = static_cast<uint16_t>(bytes.size());
+            rs_coll_uart_write(&len, sizeof(len));
+            if (!bytes.empty()) {
+                rs_coll_uart_write(bytes.data(), bytes.size());
+            }
+        }
+        rs_coll_uart_write(&last_crc_, sizeof(last_crc_));
+    } else {
+        ESP_LOGW(TAG, "InterDevice flush: collective UART not ready, batch dropped");
+    }
+
     batch_.clear();
     return true;
 }
