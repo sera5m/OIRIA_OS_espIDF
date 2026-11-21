@@ -139,9 +139,15 @@ public:
     std::shared_ptr<Window> get_main_window() const { return window_; }
 
     bool has_capability(AppCapability cap) const;
+    // Android-style: declare in the manifest, check before the privileged op.
+    // Returns false and logs if the app did not declare `cap`.
+    bool require_capability(AppCapability cap, const char* what) const;
+
     const char* get_app_name() const { return cfg_.name; }
 
     std::shared_ptr<DataPool> establish_pool(size_t bytes, e_type_storage stype);
+    // Clean ring. Hard-storage types require USES_SD_CARD.
+    std::unique_ptr<PoolRing> establish_ring(size_t bytes, e_type_storage stype);
     bool save_state_to_rpool(const std::string& path);
     bool load_state_from_rpool(const std::string& path);
 

@@ -43,7 +43,19 @@ detach, and permissions. It is not a pipe.
 - Blocking as the default. `push` stays non-blocking (semi-async). `pop_wait`
   is available when a consumer wants to sleep.
 
-## Mapping
+## Additions (this pass)
+
+- `PoolRing` — clean wrapper over a DataPool ring. Hard-storage types
+  (MICROSD / NVS / EXT_NONVOL) keep a PSRAM working buffer and persist via
+  `.rpool` (`save` / `load`).
+- Atomic small-chunk toggle on both `PoolRing` / `DataPool` and
+  `InterProcessPipe` (`set_atomic_small`). Limit is 512 bytes.
+- Pause hints: `reader_pausing()` / `writer_pausing()` on InterProcessPipe.
+  Set while a side is blocked (full queue or `pop_wait` with no timeout).
+- Capabilities are now checked at use time (`require_capability`), like
+  Android permissions. Hard-storage pools need `USES_SD_CARD`. Creating a
+  pipe needs `STREAM_OUT_CAPABLE`. Declare them on the manifest.
+
 
 | Unix                         | OIRIA                                      |
 |------------------------------|--------------------------------------------|

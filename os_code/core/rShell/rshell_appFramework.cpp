@@ -112,19 +112,6 @@ void AppBase::resume() {
 
 
 
-
-std::shared_ptr<DataPool> AppBase::establish_pool(size_t bytes, e_type_storage stype) {
-    auto pool = DataPool::create_shared(bytes, stype, get_app_name());
-    if (pool) {
-        // Enforce that only this app can acquire write/exclusive.
-        pool->set_owner_identity(this, true);
-        pool->attach();  // shm-style: creator is the first attachment
-        owned_pools.push_back(pool);
-        on_outlet_established(pool.get());
-    }
-    return pool;
-}
-
 bool AppBase::on_outlet_established(DataPool* pool) {
     // Apps can override to react
     return true;
@@ -166,9 +153,39 @@ bool AppBase::has_capability(AppCapability cap) const {
     return (static_cast<uint32_t>(cfg_.capabilities) & static_cast<uint32_t>(cap)) != 0;
 }
 
-// =======================================================
-// Task Function
-// =======================================================
+bool AppBase::require_capability(AppCapability cap, const char* what) const {
+    if (has_capability(cap)) return true;
+    ESP_LOGW(TAG, "app '%s' missing capability for %s (declare it in the manifest)",
+             get_app_name() ? get_app_name() : "?", what ? what : "operation");
+    return false;
+}
+
+std::shared_ptr<DataPool> AppBase::establish_pool(size_t bytes, e_type_storage stype) {
+    // Hard storage requires the SD capability, like an Android permission.
+    if ((stype == STORAGE_MICROSD || stype == STORAGE_NVS || stype == STORAGE_EXT_NONVOL) &&
+        !require_capability(AppCapability::USES_SD_CARD, "hard-storage pool")) {
+        return nullptr;
+    }
+    auto pool = DataPool::create_shared(bytes, stype, get_app_name());
+    if (pool) {
+        pool->set_owner_identity(this, true);
+        pool->attach();
+        owned_pools.push_back(pool);
+        on_outlet_established(pool.get());
+    }
+    return pool;
+}
+
+std::unique_ptr<PoolRing> AppBase::establish_ring(size_t bytes, e_type_storage stype) {
+    if ((stype == STORAGE_MICROSD || stype == STORAGE_NVS || stype == STORAGE_EXT_NONVOL) &&
+        !require_capability(AppCapability::USES_SD_CARD, "hard-storage ring")) {
+        return nullptr;
+    }
+    if (!require_capability(AppCapability::ST_RING_CAPABLE, "establish_ring")) {
+        return nullptr;
+    }
+    return PoolRing::create(bytes, stype, get_app_name(), this);
+}
 
 void AppBase::task_func(void* arg) {
     AppBase* self = static_cast<AppBase*>(arg);

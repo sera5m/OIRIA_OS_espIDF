@@ -482,6 +482,10 @@ AppOpStatus appManager::create_pipe(std::shared_ptr<AppBase> source,
     const std::vector<PipeTarget>& targets,
     Rshell_pipe_flowType flow) {
     if (!source || targets.empty()) return AppOpStatus::InvalidArg;
+    // Android-style: streaming out must be declared.
+    if (!source->require_capability(AppCapability::STREAM_OUT_CAPABLE, "create_pipe")) {
+        return AppOpStatus::InvalidArg;
+    }
     const bool ok = emplace_pipe(active_pipes, source, targets, flow,
                                  kind_for_targets(targets, false));
     return ok ? AppOpStatus::Ok : AppOpStatus::InvalidArg;

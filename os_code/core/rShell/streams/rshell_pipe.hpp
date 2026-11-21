@@ -131,9 +131,21 @@ public:
     // Returns false if empty. Check eof() to distinguish "closed" from "empty".
     bool try_pop(DataItem*& out);
 
-    // Blocking pop. timeout_ms == 0 is try_pop. portMAX_DELAY waits forever.
-    // Returns false on timeout or EOF (no writers left and queue empty).
+    // Blocking pop. timeout_ms == 0 is try_pop.
+    // timeout_ms == portMAX_DELAY waits until data or EOF (no timeout).
+    // While blocked, the pipe sets a pause hint so the writer can see
+    // that a reader is waiting (and vice versa on a full queue).
     bool pop_wait(DataItem*& out, uint32_t timeout_ms);
+
+    // Pause hints for async systems. True while a side is blocked waiting.
+    bool reader_pausing() const { return reader_pausing_; }
+    bool writer_pausing() const { return writer_pausing_; }
+
+    // Atomic small-chunk toggle. When on, items with payload <= kAtomicLimit
+    // are queued as a single FreeRTOS send (already atomic) and flagged.
+    static constexpr size_t kAtomicLimit = 512;
+    void set_atomic_small(bool on) { atomic_small_ = on; }
+    bool atomic_small() const { return atomic_small_; }
 
     // Drain up to max items, calling cb for each. Returns number delivered.
     // cb takes ownership and must free the item (or the drain frees on false).
@@ -155,6 +167,9 @@ private:
     size_t depth_ = 16;
     int read_open_ = 1;
     int write_open_ = 1;
+    bool reader_pausing_ = false;
+    bool writer_pausing_ = false;
+    bool atomic_small_ = false;
 };
 
 // Inter-buffer: pointer pass-through. A filter, if set, is applied to a

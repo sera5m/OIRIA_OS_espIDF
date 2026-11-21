@@ -106,6 +106,12 @@ public:
     bool is_ring() const;
     void set_ring_mode(bool ring);
 
+    // Atomic small-chunk toggle (Unix PIPE_BUF idea). When on, pushes
+    // of <= kAtomicLimit bytes are performed under the ring lock as one unit.
+    static constexpr size_t kAtomicLimit = 512;
+    void set_atomic_small(bool on) { atomic_small_ = on; }
+    bool atomic_small() const { return atomic_small_; }
+
     bool push_ring(const void* data, size_t size);
     bool pop_ring(void* data, size_t size);
     size_t ring_available() const;
@@ -154,7 +160,41 @@ private:
     bool used_psram_ = false;  // tracks actual allocation method for free()
 
     bool is_ring_ = false;
+    bool atomic_small_ = false;
     std::unique_ptr<RingBuffer> ring_buffer_;
+};
+
+// Clean wrapper over a DataPool used as a ring.
+// Owns the pool (shared). Can be backed by RAM, PSRAM, or hard storage.
+class PoolRing {
+public:
+    // storage: STORAGE_RAM / STORAGE_PSRAM / STORAGE_MICROSD / STORAGE_NVS.
+    // Hard-storage types allocate the working buffer in PSRAM (or RAM fallback)
+    // and bind a .rpool path so the ring can be persisted.
+    static std::unique_ptr<PoolRing> create(size_t bytes,
+                                            e_type_storage storage,
+                                            const char* owner_name,
+                                            const void* owner_identity = nullptr);
+
+    DataPool* pool() const { return pool_.get(); }
+    size_t capacity() const { return pool_ ? pool_->size() : 0; }
+    size_t available() const { return pool_ ? pool_->ring_available() : 0; }
+
+    bool push(const void* data, size_t n);
+    bool pop(void* data, size_t n);
+
+    // Persist / restore the current buffer contents via .rpool.
+    bool save(const std::string& name);
+    bool load(const std::string& name);
+
+    void set_atomic_small(bool on);
+    bool atomic_small() const;
+
+private:
+    explicit PoolRing(DataPool::SharedPoolPtr pool, e_type_storage storage);
+    DataPool::SharedPoolPtr pool_;
+    e_type_storage storage_;
+    std::string persist_name_;
 };
 
 namespace psram {

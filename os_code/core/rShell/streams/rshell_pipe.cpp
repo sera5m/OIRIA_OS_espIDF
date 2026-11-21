@@ -145,8 +145,6 @@ bool InterProcessPipe::push(DataItem* item) {
         return false;
     }
     if (!filter_.empty()) {
-        // Queue stores the pointer, so the filtered bytes have to live on the item.
-        // The caller still owns the DataItem. A failed send leaves it already rewritten.
         std::vector<uint8_t> out;
         if (!filter_.apply(item->payload, item->payload_len, out)) return false;
         uint8_t* fresh = nullptr;
@@ -159,8 +157,21 @@ bool InterProcessPipe::push(DataItem* item) {
         item->payload = fresh;
         item->payload_len = out.size();
     }
-    // Non-blocking by default. Semi-async: producer does not wait for the consumer.
-    return xQueueSend(static_cast<QueueHandle_t>(queue_), &item, 0) == pdTRUE;
+    // Atomic small-chunk: a single FreeRTOS queue send is already atomic.
+    // The toggle just refuses oversized "small" claims and logs the intent.
+    if (atomic_small_ && item->payload_len > kAtomicLimit) {
+        ESP_LOGW(TAG, "InterProcessPipe %s: atomic_small refuses %zu bytes",
+                 id.c_str(), item->payload_len);
+        return false;
+    }
+    // Hint: if the queue is full we are about to pause the writer.
+    if (uxQueueSpacesAvailable(static_cast<QueueHandle_t>(queue_)) == 0) {
+        writer_pausing_ = true;
+        ESP_LOGD(TAG, "InterProcessPipe %s: writer pausing (queue full)", id.c_str());
+    }
+    BaseType_t ok = xQueueSend(static_cast<QueueHandle_t>(queue_), &item, 0);
+    writer_pausing_ = false;
+    return ok == pdTRUE;
 }
 
 bool InterProcessPipe::try_pop(DataItem*& out) {
@@ -170,14 +181,24 @@ bool InterProcessPipe::try_pop(DataItem*& out) {
 bool InterProcessPipe::pop_wait(DataItem*& out, uint32_t timeout_ms) {
     if (!queue_) return false;
     DataItem* item = nullptr;
-    TickType_t ticks = (timeout_ms == 0) ? 0 :
-                       (timeout_ms == portMAX_DELAY) ? portMAX_DELAY :
-                       pdMS_TO_TICKS(timeout_ms);
-    if (xQueueReceive(static_cast<QueueHandle_t>(queue_), &item, ticks) == pdTRUE) {
+    TickType_t ticks;
+    if (timeout_ms == 0) {
+        ticks = 0;
+    } else if (timeout_ms == portMAX_DELAY) {
+        // No timeout. Block until data or the writer side closes.
+        ticks = portMAX_DELAY;
+        reader_pausing_ = true;
+        ESP_LOGD(TAG, "InterProcessPipe %s: reader pausing (waiting)", id.c_str());
+    } else {
+        ticks = pdMS_TO_TICKS(timeout_ms);
+        reader_pausing_ = true;
+    }
+    BaseType_t ok = xQueueReceive(static_cast<QueueHandle_t>(queue_), &item, ticks);
+    reader_pausing_ = false;
+    if (ok == pdTRUE) {
         out = item;
         return true;
     }
-    // Distinguish empty-but-open from EOF.
     out = nullptr;
     return false;
 }

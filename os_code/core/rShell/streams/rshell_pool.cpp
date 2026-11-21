@@ -444,10 +444,16 @@ bool DataPool::owner_enforced() const {
 }
 
 bool DataPool::push_ring(const void* data, size_t size) {
-if (!is_ring_ || !ring_buffer_) {
-return false;
-}
-return ring_buffer_->push(buffer_, size_, data, size);
+    if (!is_ring_ || !ring_buffer_) {
+        return false;
+    }
+    // Atomic small-chunk: refuse a partial if the toggle is on and the
+    // push would not fit as a single unit. The ring lock inside push
+    // already makes the copy atomic for sizes that fit.
+    if (atomic_small_ && size > 0 && size <= kAtomicLimit) {
+        if (ring_buffer_->available() + size > size_) return false;
+    }
+    return ring_buffer_->push(buffer_, size_, data, size);
 }
 
 bool DataPool::pop_ring(void* data, size_t size) {
@@ -550,4 +556,60 @@ return count;
 
 namespace psram {
 EventRingBuffer<int> g_event_ring;
+}
+
+//------------------------------------------------------------------------------
+// PoolRing — clean wrapper, optional hard-storage backing
+//------------------------------------------------------------------------------
+
+PoolRing::PoolRing(DataPool::SharedPoolPtr pool, e_type_storage storage)
+    : pool_(std::move(pool)), storage_(storage) {}
+
+std::unique_ptr<PoolRing> PoolRing::create(size_t bytes,
+                                           e_type_storage storage,
+                                           const char* owner_name,
+                                           const void* owner_identity) {
+    // Hard storage: keep a working buffer in PSRAM (RAM fallback inside
+    // allocate_memory) and remember that the authoritative copy lives on SD/NVS.
+    e_type_storage working = storage;
+    if (storage == STORAGE_MICROSD || storage == STORAGE_NVS ||
+        storage == STORAGE_EXT_NONVOL) {
+        working = STORAGE_PSRAM;
+    }
+    auto pool = DataPool::create_shared(bytes, working, owner_name);
+    if (!pool) return nullptr;
+    pool->set_ring_mode(true);
+    if (owner_identity) pool->set_owner_identity(owner_identity, true);
+    auto ring = std::unique_ptr<PoolRing>(new PoolRing(std::move(pool), storage));
+    return ring;
+}
+
+bool PoolRing::push(const void* data, size_t n) {
+    return pool_ && pool_->push_ring(data, n);
+}
+
+bool PoolRing::pop(void* data, size_t n) {
+    return pool_ && pool_->pop_ring(data, n);
+}
+
+bool PoolRing::save(const std::string& name) {
+    if (!pool_) return false;
+    persist_name_ = name;
+    return pool_->save_to_rpool(name);
+}
+
+bool PoolRing::load(const std::string& name) {
+    if (!pool_) return false;
+    persist_name_ = name;
+    bool ok = pool_->load_from_rpool(name);
+    if (ok) pool_->set_ring_mode(true);
+    return ok;
+}
+
+void PoolRing::set_atomic_small(bool on) {
+    if (pool_) pool_->set_atomic_small(on);
+}
+
+bool PoolRing::atomic_small() const {
+    return pool_ && pool_->atomic_small();
 }
