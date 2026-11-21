@@ -55,7 +55,13 @@ detach, and permissions. It is not a pipe.
 - Capabilities are now checked at use time (`require_capability`), like
   Android permissions. Hard-storage pools need `USES_SD_CARD`. Creating a
   pipe needs `STREAM_OUT_CAPABLE`. Declare them on the manifest.
-
+- Additional gates: `request_gpio_access` (RAW_GPIO_ACCESS),
+  `request_wireless` (USES_WIRELESS), `request_wake` (CAN_WAKE_DEVICE).
+  VM host pin ops check the focused app. Browser wifi status checks
+  USES_WIRELESS.
+- Last `close_write` pushes a null sentinel so a reader blocked in
+  `pop_wait(portMAX_DELAY)` wakes immediately and sees EOF.
+- Rings stay sized push/pop. No POSIX read/write mode.
 
 | Unix                         | OIRIA                                      |
 |------------------------------|--------------------------------------------|
@@ -66,4 +72,4 @@ detach, and permissions. It is not a pipe.
 | last reader close → EPIPE    | push() returns false (broken())            |
 | shm attach/detach            | DataPool::attach / detach                  |
 | tee / multiple writers       | fan / c_fan / merge in the flow graph      |
-| capabilities (Linux)         | AppCapability (declared, not enforced)     |
+| capabilities (Linux)         | AppCapability, checked at use              |
