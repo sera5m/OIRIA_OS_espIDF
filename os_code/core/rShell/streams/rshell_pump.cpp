@@ -9,6 +9,7 @@
 #include "os_code/core/rShell/rshell_appFramework.hpp"
 #include "os_code/core/rShell/rshell_appmanager.hpp"
 #include <algorithm>
+#include <cstring>
 
 // Remove duplicate includes of esp_log.h and esp_timer.h
 
@@ -89,8 +90,22 @@ static void pump_task(void* param) {
                 if (pipe->kind() == RshellPipe::Kind::InterDevice) continue;
 
                 if (pipe->kind() == RshellPipe::Kind::InterProcess) {
-                    // Queue the item. The pump does not deliver it itself.
-                    pipe->push(item);
+                    // Queue a clone so the pump can still free the original.
+                    // The consumer owns the clone and must free it after try_pop.
+                    DataItem* clone = dataitem_new(item->source_type, item->payload_len);
+                    if (clone) {
+                        clone->timestamp = item->timestamp;
+                        clone->source_id = item->source_id;
+                        clone->compat_flags = item->compat_flags;
+                        clone->periph_mask = item->periph_mask;
+                        clone->storage_hint = item->storage_hint;
+                        if (item->payload && item->payload_len && clone->payload) {
+                            memcpy(clone->payload, item->payload, item->payload_len);
+                        }
+                        if (!pipe->push(clone)) {
+                            dataitem_free(clone);
+                        }
+                    }
                     continue;
                 }
 
