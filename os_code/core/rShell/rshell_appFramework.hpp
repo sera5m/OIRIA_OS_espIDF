@@ -147,4 +147,5 @@ private:
 
     std::string name_storage_;
     bool self_stop_ = false;
+    std::atomic<bool> parked_{false};
 };
