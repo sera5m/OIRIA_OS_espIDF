@@ -113,6 +113,10 @@ private:
 };
 
 // Inter-process: semi-async FreeRTOS queue. Time is not critical.
+// Unix-style ends (V7/xv6/Linux pipe(7)):
+//   read_open / write_open counts. Last writer close → EOF.
+//   Last reader close → push returns false (broken pipe).
+// Fan/merge stay in the flow graph; this is just the transport.
 class InterProcessPipe : public RshellPipe {
 public:
     explicit InterProcessPipe(size_t queue_depth = 16);
@@ -124,15 +128,33 @@ public:
 
     // Non-blocking pop for the consumer side.
     // Caller owns the returned item and must dataitem_free it.
+    // Returns false if empty. Check eof() to distinguish "closed" from "empty".
     bool try_pop(DataItem*& out);
+
+    // Blocking pop. timeout_ms == 0 is try_pop. portMAX_DELAY waits forever.
+    // Returns false on timeout or EOF (no writers left and queue empty).
+    bool pop_wait(DataItem*& out, uint32_t timeout_ms);
 
     // Drain up to max items, calling cb for each. Returns number delivered.
     // cb takes ownership and must free the item (or the drain frees on false).
     size_t drain(std::function<bool(DataItem*)> cb, size_t max = 16);
 
+    // Unix ends. Starts with one reader and one writer open.
+    void open_read();
+    void open_write();
+    void close_read();
+    void close_write();
+
+    int read_open() const { return read_open_; }
+    int write_open() const { return write_open_; }
+    bool eof() const;      // no writers left and nothing queued
+    bool broken() const;   // no readers left
+
 private:
     void* queue_ = nullptr;  // QueueHandle_t, kept opaque in the header
     size_t depth_ = 16;
+    int read_open_ = 1;
+    int write_open_ = 1;
 };
 
 // Inter-buffer: pointer pass-through. A filter, if set, is applied to a

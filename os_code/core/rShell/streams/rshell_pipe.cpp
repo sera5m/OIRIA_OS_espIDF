@@ -139,6 +139,11 @@ InterProcessPipe::~InterProcessPipe() {
 
 bool InterProcessPipe::push(DataItem* item) {
     if (!item || !queue_) return false;
+    // Unix: write to a pipe with no readers is a broken pipe.
+    if (read_open_ <= 0) {
+        ESP_LOGW(TAG, "InterProcessPipe %s: broken (no readers)", id.c_str());
+        return false;
+    }
     if (!filter_.empty()) {
         // Queue stores the pointer, so the filtered bytes have to live on the item.
         // The caller still owns the DataItem. A failed send leaves it already rewritten.
@@ -154,17 +159,26 @@ bool InterProcessPipe::push(DataItem* item) {
         item->payload = fresh;
         item->payload_len = out.size();
     }
-    // Non-blocking. Semi-async: producer does not wait for the consumer.
+    // Non-blocking by default. Semi-async: producer does not wait for the consumer.
     return xQueueSend(static_cast<QueueHandle_t>(queue_), &item, 0) == pdTRUE;
 }
 
 bool InterProcessPipe::try_pop(DataItem*& out) {
+    return pop_wait(out, 0);
+}
+
+bool InterProcessPipe::pop_wait(DataItem*& out, uint32_t timeout_ms) {
     if (!queue_) return false;
     DataItem* item = nullptr;
-    if (xQueueReceive(static_cast<QueueHandle_t>(queue_), &item, 0) == pdTRUE) {
+    TickType_t ticks = (timeout_ms == 0) ? 0 :
+                       (timeout_ms == portMAX_DELAY) ? portMAX_DELAY :
+                       pdMS_TO_TICKS(timeout_ms);
+    if (xQueueReceive(static_cast<QueueHandle_t>(queue_), &item, ticks) == pdTRUE) {
         out = item;
         return true;
     }
+    // Distinguish empty-but-open from EOF.
+    out = nullptr;
     return false;
 }
 
@@ -179,6 +193,28 @@ size_t InterProcessPipe::drain(std::function<bool(DataItem*)> cb, size_t max) {
         ++n;
     }
     return n;
+}
+
+void InterProcessPipe::open_read()  { ++read_open_; }
+void InterProcessPipe::open_write() { ++write_open_; }
+
+void InterProcessPipe::close_read() {
+    if (read_open_ > 0) --read_open_;
+}
+
+void InterProcessPipe::close_write() {
+    if (write_open_ > 0) --write_open_;
+    // Last writer close: readers will see eof() once the queue drains.
+}
+
+bool InterProcessPipe::eof() const {
+    if (write_open_ > 0) return false;
+    if (!queue_) return true;
+    return uxQueueMessagesWaiting(static_cast<QueueHandle_t>(queue_)) == 0;
+}
+
+bool InterProcessPipe::broken() const {
+    return read_open_ <= 0;
 }
 
 // ---------------------------------------------------------------------------

@@ -96,7 +96,12 @@ public:
     void set_owner_identity(const void* identity, bool enforce = true);
     bool owner_enforced() const;
 
-    const MemoryPermission& permissions() const;
+    // shm-style attachment. Does not replace shared_ptr ownership;
+    // it tracks who currently has the region mapped so a future
+    // last-detach can decide to persist or drop.
+    void attach();
+    void detach();
+    int attachments() const;
 
     bool is_ring() const;
     void set_ring_mode(bool ring);
@@ -140,6 +145,7 @@ private:
     const char* owner_;
     const void* owner_identity_ = nullptr;
     bool enforce_owner_ = false;
+    int attach_count_ = 0;
 
     mutable std::mutex access_mutex_;
     std::atomic<uint32_t> reader_count_{0};

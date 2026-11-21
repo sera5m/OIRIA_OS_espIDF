@@ -377,8 +377,23 @@ const char* DataPool::owner() const {
 return owner_; 
 }
 
-const MemoryPermission& DataPool::permissions() const { 
-return perms_; 
+void DataPool::attach() {
+    std::lock_guard<std::mutex> lock(access_mutex_);
+    ++attach_count_;
+}
+
+void DataPool::detach() {
+    std::lock_guard<std::mutex> lock(access_mutex_);
+    if (attach_count_ > 0) --attach_count_;
+}
+
+int DataPool::attachments() const {
+    std::lock_guard<std::mutex> lock(access_mutex_);
+    return attach_count_;
+}
+
+const MemoryPermission& DataPool::permissions() const {
+    return perms_;
 }
 
 bool DataPool::is_ring() const { 

@@ -118,6 +118,7 @@ std::shared_ptr<DataPool> AppBase::establish_pool(size_t bytes, e_type_storage s
     if (pool) {
         // Enforce that only this app can acquire write/exclusive.
         pool->set_owner_identity(this, true);
+        pool->attach();  // shm-style: creator is the first attachment
         owned_pools.push_back(pool);
         on_outlet_established(pool.get());
     }
