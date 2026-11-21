@@ -5,24 +5,24 @@
 
 
 namespace rpool{
-    // Original on-disk magic is UTF-8 U+1F5CE (F0 9F 97 8E) three times.
-    // FILE_BEGIN is 18 bytes, FILE_END is 16. Kept as explicit bytes so a
-    // transport cannot eat the glyphs and so load does not use a 16-byte buf.
+    // On-disk magic is UTF-8 U+1F5CE (bytes F0 9F 97 8E) three times.
+    // FILE_BEGIN is 18 bytes, FILE_END is 16. Explicit casts so the bytes
+    // cannot be mangled and so a signed char does not overflow the literal.
     static constexpr char FILE_BEGIN[] = {
         '<',
-        '\xF0', '\x9F', '\x97', '\x8E',
-        '\xF0', '\x9F', '\x97', '\x8E',
-        '\xF0', '\x9F', '\x97', '\x8E',
+        static_cast<char>(0xF0), static_cast<char>(0x9F), static_cast<char>(0x97), static_cast<char>(0x8E),
+        static_cast<char>(0xF0), static_cast<char>(0x9F), static_cast<char>(0x97), static_cast<char>(0x8E),
+        static_cast<char>(0xF0), static_cast<char>(0x9F), static_cast<char>(0x97), static_cast<char>(0x8E),
         'S', 'T', 'A', 'R', 'T',
-        '\0'
+        0
     };
     static constexpr char FILE_END[] = {
         'E', 'N', 'D',
-        '\xF0', '\x9F', '\x97', '\x8E',
-        '\xF0', '\x9F', '\x97', '\x8E',
-        '\xF0', '\x9F', '\x97', '\x8E',
+        static_cast<char>(0xF0), static_cast<char>(0x9F), static_cast<char>(0x97), static_cast<char>(0x8E),
+        static_cast<char>(0xF0), static_cast<char>(0x9F), static_cast<char>(0x97), static_cast<char>(0x8E),
+        static_cast<char>(0xF0), static_cast<char>(0x9F), static_cast<char>(0x97), static_cast<char>(0x8E),
         '>',
-        '\0'
+        0
     };
 
     #pragma pack(push, 1)
@@ -30,28 +30,24 @@ namespace rpool{
     struct Header
     {
         // Size of the pool represented by this file.
-            // This is the logical pool size, NOT the file size.
+        // This is the logical pool size, NOT the file size.
         uint64_t sizeBytes;
-
 
         // Pointer to the current owning program.
         // Only valid while the owner is actively running.
         // Never trusted after loading from storage.
         uintptr_t ownerPointer;
 
-
         // Name of the owning application.
-        // Should correspond to an entry in the application's table.
-        char ownerAppName[64]; //this should be a std::string
+        char ownerAppName[64];
         uint8_t flags;
         // bit 0 = isElif
         // bit 1 = isSwapMem
-        // bit 2 = isBad? Indicates the pool should be considered invalid or wiped during initialization/startup recovery.
-        // bit 3 = ring geometry follows the payload (uint32 magic 'RING', head, tail, count)
-        uint8_t reserved[7];// Pad to an 8-byte boundary.
-    };//end struct
+        // bit 2 = isBad. Pool should be wiped on recovery.
+        // bit 3 = ring geometry follows the payload:
+        //         uint32 magic 0x52494E47 ('RING'), head, tail, count.
+        uint8_t reserved[7];
+    };
 
     #pragma pack(pop)
 }//end namespace
-
-

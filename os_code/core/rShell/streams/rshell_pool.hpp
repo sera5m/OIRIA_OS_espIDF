@@ -5,16 +5,12 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 #include <esp_heap_caps.h>
 
 #include "rshell_streamdefs.h"
-
-
-
-// Forward declarations instead of full include
 #include "os_code/core/rShell/enviroment/env_vars.h"
-#include "rshell_streamdefs.h"
 #include "hardware/drivers/sd_card/d_sdc.h"
 #include "os_code/core/rShell/streams/rshell_nv_pool.hpp"
 
@@ -33,9 +29,7 @@ enum class AccessMode {
     EXCLUSIVE
 };
 
-
 class DataPool;
-
 
 class PoolAccessToken {
 public:
@@ -46,7 +40,6 @@ public:
     PoolAccessToken(const PoolAccessToken&) = delete;
     PoolAccessToken& operator=(const PoolAccessToken&) = delete;
 
-    // Persistent NV Storage on microSD
     bool save_to_rpool(const std::string& filepath);
     bool load_from_rpool(const std::string& filepath);
 
@@ -90,15 +83,15 @@ public:
     size_t size() const;
     e_type_storage storage_type() const;
     const char* owner() const;
+    const MemoryPermission& permissions() const;
     const void* owner_identity() const;
-    // When enforce is true, write/exclusive acquire requires requester == identity.
-    // Call with the AppBase* (or other stable identity) after create.
+    // When enforce is true, write/exclusive acquire requires requester == identity
+    // or DataPool::system_writer(). Call with the AppBase* after create.
     void set_owner_identity(const void* identity, bool enforce = true);
+    // Pump / kernel writer. One address space: this is a convention, not an MMU.
+    static const void* system_writer();
     bool owner_enforced() const;
 
-    // shm-style attachment. Does not replace shared_ptr ownership;
-    // it tracks who currently has the region mapped so a future
-    // last-detach can decide to persist or drop.
     void attach();
     void detach();
     int attachments() const;
@@ -106,8 +99,6 @@ public:
     bool is_ring() const;
     void set_ring_mode(bool ring);
 
-    // Atomic small-chunk toggle (Unix PIPE_BUF idea). When on, pushes
-    // of <= kAtomicLimit bytes are performed under the ring lock as one unit.
     static constexpr size_t kAtomicLimit = 512;
     void set_atomic_small(bool on) { atomic_small_ = on; }
     bool atomic_small() const { return atomic_small_; }
@@ -120,8 +111,6 @@ public:
     bool copy_from(const std::byte* src, size_t count, size_t offset = 0);
     bool copy_to(std::byte* dst, size_t count, size_t offset = 0) const;
 
-
-    // Persistent NV Storage (.rpool)
     bool save_to_rpool(const std::string& filepath);
     bool load_from_rpool(const std::string& filepath);
 
@@ -157,20 +146,15 @@ private:
     std::atomic<uint32_t> reader_count_{0};
     const void* writer_ = nullptr;
     std::atomic<AccessMode> current_mode_{AccessMode::READ_ONLY};
-    bool used_psram_ = false;  // tracks actual allocation method for free()
+    bool used_psram_ = false;
 
     bool is_ring_ = false;
     bool atomic_small_ = false;
     std::unique_ptr<RingBuffer> ring_buffer_;
 };
 
-// Clean wrapper over a DataPool used as a ring.
-// Owns the pool (shared). Can be backed by RAM, PSRAM, or hard storage.
 class PoolRing {
 public:
-    // storage: STORAGE_RAM / STORAGE_PSRAM / STORAGE_MICROSD / STORAGE_NVS.
-    // Hard-storage types allocate the working buffer in PSRAM (or RAM fallback)
-    // and bind a .rpool path so the ring can be persisted.
     static std::unique_ptr<PoolRing> create(size_t bytes,
                                             e_type_storage storage,
                                             const char* owner_name,
@@ -183,7 +167,6 @@ public:
     bool push(const void* data, size_t n);
     bool pop(void* data, size_t n);
 
-    // Persist / restore the current buffer contents via .rpool.
     bool save(const std::string& name);
     bool load(const std::string& name);
 
