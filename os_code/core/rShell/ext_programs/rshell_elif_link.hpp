@@ -11,13 +11,17 @@
 
 // Dynamic app loading via ELF / binary on SD card.
 // NOTE: These ELFs execute native code in the firmware address space.
-// FreeRTOS task separation is not a memory sandbox. A future IS_sandboxed
-// toggle should gate whether an ELF is allowed to call privileged host
-// symbols; capability flags currently exist on ApplicationConfig but are
-// not yet enforced by rShell.
+// FreeRTOS task separation is not a memory sandbox. The IS_sandboxed
+// flag below is the toggle the architecture was supposed to have; when
+// true the loader should restrict the symbol table (not yet enforced).
+// Capability flags on ApplicationConfig are declared but not checked.
 class RshellElifLoader {
 public:
     static RshellElifLoader& instance();
+    
+    // When true, future loads should use a restricted host symbol set.
+    // Currently informational; the ESP-ELF adapter does not yet filter.
+    bool IS_sandboxed = false;
     
     // Load an ELF app from SD card
     std::shared_ptr<AppBase> load_from_sd(const std::string& path);

@@ -27,7 +27,7 @@ RshellElifLoader& RshellElifLoader::instance() {
 // ================================================================
 
 std::shared_ptr<AppBase> RshellElifLoader::load_from_sd(const std::string& path) {
-    ESP_LOGI(TAG, "Loading ELF app from: %s", path.c_str());
+    ESP_LOGI(TAG, "Loading ELF app from: %s (IS_sandboxed=%d)", path.c_str(), (int)IS_sandboxed);
     
     // Check if already loaded
     for (const auto& [name, loaded] : loaded_apps) {
