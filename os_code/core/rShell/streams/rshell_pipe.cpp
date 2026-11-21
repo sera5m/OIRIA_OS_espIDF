@@ -196,6 +196,11 @@ bool InterProcessPipe::pop_wait(DataItem*& out, uint32_t timeout_ms) {
     BaseType_t ok = xQueueReceive(static_cast<QueueHandle_t>(queue_), &item, ticks);
     reader_pausing_ = false;
     if (ok == pdTRUE) {
+        // Null sentinel from close_write means EOF. Do not hand it to the caller.
+        if (item == nullptr) {
+            out = nullptr;
+            return false;
+        }
         out = item;
         return true;
     }
@@ -225,7 +230,20 @@ void InterProcessPipe::close_read() {
 
 void InterProcessPipe::close_write() {
     if (write_open_ > 0) --write_open_;
-    // Last writer close: readers will see eof() once the queue drains.
+    // Last writer: wake any reader blocked in pop_wait(portMAX_DELAY).
+    // A blocked reader means the queue is empty, so the sentinel fits.
+    // nullptr is the EOF token; pop_wait treats it as end-of-stream.
+    if (write_open_ == 0 && queue_ && read_open_ > 0) {
+        int n = read_open_;
+        if (n > 8) n = 8;
+        for (int i = 0; i < n; ++i) {
+            DataItem* eof_tok = nullptr;
+            if (xQueueSend(static_cast<QueueHandle_t>(queue_), &eof_tok, 0) != pdTRUE) {
+                break;
+            }
+        }
+        ESP_LOGD(TAG, "InterProcessPipe %s: writers closed, readers woken", id.c_str());
+    }
 }
 
 bool InterProcessPipe::eof() const {

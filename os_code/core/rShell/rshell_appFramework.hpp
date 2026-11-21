@@ -143,6 +143,13 @@ public:
     // Returns false and logs if the app did not declare `cap`.
     bool require_capability(AppCapability cap, const char* what) const;
 
+    // Android-style gates. Call before the privileged op. Fail closed.
+    // These are the documented entry points; raw GPIO / wifi / wake from
+    // an app should go through them.
+    bool request_gpio_access(const char* why = nullptr) const;
+    bool request_wireless(const char* why = nullptr) const;
+    bool request_wake(const char* why = nullptr) const;
+
     const char* get_app_name() const { return cfg_.name; }
 
     std::shared_ptr<DataPool> establish_pool(size_t bytes, e_type_storage stype);

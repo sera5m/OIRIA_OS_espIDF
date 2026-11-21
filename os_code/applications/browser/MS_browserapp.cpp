@@ -128,6 +128,7 @@ BrowserApp::BrowserApp(const ApplicationConfig& cfg) : AppBase(cfg) {
 
 void BrowserApp::refresh_wifi_status() {
     wifi_ok = false;
+    if (!request_wireless("browser status")) return;
 #if BROWSER_HAS_WIFI
     wifi_ap_record_t ap{};
     if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {

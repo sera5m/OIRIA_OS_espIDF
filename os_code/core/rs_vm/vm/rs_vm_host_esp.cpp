@@ -52,7 +52,17 @@ static void host_print_char(char c, void*) {
 static void host_delay_ms(uint32_t ms, void*) {
     vTaskDelay(pdMS_TO_TICKS(ms ? ms : 1));
 }
+static bool focused_has_gpio() {
+    auto app = appManager::instance().get_focused_app();
+    if (!app) return false;
+    return app->request_gpio_access("vm pin");
+}
+
 static void host_pin_mode(uint8_t pin, uint8_t mode, void*) {
+    if (!focused_has_gpio()) {
+        ESP_LOGW(TAG, "pin_mode denied (focused app lacks RAW_GPIO_ACCESS)");
+        return;
+    }
     gpio_config_t io = {};
     io.pin_bit_mask = 1ULL << pin;
     io.intr_type = GPIO_INTR_DISABLE;
@@ -67,9 +77,17 @@ static void host_pin_mode(uint8_t pin, uint8_t mode, void*) {
     gpio_config(&io);
 }
 static void host_dig_write(uint8_t pin, uint8_t level, void*) {
+    if (!focused_has_gpio()) {
+        ESP_LOGW(TAG, "dig_write denied (focused app lacks RAW_GPIO_ACCESS)");
+        return;
+    }
     gpio_set_level((gpio_num_t)pin, level ? 1 : 0);
 }
 static int host_dig_read(uint8_t pin, void*) {
+    if (!focused_has_gpio()) {
+        ESP_LOGW(TAG, "dig_read denied (focused app lacks RAW_GPIO_ACCESS)");
+        return 0;
+    }
     return gpio_get_level((gpio_num_t)pin);
 }
 static int host_adc_read(uint8_t pin, void*) {

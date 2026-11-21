@@ -160,6 +160,18 @@ bool AppBase::require_capability(AppCapability cap, const char* what) const {
     return false;
 }
 
+bool AppBase::request_gpio_access(const char* why) const {
+    return require_capability(AppCapability::RAW_GPIO_ACCESS, why ? why : "gpio");
+}
+
+bool AppBase::request_wireless(const char* why) const {
+    return require_capability(AppCapability::USES_WIRELESS, why ? why : "wireless");
+}
+
+bool AppBase::request_wake(const char* why) const {
+    return require_capability(AppCapability::CAN_WAKE_DEVICE, why ? why : "wake");
+}
+
 std::shared_ptr<DataPool> AppBase::establish_pool(size_t bytes, e_type_storage stype) {
     // Hard storage requires the SD capability, like an Android permission.
     if ((stype == STORAGE_MICROSD || stype == STORAGE_NVS || stype == STORAGE_EXT_NONVOL) &&
