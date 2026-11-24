@@ -61,7 +61,20 @@ git clone https://github.com/sera5m/OIRIA_OS_espIDF
 cd OIRIA_OS_espIDF
 idf.py build
 idf.py -p /dev/ttyACM0 flash monitor
+
+
 ```
+**developing apps for this device**
+app development is still experimental and desktop-only. support coming to the mobile app sometime in the future. please test all of your apps features before submitting it to the repo [HERE](https://github.com/sera5m/oiria-index)
+
+
+**SMARTLINK APP**
+[MOBILE, ANDROID](https://github.com/sera5m/android_smartlink_app)
+[mobile, apple] (lol)
+[DESKTOP, LINUX,arch x86] (NOT DONE) 
+[DESKTOP, LINUX, deb] (not done)
+[DESKTOP, microslop windows] (not done)
+
 
 **LIABILITY WARNING**
 this device is still experimental and may not perform exactly as indented, this being an inherent limitation of software. while the creators of this software have taken all caution to maintain legality and safety in features, this device is a tool, and as with all tools, misuse is possible. ensure that the electronics toolkit, universal remote, or quick utils are used only on devices that you have ownership of
