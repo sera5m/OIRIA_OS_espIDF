@@ -1,20 +1,20 @@
 # OIRIA OS (ESP-IDF)
 
-Smartwatch firmware. Dual purpose: a normal smart device, and an industrial or semi-universal controller for whatever hardware it meets — consumer gear, raw modules, or robotics.
+Smartwatch firmware. Dual purpose: a normal smart device, and an industrial or semi-universal controller for whatever hardware it meets — consumer gear, raw modules, or robotics, all in one device.
 
 ## what
 
 OIRIA OS is intended to behave like Linux for small devices that have no MMU, without containing any Linux components. It should be friendly enough for a layman and deep enough for an expert, with a clean path between the two. It is also meant to meet high performance criteria for microcontrollers.
 
-The smartlink companion is part of that. The watch is both a wearable and a controller.
+The smartlink companion is part of this, given The watch is both a wearable and a controller.
 
 ## why
 
-Wear OS is not good enough. Many standard libraries (microGL and the like) do not meet the performance bar. Mixed drivers and manufacturers rarely work together because of side effects, nonstandard management, or nonstandard I/O. A small, owned stack avoids that.
+Wear OS is not good enough. Many standard libraries (microGL and the like) do not meet the performance bar. Mixed drivers and manufacturers rarely work together because of side effects, nonstandard management, or nonstandard I/O state machines. A small, owned stack avoids that.
 
 ## how
 
-OIRIA OS is broken into state-machine layers with component managers, similar to how modern Linux handles services. Encapsulation is kept thin for performance. There is no user/kernel boundary and no MMU sandbox. Isolation is by convention and by declared capabilities. FreeRTOS sits under everything. Two long-lived managers (WindowManager and appManager) own the frame and the app list. Apps own their windows. Input is an event. Data moves as a DataItem when it needs to leave an app.
+OIRIA OS is broken into state-machine layers with component managers, similar to how modern Linux handles services. Encapsulation is kept thin for performance. There is no user/kernel boundary and no MMU sandbox. Isolation is by convention and by declared capabilities. FreeRTOS sits under everything. Two long-lived managers (WindowManager and appManager) own the frame and the app list. Apps own their windows. Input is handled by asynch events with periodic check. ipc is handled by rshell pipes as a DataItem when it needs to leave an app, or the device itself (best performance with batching; low latency without, but higher overhead)
 
 ---
 
@@ -42,17 +42,18 @@ OIRIA OS is broken into state-machine layers with component managers, similar to
 
 - name: rshell (`os_code/core/rShell`)
 - purpose: app lifecycle and scheduling on top of FreeRTOS. Registers apps, opens them, starts their task, routes input and pipes, and owns focus.
-- architectural principles: `AppBase` is the unit. `start_task` is an `xTaskCreate` of a loop that calls `tick_app` at `tick_rate_hz` and feeds the watchdog. Input arrives on a separate path (`route_input_to_focused`). Pipes and DataItems are the long-term data currency; most apps still talk to their window directly. Capabilities are declared on the manifest (`USES_SD_CARD`, `STREAM_OUT_CAPABLE`, and others) and checked at the call for GPIO, wireless, and wake. The ELF loader is not a sandbox.
+- architectural principles: `AppBase` is the unit. `start_task` is an `xTaskCreate` of a loop that calls `tick_app` at `tick_rate_hz` and feeds the watchdog. Input arrives on a separate path (`route_input_to_focused`). Pipes and DataItems are the long-term data currency; most apps still talk to their window directly. Capabilities are declared on the manifest (`USES_SD_CARD`, `STREAM_OUT_CAPABLE`, and others) and checked at the call for GPIO, wireless, and wake. The ELF loader is not sandboxed (no mmu) so be careful if developing. further suppoer will be added in the future
 
 **scripting**
 
 - name: Toplethos (`os_code/core/rs_vm`)
 - purpose: on-device scripting layer for behavior that does not belong in C++.
-- architectural principles: bytecode interpreter (`rsvm_compile` + `rsvm_run`). No JIT on the ESP32-S3. The VM asks the host through function pointers; the host is not a kernel. Desktop AOT and the full language tree live elsewhere.
+- architectural principles: bytecode interpreter (`rsvm_compile` + `rsvm_run`). No JIT on the ESP32-S3. The VM asks the host through function pointers; the host is not a kernel. Desktop AOT and the full language tree live elsewhere, as this device can only handle a small subset of features and will not be able to handle simd, self modifying code, intelegently self modifying code, or high bit width instructions or workloads)
+why: bash is too simple. lua slow and big. java too huge and does not allow manual memory access. 
 
 ---
 
-**Build:** this repo **is** the ESP-IDF project. See [BUILD.md](BUILD.md).
+**Build:** this repo is the ESP-IDF project. See [BUILD.md](BUILD.md).
 
 ```bash
 . ~/esp/esp-idf/export.sh
@@ -62,7 +63,8 @@ idf.py build
 idf.py -p /dev/ttyACM0 flash monitor
 ```
 
-Do **not** dump this tree into `tusb_hid/main/`. That old wrapper is gone.
+**LIABILITY WARNING**
+this device is still experimental and may not perform exactly as indented, this being an inherent limitation of software. while the creators of this software have taken all caution to maintain legality and safety in features, this device is a tool, and as with all tools, misuse is possible. ensure that the electronics toolkit, universal remote, or quick utils are used only on devices that you have ownership of
 
 **WARNING**
 
