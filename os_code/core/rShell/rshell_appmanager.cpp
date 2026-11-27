@@ -356,6 +356,24 @@ std::shared_ptr<AppBase> appManager::get_focused_app() const {
     return focused_app;
 }
 
+
+void appManager::set_hot_focus(std::shared_ptr<AppBase> app)
+{
+    hot_focus_ = app;
+    onscreen_hid_ = (app != nullptr);
+}
+
+void appManager::clear_hot_focus()
+{
+    hot_focus_.reset();
+    onscreen_hid_ = false;
+}
+
+std::shared_ptr<AppBase> appManager::get_hot_focus() const
+{
+    return hot_focus_;
+}
+
 void appManager::route_input_to_focused(const InputEvent& ev) {
     if (focused_app) {
         focused_app->receive_event_input(&ev);

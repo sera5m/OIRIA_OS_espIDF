@@ -80,6 +80,17 @@ public:
     // NotFound if the app is not running. Ok even if it has no window yet.
     AppOpStatus focus_app(const std::string& name, bool settle = true);
     std::shared_ptr<AppBase> get_focused_app() const;
+    
+    /* Hot focus: the on-screen HID (keyboard, touchpad) being touched.
+       Focused is what receives the converted input. Hot focus is what
+       the finger is on. Only one touch at a time, so this is a second
+       slot, not a second pointer. */
+    void set_hot_focus(std::shared_ptr<AppBase> app);
+    void clear_hot_focus();
+    std::shared_ptr<AppBase> get_hot_focus() const;
+    bool is_using_onscreen_hid() const { return onscreen_hid_; }
+    void set_onscreen_hid(bool on) { onscreen_hid_ = on; }
+
     void route_input_to_focused(const InputEvent& ev);
     // True once UpdateAll has finished a frame that started at or after the
     // current focus epoch. False on timeout, or if called inside UpdateAll.
@@ -150,6 +161,8 @@ private:
 
     std::vector<std::shared_ptr<AppBase>> apps;
     std::shared_ptr<AppBase> focused_app;
+    std::shared_ptr<AppBase> hot_focus_;
+    bool onscreen_hid_ = false;
     std::unordered_map<std::string, AppManifest> app_manifests;
     std::unordered_map<std::string, std::weak_ptr<AppBase>> running_apps;
     std::vector<std::unique_ptr<RshellPipe>> active_pipes;

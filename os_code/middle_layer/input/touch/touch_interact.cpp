@@ -3,6 +3,7 @@
 #include "os_code/core/window_env/MWenv.hpp"
 #include "os_code/core/window_env/Canvas.hpp"
 #include "os_code/middle_layer/input/input_handler.hpp"
+#include "os_code/core/rShell/rshell_appmanager.hpp"
 
 static int16_t px = -32, py = -32;
 static int visible = 0;
@@ -56,8 +57,23 @@ void touch_interact_point(int16_t x, int16_t y, int down)
                 }
                 if (ProcInputQueTarget)
                     xQueueSend(ProcInputQueTarget, &ev, 0);
+                /* On-screen HID owns this point. Converted event goes to
+                   the target focus. Raw XY is discarded. */
+                if (appManager::instance().is_using_onscreen_hid()) {
+                    appManager::instance().route_input_to_focused(ev);
+                    first = el;
+                    first_ms = t;
+                    return;
+                }
             }
         }
+    }
+
+    /* Raw pointer path. Suppressed while an on-screen HID is active. */
+    if (appManager::instance().is_using_onscreen_hid()) {
+        first = el;
+        first_ms = t;
+        return;
     }
 
     /* double tap on the same element */
