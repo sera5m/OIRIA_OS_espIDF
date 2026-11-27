@@ -289,3 +289,39 @@ void Canvas::SetSize(int width, int height) {
     m_cfg.height = height;
     m_dirty = true;
 }
+
+int Canvas::AddZone(const InputZone& z)
+{
+    if (m_zone_n >= kMaxZones) return -1;
+    m_zones[m_zone_n] = z;
+    return m_zone_n++;
+}
+
+void Canvas::ClearZones()
+{
+    m_zone_n = 0;
+}
+
+void Canvas::SetZoneEnabled(int index, bool on)
+{
+    if (index < 0 || index >= m_zone_n) return;
+    m_zones[index].enabled = on;
+}
+
+int Canvas::ZoneAt(int lx, int ly) const
+{
+    for (int i = m_zone_n - 1; i >= 0; --i) {
+        const auto& z = m_zones[i];
+        if (!z.enabled) continue;
+        if (lx >= z.bounds.x && lx < z.bounds.x + z.bounds.w &&
+            ly >= z.bounds.y && ly < z.bounds.y + z.bounds.h)
+            return i;
+    }
+    return -1;
+}
+
+const InputZone* Canvas::GetZone(int index) const
+{
+    if (index < 0 || index >= m_zone_n) return nullptr;
+    return &m_zones[index];
+}

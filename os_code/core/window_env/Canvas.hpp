@@ -12,6 +12,24 @@
 class Window; // forward
 
 // ---------------------------------------------------------------------------
+// Input zones. A touch inside a zone emits a key, a mouse delta, or a macro.
+// ---------------------------------------------------------------------------
+enum class ZoneKind : uint8_t { Key, Mouse, Macro };
+
+struct InputZone {
+    s_bounds_16u bounds{};     /* canvas-local */
+    ZoneKind     kind = ZoneKind::Key;
+    uint16_t     key = 0;      /* Key: the key. Mouse: unused. Macro: first key */
+    int16_t      dx = 0;       /* Mouse: delta per touch */
+    int16_t      dy = 0;
+    uint16_t     macro[4] = {};/* Macro: up to 4 keys */
+    uint8_t      macro_n = 0;
+    bool         enabled = true;
+};
+
+
+
+// ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
@@ -72,6 +90,16 @@ public:
     // If true (default), Draw() calls world->draw(). Set false if you
     // step/draw the world yourself from game code.
     void SetAutoDrawWorld(bool on) { m_auto_draw_world = on; }
+
+    /* Input zones. Touch inside a zone emits the mapped input. */
+    int  AddZone(const InputZone& z);          /* returns index, -1 on full */
+    void ClearZones();
+    void SetZoneEnabled(int index, bool on);
+    /* Test a canvas-local point. Returns the zone index or -1. */
+    int  ZoneAt(int lx, int ly) const;
+    const InputZone* GetZone(int index) const;
+
+
 
     // Getters
     int GetX() const { return m_cfg.x; }

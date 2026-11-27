@@ -1,6 +1,8 @@
 #include "touch_interact.h"
 #include "esp_timer.h"
 #include "os_code/core/window_env/MWenv.hpp"
+#include "os_code/core/window_env/Canvas.hpp"
+#include "os_code/middle_layer/input/input_handler.hpp"
 
 static int16_t px = -32, py = -32;
 static int visible = 0;
@@ -30,6 +32,33 @@ void touch_interact_point(int16_t x, int16_t y, int down)
 
     std::shared_ptr<Window> win;
     ui_widget_t* el = WindowManager::getInstance().hit_element(x, y, &win);
+
+    /* Zone on the window's canvas maps to a key, mouse delta, or macro. */
+    if (win && win->GetCanvas()) {
+        int ox = 0, oy = 0, ww = 0, wh = 0;
+        win->get_physical_bounds(ox, oy, ww, wh);
+        int zi = win->GetCanvas()->ZoneAt(x - ox, y - oy);
+        if (zi >= 0) {
+            const InputZone* z = win->GetCanvas()->GetZone(zi);
+            if (z) {
+                InputEvent ev{};
+                ev.timestamp = t;
+                ev.source_device_type = HIDInputDeviceType::Mouse;
+                if (z->kind == ZoneKind::Key) {
+                    ev.key = z->key;
+                    ev.action = KeyAction::Tap;
+                } else if (z->kind == ZoneKind::Mouse) {
+                    ev.action = KeyAction::PositionDelta;
+                    ev.delta = z->dx;
+                } else {
+                    ev.key = z->macro_n ? z->macro[0] : 0;
+                    ev.action = KeyAction::Tap;
+                }
+                if (ProcInputQueTarget)
+                    xQueueSend(ProcInputQueTarget, &ev, 0);
+            }
+        }
+    }
 
     /* double tap on the same element */
     if (first && (t - first_ms) <= 500 && el && el == first) {
