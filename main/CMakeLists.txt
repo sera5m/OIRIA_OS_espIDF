@@ -13,6 +13,7 @@ idf_component_register(
         "../hardware/drivers/devices_i2c/i2cHelpers.c"
         "../hardware/drivers/accel/bma400_driver.c"
         "../hardware/drivers/touch/cst816.c"
+        "../hardware/drivers/touch/touch_get.cpp"
         "../hardware/drivers/heartMonitor/heartrate_sensor.c"
         "../hardware/drivers/heartMonitor/hr_metrics.c"
         "../hardware/drivers/heartMonitor/hr_live.c"
