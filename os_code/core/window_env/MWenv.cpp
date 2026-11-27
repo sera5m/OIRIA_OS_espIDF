@@ -1431,7 +1431,7 @@ void WindowManager::SortWindowsByZOrder() {
     std::sort(windows.begin(), windows.end(),
         [](const std::shared_ptr<Window>& a, const std::shared_ptr<Window>& b) {
             if (!a || !b) return a != nullptr;  // nulls go to end
-            return a->wi_sizing.Zorder < b->wi_sizing.Zorder;  // lower Z = higher priority (draw later)
+            return a->wi_sizing.Zorder < b->wi_sizing.Zorder;  // higher Z draws later = on top
         });
 }
 
@@ -1851,6 +1851,8 @@ ui_widget_t* WindowManager::hit_element(int sx, int sy, std::shared_ptr<Window>*
 void WindowManager::raise_to_front(std::shared_ptr<Window> win)
 {
     if (!win) return;
-    win->set_layer(0);
+    /* Higher layer draws later and sits on top. 254 is the app ceiling;
+       255 is reserved for the OS. */
+    win->set_layer(FULLSCREEN_LAYER);
     SortWindowsByLayer();
 }

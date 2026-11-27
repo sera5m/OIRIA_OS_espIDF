@@ -200,6 +200,7 @@ void clearScreenEveryXCalls(uint16_t x);
 // Window
 // ---------------------------------------------------------------------------
 
+// One standard: higher layer draws later and sits on top.
 // 255 is reserved for the OS itself. Apps cannot claim it.
 constexpr uint8_t OS_LAYER = 255;
 constexpr uint8_t FULLSCREEN_LAYER = 254;
