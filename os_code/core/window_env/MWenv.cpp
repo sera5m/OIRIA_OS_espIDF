@@ -179,6 +179,7 @@ Window::Window(const WindowCfg& cfg, const std::string& initialContent)
 
 void Window::set_position(uint16_t x, uint16_t y, bool interpolate) {
     if (wi_sizing.Xpos == x && wi_sizing.Ypos == y) return;
+    WindowManager::getInstance().invalidate_vis_cache();
     
     wi_sizing.Xpos = x;
     wi_sizing.Ypos = y;
@@ -210,6 +211,7 @@ void Window::claim_os_layer() {
 
 void Window::set_size(uint16_t width, uint16_t height) {
     if (wi_sizing.Width == width && wi_sizing.Height == height) return;
+    WindowManager::getInstance().invalidate_vis_cache();
     
     wi_sizing.Width = width;
     wi_sizing.Height = height;
@@ -1435,6 +1437,7 @@ void WindowManager::SortWindowsByZOrder() {
             if (!a || !b) return a != nullptr;  // nulls go to end
             return a->wi_sizing.Zorder < b->wi_sizing.Zorder;  // higher Z draws later = on top
         });
+    rebuild_vis_cache();
 }
 
 
@@ -1461,6 +1464,7 @@ void WindowManager::make_window_fullscreen(std::shared_ptr<Window> win){
     win->set_layer(FULLSCREEN_LAYER);
     win->set_position(0, 0, false);
     win->set_size(v_env.screen_dim_w, v_env.screen_dim_h);
+    rebuild_vis_cache();
     win->Initialcfg.borderless = true;
     win->Currentcfg.borderless = true;
     win->dirty = true;
@@ -1561,6 +1565,7 @@ void WindowManager::rebuild_vis_cache()
 
 std::shared_ptr<Window> WindowManager::window_at(int sx, int sy)
 {
+    if (vis_cache.empty()) rebuild_vis_cache();
     for (auto& r : vis_cache) {
         if (sx >= r.x1 && sx < r.x2 && sy >= r.y1 && sy < r.y2)
             return r.win;
@@ -1676,6 +1681,7 @@ void WindowManager::UpdateAll(bool force, bool ToolbarUpdate, bool repositionWin
             if (!b) return true;
             return a->Initialcfg.Layer < b->Initialcfg.Layer;
         });
+    rebuild_vis_cache();
 
     // Draw toolbar BEHIND windows
     if (!draw_toolbar_ontop && ToolbarUpdate && m_toolbarConfig.showToolbar) {

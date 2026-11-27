@@ -431,6 +431,7 @@ public:
         std::shared_ptr<Window> win;
     };
     void rebuild_vis_cache();
+    void invalidate_vis_cache() { vis_cache.clear(); }
     std::shared_ptr<Window> window_at(int sx, int sy);
 
     /* Hit test across open windows. Returns the widget under x,y and the window it lives in. */
