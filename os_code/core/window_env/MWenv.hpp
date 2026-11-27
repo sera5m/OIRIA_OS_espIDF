@@ -200,6 +200,10 @@ void clearScreenEveryXCalls(uint16_t x);
 // Window
 // ---------------------------------------------------------------------------
 
+// 255 is reserved for the OS itself. Apps cannot claim it.
+constexpr uint8_t OS_LAYER = 255;
+constexpr uint8_t FULLSCREEN_LAYER = 254;
+
 class Window : public std::enable_shared_from_this<Window> {
 public:
     bool content_dirty = true;
@@ -210,6 +214,7 @@ public:
 
     void set_position(uint16_t x, uint16_t y, bool interpolate = false);
     void set_layer(uint8_t layer);
+    void claim_os_layer();   /* only the OS may call this */
     void set_size(uint16_t width, uint16_t height);
 
     bool window_highlighted = false;

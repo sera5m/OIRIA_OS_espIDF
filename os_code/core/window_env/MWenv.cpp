@@ -193,10 +193,19 @@ void Window::set_position(uint16_t x, uint16_t y, bool interpolate) {
 }
 
 void Window::set_layer(uint8_t layer) {
+    if (layer == OS_LAYER) {
+        ESP_LOGW(TAG, "layer 255 is reserved for the OS; use claim_os_layer()");
+        return;
+    }
     Initialcfg.Layer = layer;
-    // Also update Currentcfg if you track it
     dirty = true;
     ESP_LOGI(TAG, "Window layer changed to %d", layer);
+}
+
+void Window::claim_os_layer() {
+    Initialcfg.Layer = OS_LAYER;
+    dirty = true;
+    ESP_LOGI(TAG, "OS layer claimed");
 }
 
 void Window::set_size(uint16_t width, uint16_t height) {
@@ -1447,7 +1456,7 @@ void WindowManager::make_window_fullscreen(std::shared_ptr<Window> win){
     v_env.clamped_screen_dim_h = v_env.screen_dim_h;
 
     // Force this window to full control
-    win->set_layer(255);
+    win->set_layer(FULLSCREEN_LAYER);
     win->set_position(0, 0, false);
     win->set_size(v_env.screen_dim_w, v_env.screen_dim_h);
     win->Initialcfg.borderless = true;
