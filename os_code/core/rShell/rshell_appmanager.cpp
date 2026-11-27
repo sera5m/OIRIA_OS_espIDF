@@ -272,7 +272,7 @@ void appManager::set_focused_app(std::shared_ptr<AppBase> app) {
     if (auto win = app->get_main_window()) {
         win->window_highlighted = true;
         win->dirty = true;
-        win->set_layer(255);
+        win->set_layer(FULLSCREEN_LAYER);
         ref_wm.SortWindowsByLayer();
         ESP_LOGD(TAG, "Highlighted + raised window for focused app: %s", app->get_app_name());
     } else {

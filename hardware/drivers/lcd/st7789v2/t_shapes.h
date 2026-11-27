@@ -139,7 +139,8 @@ static inline fb_shape_t* fb_shape_add(
 }
 
 //====================
-// Optional: sort by layer (call before render)
+// Optional: sort by layer (call before render).
+// Higher layer draws later and sits on top. Same rule as Window::Layer.
 //====================
 static inline void fb_shapes_sort_by_layer(fb_shape_buffer_t* fb)
 {
