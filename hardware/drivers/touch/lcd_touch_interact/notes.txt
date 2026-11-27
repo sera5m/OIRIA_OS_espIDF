@@ -1,0 +1,3 @@
+need to remember i want to have lcd compositor remember 255 reserved os layer
+//config var. comspotitor usually is 0 at first layer. 
+    //if we want to use RESERVED last (os panel config), we can access it by setting this to 255.
