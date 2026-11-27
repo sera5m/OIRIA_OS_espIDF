@@ -34,6 +34,7 @@ struct ui_widget {
     int32_t      maxv;           // bar/arc max, or list count
     const int16_t* samples;      // spark only, not owned
     int16_t      sample_n;
+    uint16_t     id;          /* stable id for hit compare */
     bool         focused;
     bool         visible;
     ui_widget_t* parent;
@@ -69,6 +70,9 @@ void ui_w_list_set(ui_widget_t* list, int index);
 int  ui_w_list_get(const ui_widget_t* list);
 
 // Free the tree. Safe on null.
+/* Hit test. Walks the tree, returns the deepest widget under screen x,y or null. */
+ui_widget_t* ui_w_hit(ui_widget_t* root, int sx, int sy);
+
 void ui_w_free(ui_widget_t* w);
 
 #ifdef __cplusplus

@@ -416,6 +416,10 @@ public:
     void RepositionAllWindows();
     void SortWindowsByZOrder();
     void SortWindowsByLayer();
+    /* Hit test across open windows. Returns the widget under x,y and the window it lives in. */
+    ui_widget_t* hit_element(int sx, int sy, std::shared_ptr<Window>* out_win);
+    /* Bring a window to the front (layer 0). */
+    void raise_to_front(std::shared_ptr<Window> win);
     void SetToolbarText(const char* text);
     void DrawToolBar();
     void ResetRepositioning() { windows_repositioned = false; }

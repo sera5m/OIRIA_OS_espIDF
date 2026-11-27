@@ -176,6 +176,21 @@ public:
 };
 
 // DeviceManager class
+
+// Touch device. Polls the CST816 and feeds touch_interact.
+class TouchDevice : public Device {
+public:
+    esp_err_t initialize(void* bus);          // i2c_master_bus_handle_t
+    void update() override;
+    void interact(Device& other) override { (void)other; }
+    HIDInputDeviceType getType() const override { return HIDInputDeviceType::Mouse; }
+    const char* getName() const override { return "touch"; }
+    uint32_t getUpdateIntervalMs() const override { return 20; }
+private:
+    struct cst816_dev* dev = nullptr;
+    int was_down = 0;
+};
+
 class DeviceManager {
     private:
         std::vector<std::unique_ptr<Device>> devices;
@@ -183,7 +198,8 @@ class DeviceManager {
     public:
         void addDevice(std::unique_ptr<Device> device);
         void updateAll();           // Updates ALL devices (legacy, if needed)
-        void updateEncoder();       // Updates only encoder/knob devices
+        void updateEncoder();
+        void updateTouch();       // Updates only encoder/knob devices
         void updateButtons();       // Updates only button devices
         void removeDevice(const char* name);
         void listDevices();

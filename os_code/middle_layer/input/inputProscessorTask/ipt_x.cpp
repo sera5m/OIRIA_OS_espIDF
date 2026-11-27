@@ -118,7 +118,8 @@ static void input_task(void* pvParameters)
         }
         //very bad i do not like
         gDeviceManager.updateButtons();
-        gDeviceManager.updateEncoder(); //we do this for now to save time in developement, we'll later need to have the device manager tick every device present, prioritizing high frequency devices. 
+        gDeviceManager.updateEncoder();
+        gDeviceManager.updateTouch(); //we do this for now to save time in developement, we'll later need to have the device manager tick every device present, prioritizing high frequency devices. 
         // Process queue (may be empty)
         bool processed_any = false;
         while (xQueueReceive(ProcInputQueTarget, &ev, 0) == pdTRUE) {

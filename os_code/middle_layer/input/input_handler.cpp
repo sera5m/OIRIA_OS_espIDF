@@ -359,6 +359,15 @@ void DeviceManager::updateEncoder() {
     }
 }
 
+
+void DeviceManager::updateTouch() {
+    for (auto& dev : devices) {
+        if (dev->getType() == HIDInputDeviceType::Mouse) {
+            dev->update();
+        }
+    }
+}
+
 void DeviceManager::updateButtons() {
     for (auto& dev : devices) {
         if (dev->getType() == HIDInputDeviceType::Button) {
@@ -402,4 +411,31 @@ void DeviceManager::listDevices() {
     for (auto& dev : devices) {
         ESP_LOGI("DeviceManager", "  - %s (type %d)", dev->getName(), (int)dev->getType());
     }
+}
+#include "hardware/drivers/touch/cst816.h"
+#include "os_code/middle_layer/input/touch/touch_interact.h"
+
+esp_err_t TouchDevice::initialize(void* bus)
+{
+    if (!bus) return ESP_ERR_INVALID_ARG;
+    cst816_cfg_t c = {};
+    c.bus = (i2c_master_bus_handle_t)bus;
+    c.rst = GPIO_NUM_NC;
+    c.irq = GPIO_NUM_NC;
+    c.speed_hz = 100000;
+    esp_err_t e = cst816_init(&c, &dev);
+    if (e == ESP_OK) touch_interact_init();
+    return e;
+}
+
+void TouchDevice::update()
+{
+    if (!dev) return;
+    cst816_report_t r{};
+    if (cst816_read(dev, &r) != ESP_OK) return;
+    int down = r.n > 0;
+    if (down && !was_down) {
+        touch_interact_point(r.pt[0].x, r.pt[0].y, 1);
+    }
+    was_down = down;
 }

@@ -1823,3 +1823,25 @@ void Toolbar::DrawToolBar()
 {
     if (root) ui_w_draw(root, wi_sizing.Xpos, wi_sizing.Ypos);
 }
+
+ui_widget_t* WindowManager::hit_element(int sx, int sy, std::shared_ptr<Window>* out_win)
+{
+    if (out_win) *out_win = nullptr;
+    ui_widget_t* best = nullptr;
+    for (auto& w : windows) {
+        if (!w || !w->root) continue;
+        int ox = 0, oy = 0, ww = 0, wh = 0;
+        w->get_physical_bounds(ox, oy, ww, wh);
+        if (sx < ox || sy < oy || sx >= ox + ww || sy >= oy + wh) continue;
+        ui_widget_t* h = ui_w_hit(w->root, sx - ox, sy - oy);
+        if (h) { best = h; if (out_win) *out_win = w; }
+    }
+    return best;
+}
+
+void WindowManager::raise_to_front(std::shared_ptr<Window> win)
+{
+    if (!win) return;
+    win->set_layer(0);
+    SortWindowsByLayer();
+}

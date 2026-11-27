@@ -192,6 +192,15 @@ sdmmc_card_t *card = nullptr;
         return ret;
     }
 
+    /* Touch. Same bus. Registered as an input device. */
+    {
+        auto touch = std::make_unique<TouchDevice>();
+        if (touch->initialize(bus) == ESP_OK) {
+            gDeviceManager.addDevice(std::move(touch));
+            ESP_LOGI(TAG, "touch registered");
+        }
+    }
+
     // -----------------------------
     // UI INIT
     // -----------------------------

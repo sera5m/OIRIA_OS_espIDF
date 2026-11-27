@@ -258,3 +258,22 @@ void ui_w_free(ui_widget_t* w)
     }
     free(w);
 }
+
+static ui_widget_t* hit_rec(ui_widget_t* w, int sx, int sy, int ox, int oy)
+{
+    if (!w || !w->visible) return nullptr;
+    int x = ox + w->x, y = oy + w->y;
+    ui_widget_t* found = nullptr;
+    for (ui_widget_t* c = w->first_child; c; c = c->next) {
+        ui_widget_t* h = hit_rec(c, sx, sy, x, y);
+        if (h) found = h;
+    }
+    if (found) return found;
+    if (sx >= x && sx < x + w->w && sy >= y && sy < y + w->h) return w;
+    return nullptr;
+}
+
+ui_widget_t* ui_w_hit(ui_widget_t* root, int sx, int sy)
+{
+    return hit_rec(root, sx, sy, 0, 0);
+}
