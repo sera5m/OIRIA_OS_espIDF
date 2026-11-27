@@ -422,6 +422,17 @@ public:
     void RepositionAllWindows();
     void SortWindowsByZOrder();
     void SortWindowsByLayer();
+
+    /* Visible-region cache. Rebuilt on every z-order change.
+       Entries are top-to-bottom. A point is claimed by the first
+       window whose rect contains it. Anything else is background. */
+    struct VisRect {
+        int x1, y1, x2, y2;          /* inclusive-exclusive */
+        std::shared_ptr<Window> win;
+    };
+    void rebuild_vis_cache();
+    std::shared_ptr<Window> window_at(int sx, int sy);
+
     /* Hit test across open windows. Returns the widget under x,y and the window it lives in. */
     ui_widget_t* hit_element(int sx, int sy, std::shared_ptr<Window>* out_win);
     /* Bring a window to the front. Higher layer draws later. */
@@ -455,6 +466,7 @@ private:
     ~WindowManager();
 
     std::vector<std::shared_ptr<Window>> windows;
+    std::vector<VisRect> vis_cache;
 
     toolbarconfig m_toolbarConfig;
     std::string toolbar_text;

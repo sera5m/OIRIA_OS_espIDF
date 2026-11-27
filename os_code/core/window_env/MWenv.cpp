@@ -1053,6 +1053,7 @@ bool WindowManager::registerWindow(std::shared_ptr<Window> window) {
     }
     
     windows.push_back(window);
+    rebuild_vis_cache();
    // ESP_LOGI(TAG, "Window registered at pos(%d,%d) size(%dx%d), total: %d", window->wi_sizing.Xpos, window->wi_sizing.Ypos, window->wi_sizing.Width, window->wi_sizing.Height,(int)windows.size());
     return true;
 }
@@ -1073,6 +1074,7 @@ bool WindowManager::unregisterWindow(std::shared_ptr<Window> window) {
     
     // Mark window as hidden before removal
     window->IsWindowShown = false;
+    rebuild_vis_cache();
     window->dirty = true;
     
     // Remove from vector
@@ -1539,6 +1541,33 @@ void WindowManager::UpdateToolbar() {
 }
 
 
+
+void WindowManager::rebuild_vis_cache()
+{
+    vis_cache.clear();
+    /* windows is sorted low-to-high, so the back is the top. */
+    for (auto it = windows.rbegin(); it != windows.rend(); ++it) {
+        auto& w = *it;
+        if (!w || !w->IsWindowShown) continue;
+        int x = 0, y = 0, ww = 0, wh = 0;
+        w->get_physical_bounds(x, y, ww, wh);
+        if (ww <= 0 || wh <= 0) continue;
+        VisRect r;
+        r.x1 = x; r.y1 = y; r.x2 = x + ww; r.y2 = y + wh;
+        r.win = w;
+        vis_cache.push_back(r);
+    }
+}
+
+std::shared_ptr<Window> WindowManager::window_at(int sx, int sy)
+{
+    for (auto& r : vis_cache) {
+        if (sx >= r.x1 && sx < r.x2 && sy >= r.y1 && sy < r.y2)
+            return r.win;
+    }
+    return nullptr;   /* background */
+}
+
 void WindowManager::SortWindowsByLayer() {
     std::sort(windows.begin(), windows.end(),
         [](const std::shared_ptr<Window>& a, const std::shared_ptr<Window>& b) {
@@ -1546,6 +1575,7 @@ void WindowManager::SortWindowsByLayer() {
             if (!b) return true;
             return a->Initialcfg.Layer < b->Initialcfg.Layer;
         });
+    rebuild_vis_cache();
 }
 
 void WindowManager::DebugPrintWindowDOM() const {
@@ -1836,16 +1866,13 @@ void Toolbar::DrawToolBar()
 ui_widget_t* WindowManager::hit_element(int sx, int sy, std::shared_ptr<Window>* out_win)
 {
     if (out_win) *out_win = nullptr;
-    ui_widget_t* best = nullptr;
-    for (auto& w : windows) {
-        if (!w || !w->root) continue;
-        int ox = 0, oy = 0, ww = 0, wh = 0;
-        w->get_physical_bounds(ox, oy, ww, wh);
-        if (sx < ox || sy < oy || sx >= ox + ww || sy >= oy + wh) continue;
-        ui_widget_t* h = ui_w_hit(w->root, sx - ox, sy - oy);
-        if (h) { best = h; if (out_win) *out_win = w; }
-    }
-    return best;
+    auto win = window_at(sx, sy);
+    if (!win) return nullptr;          /* background */
+    if (out_win) *out_win = win;
+    if (!win->root) return nullptr;
+    int ox = 0, oy = 0, ww = 0, wh = 0;
+    win->get_physical_bounds(ox, oy, ww, wh);
+    return ui_w_hit(win->root, sx - ox, sy - oy);
 }
 
 void WindowManager::raise_to_front(std::shared_ptr<Window> win)
