@@ -27,6 +27,7 @@ idf_component_register(
         "../os_code/core/window_env/ui/ui_widgets.cpp"
         "../os_code/core/window_env/ui/ui_widget.cpp"
         "../os_code/middle_layer/input/touch/touch_interact.cpp"
+        "../os_code/core/screenshot/screenshot.cpp"
         "../hardware/drivers/lcd/st7789v2/lcdriverAddon.cpp"
         "../hardware/drivers/lcd/crt_rca_mono/crt_rm.c"
         "../hardware/drivers/lcd/fonts/font_avr_classics.c"
