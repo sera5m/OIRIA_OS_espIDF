@@ -1191,6 +1191,10 @@ void WindowManager::SetToolbarActive(bool on) {
         toolbar_win_ = std::make_shared<Toolbar>(cfg);
         toolbar_win_->claim_os_layer();
         registerWindow(toolbar_win_);
+        static s_bmp_t ico_wifi{16,16,(uint16_t*)epd_bmp_wifi_full};
+        static s_bmp_t ico_bat{16,16,(uint16_t*)epd_bmp_bat_full};
+        addToolbarIco(ico_wifi);
+        addToolbarIco(ico_bat);
     }
     if (toolbar_win_) toolbar_win_->IsWindowShown = on;
     tb_dirty = true;
@@ -1879,6 +1883,17 @@ void Toolbar::set_items(toolbar_items_t items)
 void Toolbar::DrawToolBar()
 {
     if (root) ui_w_draw(root, wi_sizing.Xpos, wi_sizing.Ypos);
+    /* Registered status icons, 16x16, left to right. */
+    int x = wi_sizing.Xpos + 2;
+    int y = wi_sizing.Ypos + 4;
+    for (int i = 0; i < 16; ++i) {
+        if (!cfg_.ref_iconptrs[i]) continue;
+        if (!(cfg_.icons_shown & (1 << i))) continue;
+        const uint8_t* bits = (const uint8_t*)cfg_.ref_iconptrs[i]->data;
+        icon_draw_1bit(x, y, 16, 16, bits, 0xFFFF);
+        x += 18;
+        if (x + 16 > wi_sizing.Xpos + wi_sizing.Width) break;
+    }
 }
 
 ui_widget_t* WindowManager::hit_element(int sx, int sy, std::shared_ptr<Window>* out_win)
