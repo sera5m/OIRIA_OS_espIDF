@@ -1,0 +1,36 @@
+Qty,Component Category,Schematic Ref,Specific Part Number & Description,Recommended Datasheet / Link
+1,Microcontroller,U3,"ESP32-S3-WROOM-1-N8R8 (8MB Flash, 8MB PSRAM, PCB Antenna)",https://www.espressif.com/en/products/modules
+1,Wireless (LoRa),U7,"NiceRF LoRa1262-915 (915MHz, SX1262 chip, TCXO)",https://www.nicerf.com/products/detail/lora1262.html
+1,Wireless (NFC),J3,"PN532 NFC Module V3 (Generic 4-pin breakout board)",https://www.nxp.com/products/rfid-nfc/nfc-hf/nfc-readers
+1,Sensor (Accel),U2,"Bosch BMA400 (Ultra-low power, step counter)",https://www.bosch-sensortec.com/products/motion-sensors/accelerometers/bma400/
+1,Sensor (Health),U9,"Analog Devices MAX30102 (Pulse Oximeter and Heart-Rate)",https://www.analog.com/en/products/max30102.html
+1,Sensor (Compass),U4,"iSentek IST8310 (3-axis electronic magnetometer)",http://www.isentek.com/en/product_3.php
+1,Sensor (RTC),U8,"Maxim DS3231MZ+ (I2C Real-Time Clock, MEMS)",https://www.analog.com/en/products/ds3231m.html
+1,Sensor (Temp),U1,"Analog Devices TMP36 (Low Voltage Temp Sensor)",https://www.analog.com/en/products/tmp36.html
+1,IR Receiver,U12,"Vishay TSOP75238W (Micro-SMD, 38kHz, Top View)",https://www.vishay.com/docs/82495/tsop752.pdf
+1,IR Emitter,D2,"Vishay VSMY2940G (High-Intensity 940nm, 0805 SMD)",https://www.vishay.com/docs/84100/vsmy2940g.pdf
+1,I2C Expander,U6,"TI TCA9534PWR (8-Bit I2C I/O Expander, TSSOP)",https://www.ti.com/product/TCA9534
+1,LDO (3.3V Main),U15,"Diodes AP2112K-3.3TRG1 (600mA Low Dropout, SOT-23-5)",https://www.diodes.com/assets/Datasheets/AP2112.pdf
+1,LDO (1.8V HR),U5,"Torex XC6206P182MR (1.8V output for MAX30102, SOT-23)",https://www.torexsemi.com/file/xc6206/XC6206.pdf
+3,Load Switch,"U10, U11, U13","TI TPS22919DCKR (5.5V, 1.5A Load Switch)",https://www.ti.com/product/TPS22919
+1,LiPo Charger,U14,"TP4056 (1A Standalone Linear Li-lon Charger)",https://dlnmh9ip6v2uc.cloudfront.net/datasheets/Prototyping/TP4056.pdf
+2,Rotary Encoder,"SW3, SW4","Panasonic EVQ-W8 or Alps EC10 (SMD Thumbwheel with Push Switch)",https://industry.panasonic.eu/components/switches/rotary-encoders
+2,N-Ch MOSFET,"Q1, Q2","Alpha & Omega AO3400A (30V N-Channel, SOT-23)",http://www.aosmd.com/res/data_sheets/AO3400A.pdf
+1,RGB LED,D1,"WS2812B (5050 or 3528 SMD NeoPixel)",http://www.world-semi.com/
+1,Connector,J1,U.FL SMD Connector (LoRa Antenna),
+1,Connector,J2,14-Pin FPC Connector (SPI Display),
+1,Connector,J4,Micro SD Card Socket (Push-Pull with Card Detect),
+1,Connector,J5,14-Pin or 16-Pin USB-C 2.0 Receptacle,
+1,Connector,J6,6-Pin Surface Mount Pogo Connector,
+18,Passive,,"Resistor, 10kΩ",
+2,Passive,,"Resistor, 4.7kΩ",
+2,Passive,,"Resistor, 5.1kΩ",
+1,Passive,,"Resistor, 2.7kΩ",
+1,Passive,,"Resistor, 1kΩ",
+2,Passive,,"Resistor, 220Ω",
+1,Passive,,"Resistor, 22Ω",
+1,Passive,,"Resistor, 100kΩ",
+5,Passive,,"Capacitor, 10µF",
+2,Passive,,"Capacitor, 4.7µF",
+1,Passive,,"Capacitor, 1µF",
+5,Passive,,"Capacitor, 0.1µF"

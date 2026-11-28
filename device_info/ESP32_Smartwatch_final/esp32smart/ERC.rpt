@@ -1,0 +1,38 @@
+ERC report (2026-07-10T02:34:11, Encoding UTF8)
+Report includes: Errors, Warnings
+
+***** Sheet /
+[footprint_link_issues]: The current configuration does not include the footprint library 'Custom_parts'
+    ; warning
+    @(3800 mils, 950 mils): Symbol U5 [LoRa1262]
+[footprint_link_issues]: The current configuration does not include the footprint library 'Custom_parts'
+    ; warning
+    @(3650 mils, 4200 mils): Symbol SW3 [RotaryEncoder_Switch]
+[pin_to_pin]: Pins of type Bidirectional and Power output are connected
+    ; warning
+    @(850 mils, 5800 mils): Symbol U1 Pin 1 [SDO, Bidirectional, Line]
+    @(10650 mils, 1700 mils): Symbol #FLG02 Pin 1 [Power output, Line]
+[footprint_link_issues]: The current configuration does not include the footprint library 'Custom_parts'
+    ; warning
+    @(5150 mils, 4200 mils): Symbol SW4 [RotaryEncoder_Switch]
+[lib_symbol_mismatch]: Symbol 'TPS22919DCKR' doesn't match copy in library 'TPS22919DCKR'
+    ; warning
+    @(6800 mils, 1350 mils): Symbol U7 [TPS22919DCKR]
+[lib_symbol_mismatch]: Symbol 'TPS22919DCKR' doesn't match copy in library 'TPS22919DCKR'
+    ; warning
+    @(6800 mils, 2550 mils): Symbol U8 [TPS22919DCKR]
+[lib_symbol_mismatch]: Symbol 'TPS22919DCKR' doesn't match copy in library 'TPS22919DCKR'
+    ; warning
+    @(8350 mils, 1350 mils): Symbol U11 [TPS22919DCKR]
+[multiple_net_names]: Both GND and VSS are attached to the same items; GND will be used in the netlist
+    ; warning
+    @(3000 mils, 4200 mils): Symbol #PWR020 Pin 1 [Power input, Line]
+    @(3850 mils, 7550 mils): Symbol U4 Hidden pin 11 [VSS, Power input, Line]
+
+ ** ERC messages: 8  Errors 0  Warnings 8
+
+ ** Ignored checks:
+    - Global label only appears once in the schematic
+    - Four connection points are joined together
+    - SPICE model issue
+    - Assigned footprint doesn't match footprint filters

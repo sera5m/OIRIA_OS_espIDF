@@ -1,0 +1,182 @@
+** Drc report for esp32smart.kicad_pcb **
+** Created on 2026-07-10T02:33:12 **
+** Report includes: Errors, Warnings **
+
+** Found 42 DRC violations **
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; warning
+    @(170.0000 mm, 76.0000 mm): Segment on Edge.Cuts
+    @(170.2200 mm, 78.9500 mm): Segment of SW6 on F.Silkscreen
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; warning
+    @(170.0000 mm, 76.0000 mm): Segment on Edge.Cuts
+    @(170.2200 mm, 76.9500 mm): Segment of SW6 on F.Silkscreen
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; warning
+    @(130.0000 mm, 124.0000 mm): Segment on Edge.Cuts
+    @(129.7800 mm, 79.9800 mm): Segment of SW1 on F.Silkscreen
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; warning
+    @(130.0000 mm, 124.0000 mm): Segment on Edge.Cuts
+    @(129.7800 mm, 77.9800 mm): Segment of SW1 on F.Silkscreen
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; warning
+    @(159.5000 mm, 124.0000 mm): Segment on Edge.Cuts
+    @(159.2550 mm, 130.0700 mm): Segment of U3 on F.Silkscreen
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; warning
+    @(159.5000 mm, 124.0000 mm): Segment on Edge.Cuts
+    @(140.8550 mm, 130.0700 mm): Segment of U3 on F.Silkscreen
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; warning
+    @(170.0000 mm, 76.0000 mm): Segment on Edge.Cuts
+    @(169.0000 mm, 113.3000 mm): Segment of J7 on F.Silkscreen
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; warning
+    @(170.0000 mm, 76.0000 mm): Segment on Edge.Cuts
+    @(169.0000 mm, 122.7000 mm): Segment of J7 on F.Silkscreen
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; warning
+    @(130.0000 mm, 124.0000 mm): Segment on Edge.Cuts
+    @(129.7800 mm, 83.0300 mm): Segment of SW2 on F.Silkscreen
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; warning
+    @(130.0000 mm, 124.0000 mm): Segment on Edge.Cuts
+    @(129.7800 mm, 85.0300 mm): Segment of SW2 on F.Silkscreen
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; warning
+    @(170.0000 mm, 76.0000 mm): Segment on Edge.Cuts
+    @(170.2200 mm, 82.0000 mm): Segment of SW5 on F.Silkscreen
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; warning
+    @(170.0000 mm, 76.0000 mm): Segment on Edge.Cuts
+    @(170.2200 mm, 84.0000 mm): Segment of SW5 on F.Silkscreen
+[lib_footprint_issues]: The footprint library 'Custom_parts' is not enabled in the current configuration
+    Local override; warning
+    @(153.5000 mm, 84.5000 mm): Footprint U5
+[lib_footprint_issues]: The footprint library 'Custom_parts' is not enabled in the current configuration
+    Local override; warning
+    @(166.0000 mm, 106.0000 mm): Footprint SW4
+[lib_footprint_mismatch]: Footprint 'LED_0805_2012Metric' does not match copy in library 'LED_SMD'
+    Local override; warning
+    @(160.0625 mm, 71.5000 mm): Footprint D3
+[lib_footprint_issues]: The footprint library 'Custom_parts' is not enabled in the current configuration
+    Local override; warning
+    @(134.0000 mm, 96.0000 mm): Footprint SW3
+[silk_overlap]: Silkscreen clearance
+    Rule: board setup constraints silk; warning
+    @(160.0927 mm, 119.9908 mm): Reference field of C1
+    @(160.6400 mm, 119.1078 mm): Segment of C4 on F.Silkscreen
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(145.5000 mm, 76.5000 mm): Rectangle of U5 on F.Silkscreen
+    @(146.0000 mm, 85.5000 mm): Pad 5 [/LoRa_CS] of U5 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(145.5000 mm, 76.5000 mm): Rectangle of U5 on F.Silkscreen
+    @(146.0000 mm, 87.5000 mm): Pad 6 [/LoRa_RST] of U5 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(145.5000 mm, 76.5000 mm): Rectangle of U5 on F.Silkscreen
+    @(146.0000 mm, 77.5000 mm): Pad 1 [GND] of U5 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(145.5000 mm, 76.5000 mm): Rectangle of U5 on F.Silkscreen
+    @(146.0000 mm, 79.5000 mm): Pad 2 [/LoRa_MISO] of U5 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(145.5000 mm, 76.5000 mm): Rectangle of U5 on F.Silkscreen
+    @(146.0000 mm, 81.5000 mm): Pad 3 [/LLCD_MOSI] of U5 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(145.5000 mm, 76.5000 mm): Rectangle of U5 on F.Silkscreen
+    @(146.0000 mm, 83.5000 mm): Pad 4 [/LLCD_CLK] of U5 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(145.5000 mm, 76.5000 mm): Rectangle of U5 on F.Silkscreen
+    @(146.0000 mm, 89.5000 mm): Pad 7 [unconnected-(U5-NC-Pad7)] of U5 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(145.5000 mm, 76.5000 mm): Rectangle of U5 on F.Silkscreen
+    @(146.0000 mm, 91.5000 mm): Pad 8 [GND] of U5 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(131.6500 mm, 93.6000 mm): Segment of SW3 on F.Silkscreen
+    @(135.1750 mm, 93.1500 mm): Pad [<no net>] of SW3 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(135.5500 mm, 93.6000 mm): Segment of SW3 on F.Silkscreen
+    @(135.1750 mm, 98.8500 mm): Pad [<no net>] of SW3 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(135.5500 mm, 93.6000 mm): Segment of SW3 on F.Silkscreen
+    @(135.1750 mm, 93.1500 mm): Pad [<no net>] of SW3 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(135.5500 mm, 98.4000 mm): Segment of SW3 on F.Silkscreen
+    @(135.1750 mm, 98.8500 mm): Pad [<no net>] of SW3 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(164.4500 mm, 103.6000 mm): Segment of SW4 on F.Silkscreen
+    @(164.8250 mm, 103.1500 mm): Pad [<no net>] of SW4 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(164.4500 mm, 108.4000 mm): Segment of SW4 on F.Silkscreen
+    @(164.8250 mm, 103.1500 mm): Pad [<no net>] of SW4 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(164.4500 mm, 108.4000 mm): Segment of SW4 on F.Silkscreen
+    @(164.8250 mm, 108.8500 mm): Pad [<no net>] of SW4 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(168.3500 mm, 108.4000 mm): Segment of SW4 on F.Silkscreen
+    @(164.8250 mm, 108.8500 mm): Pad [<no net>] of SW4 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(145.5000 mm, 76.5000 mm): Rectangle of U5 on F.Silkscreen
+    @(161.0000 mm, 81.5000 mm): Pad 14 [unconnected-(U5-NC-Pad14)] of U5 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(145.5000 mm, 76.5000 mm): Rectangle of U5 on F.Silkscreen
+    @(161.0000 mm, 79.5000 mm): Pad 15 [/LoRa_DIO1] of U5 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(145.5000 mm, 76.5000 mm): Rectangle of U5 on F.Silkscreen
+    @(161.0000 mm, 77.5000 mm): Pad 16 [/LoRa_BUSY] of U5 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(145.5000 mm, 76.5000 mm): Rectangle of U5 on F.Silkscreen
+    @(161.0000 mm, 91.5000 mm): Pad 9 [Net-(J2-In)] of U5 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(145.5000 mm, 76.5000 mm): Rectangle of U5 on F.Silkscreen
+    @(161.0000 mm, 89.5000 mm): Pad 10 [GND] of U5 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(145.5000 mm, 76.5000 mm): Rectangle of U5 on F.Silkscreen
+    @(161.0000 mm, 87.5000 mm): Pad 11 [unconnected-(U5-DIO3-Pad11)] of U5 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(145.5000 mm, 76.5000 mm): Rectangle of U5 on F.Silkscreen
+    @(161.0000 mm, 85.5000 mm): Pad 12 [unconnected-(U5-NC-Pad12)] of U5 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(145.5000 mm, 76.5000 mm): Rectangle of U5 on F.Silkscreen
+    @(161.0000 mm, 83.5000 mm): Pad 13 [+3.3V] of U5 on F.Cu
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; warning
+    @(160.0927 mm, 119.9908 mm): Reference field of C1
+    @(158.8050 mm, 119.8900 mm): Pad 3 [/EN] of U3 on F.Cu
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** Ignored checks **
+    - Footprint has no courtyard defined
+    - Track endpoint not centered on via
+    - Tuning profile track geometries
+    - Footprint doesn't match symbol's footprint filters
+    - Footprint component type doesn't match footprint pads
+
+** End of Report **
