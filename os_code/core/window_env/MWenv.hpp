@@ -470,6 +470,7 @@ private:
     std::vector<VisRect> vis_cache;
 
     toolbarconfig m_toolbarConfig;
+    std::shared_ptr<Toolbar> toolbar_win_;
     std::string toolbar_text;
     bool tb_dirty = true;
     uint64_t last_toolbar_update = 0;

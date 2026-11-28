@@ -1184,6 +1184,15 @@ uint16_t WindowManager::GetToolbarOffset() {
 
 void WindowManager::SetToolbarActive(bool on) {
     m_toolbarConfig.showToolbar = on;
+    if (on && !toolbar_win_) {
+        WindowCfg cfg{};
+        cfg.win_width = v_env.screen_dim_w;
+        cfg.win_height = 28;
+        toolbar_win_ = std::make_shared<Toolbar>(cfg);
+        toolbar_win_->claim_os_layer();
+        registerWindow(toolbar_win_);
+    }
+    if (toolbar_win_) toolbar_win_->IsWindowShown = on;
     tb_dirty = true;
     windows_repositioned = false;  // Need to reposition windows again
     for (auto& win : windows) {
@@ -1222,6 +1231,9 @@ void WindowManager::SetToolbarText(const char* text) {
 
 
 void WindowManager::DrawToolBar() {
+    if (!m_toolbarConfig.showToolbar || !toolbar_win_) return;
+    toolbar_win_->dirty = true;
+    return;
     if (!m_toolbarConfig.showToolbar) return;
     
     static uint16_t last_color = 0xFFFF;
